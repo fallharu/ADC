@@ -526,8 +526,6 @@ def manual_overtake_context_backlog_status_api():
         "snapshot_taken_at": datetime.now(timezone.utc).isoformat(),
     })
 
-@main.route("/api/manual_overtake/<int:run_id>/events", methods=["GET", "POST"])
-
 @main.route("/manual_overtake/export", methods=["GET"])
 def manual_overtake_export():
     """手動追い越しデータをCSV形式でエクスポートする。"""
@@ -749,11 +747,9 @@ def manual_overtake_snapshot_image(manual_event_id: int):
     return manual_overtake_scale_image(manual_event_id)
 
 
+
+
 # Missing endpoints restored from routes_legacy.py
-@main.route("/api/manual_overtake/<int:run_id>/metadata")
-
-
-@main.route("/api/manual_overtake/<int:run_id>/scale_preview")
 
 def _collect_event_measurement_y_values(event: Mapping[str, Any]) -> list[float]:
     if not isinstance(event, Mapping):
