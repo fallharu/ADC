@@ -1,0 +1,3806 @@
+{% extends "base.html" %}
+{% block title %}手動追い越し付与{% endblock %}
+
+{% block content %}
+<h2 class="mb-3">5. 手動追い越し判定付与</h2>
+<p class="text-muted">動画を確認しながら任意のフレームに追い越しイベントを手動で登録できます。検出済みのGroup BBOXを選択すると、接近距離や離隔距離が自動計算され、専用テーブルに保存されます。</p>
+<p class="small">保存済みイベントのみを一覧で確認する場合は<a href="{{ url_for('main.manual_overtake_view') }}">観覧モード</a>をご利用ください。</p>
+
+<style>
+  .manual-run-legend .badge {
+    font-weight: 500;
+    border: 1px solid transparent;
+  }
+
+  .manual-badge-annotated {
+    background-color: #d1e7dd;
+    color: #0f5132;
+    border-color: #badbcc;
+  }
+
+  .manual-badge-visited {
+    background-color: #cff4fc;
+    color: #055160;
+    border-color: #b6effb;
+  }
+
+  .manual-badge-new {
+    background-color: #f8f9fa;
+    color: #495057;
+    border-color: #e9ecef;
+  }
+
+  #manualRunSelect option.manual-run-option[data-status="annotated"],
+  #manualViewRuns option.manual-run-option[data-status="annotated"] {
+    background-color: #d1e7dd;
+    color: #0f5132;
+    font-weight: 600;
+  }
+
+  #manualRunSelect option.manual-run-option[data-status="visited"],
+  #manualViewRuns option.manual-run-option[data-status="visited"] {
+    background-color: #cff4fc;
+    color: #055160;
+  }
+
+  #manualRunSelect option.manual-run-option[data-status="new"],
+  #manualViewRuns option.manual-run-option[data-status="new"] {
+    background-color: #f8f9fa;
+  }
+
+  .manual-context-scroll {
+    max-height: clamp(360px, 60vh, 580px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .manual-context-scroll table {
+    margin-bottom: 0;
+  }
+
+  .manual-context-scroll:hover {
+    cursor: default;
+  }
+
+  .manual-processing-indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: #adb5bd;
+    box-shadow: 0 0 0 1px rgba(108, 117, 125, 0.4) inset;
+    transition: background-color 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  .manual-processing-indicator[data-state="processing"] {
+    background-color: #ffda6a;
+    box-shadow: 0 0 8px rgba(255, 193, 7, 0.65);
+  }
+
+  .manual-processing-indicator[data-state="success"] {
+    background-color: #4dabf7;
+    box-shadow: 0 0 8px rgba(13, 110, 253, 0.55);
+  }
+
+  .manual-processing-indicator[data-state="error"] {
+    background-color: #f03e3e;
+    box-shadow: 0 0 8px rgba(220, 53, 69, 0.55);
+  }
+
+  .manual-event-highlight {
+    animation: manualEventFlash 2.4s ease-in-out 1;
+  }
+
+  @keyframes manualEventFlash {
+    0% {
+      background-color: #fff3cd;
+    }
+
+    45% {
+      background-color: #ffe69c;
+    }
+
+    100% {
+      background-color: transparent;
+    }
+  }
+</style>
+
+<form method="get" id="manualRunForm" class="row g-2 align-items-end mb-4">
+  <div class="col-sm-5 col-md-4 col-lg-3">
+    <label for="manualRunSelect" class="form-label small">対象Run</label>
+    <div class="manual-run-legend d-flex align-items-center gap-2 mb-1 small">
+      <span class="badge rounded-pill manual-badge-annotated">付与済み</span>
+      <span class="badge rounded-pill manual-badge-visited">観覧済み</span>
+      <span class="badge rounded-pill manual-badge-new">未訪問</span>
+    </div>
+    <select id="manualRunSelect" name="run_id" class="form-select form-select-sm">
+      <option value="" {% if not selected_run_id %}selected{% endif %}>Runを選択してください</option>
+      {% for option in run_options %}
+      {% set rid = option.run_id if option.run_id is defined else option['run_id'] %}
+      {% set status = option.manual_status if option.manual_status is defined else option['manual_status'] %}
+      {% if status is none %}{% set status = 'new' %}{% endif %}
+      {% set status_label = '未訪問' %}
+      {% if status == 'annotated' %}
+      {% set status_label = '手動追い越し付与済み' %}
+      {% elif status == 'visited' %}
+      {% set status_label = '観覧済み (付与なし)' %}
+      {% endif %}
+      <option value="{{ rid }}" class="manual-run-option" data-status="{{ status }}" title="{{ status_label }}" {% if
+        selected_run_id==rid %}selected{% endif %}>
+        Run #{{ rid }}{% if option.filename or option['filename'] %} - {{ option.filename if option.filename is defined
+        else option['filename'] }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-primary btn-sm">表示</button>
+  </div>
+  <div class="col-auto">
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="manualNextRunButton" disabled>次のRunへ</button>
+  </div>
+</form>
+
+{% if selected_run_id %}
+<div id="manualOvertakeConfig" data-run-id="{{ selected_run_id }}"
+  data-metadata-url="{{ url_for('main.manual_overtake_metadata', run_id=selected_run_id) }}"
+  data-frame-url="{{ url_for('main.manual_overtake_frame', run_id=selected_run_id) }}"
+  data-detections-url="{{ url_for('main.manual_overtake_detections', run_id=selected_run_id) }}"
+  data-events-url="{{ url_for('main.manual_overtake_events_api', run_id=selected_run_id) }}"
+  data-db-status-url="{{ url_for('main.manual_overtake_events_status', run_id=selected_run_id) }}"
+  data-verify-url="{{ url_for('main.manual_overtake_event_verify', run_id=selected_run_id) }}"
+  data-prefetch-url="{{ url_for('main.manual_overtake_prefetch', run_id=selected_run_id) }}"
+  data-group-seek-url="{{ url_for('main.manual_overtake_group_seek', run_id=selected_run_id) }}"
+  data-scale-preview-url="{{ url_for('main.manual_overtake_scale_preview', run_id=selected_run_id) }}"
+  data-scale-preview-image-base="{{ url_for('main.manual_overtake_scale_preview_image', run_id=selected_run_id) }}"
+  data-context-flush-url="{{ url_for('main.manual_overtake_context_flush', run_id=selected_run_id) }}"
+  data-event-count="{{ events|length }}">
+</div>
+
+<div class="row g-4">
+  <div class="col-12 col-lg-8">
+    <div class="card shadow-sm h-100">
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+          <span>フレームプレビュー</span>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="manualPrefetchButton"
+            data-default-label="動画フレーム一括生成">動画フレーム一括生成</button>
+        </div>
+        <span id="manualFrameCounter" class="badge text-bg-secondary">0 / 0</span>
+      </div>
+      <div class="card-body">
+        <div class="position-relative border rounded bg-body-tertiary overflow-hidden" style="min-height: 380px;"
+          id="manualFrameContainer">
+          <div id="manualFrameLoader"
+            class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center">
+            <div class="spinner-border text-primary" role="status"><span class="visually-hidden">読み込み中...</span></div>
+          </div>
+          <img id="manualFrameImage" class="w-100 h-auto d-none" alt="manual frame" draggable="false">
+          <canvas id="manualOverlayCanvas" class="position-absolute top-0 start-0"></canvas>
+        </div>
+        <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
+          <div class="input-group input-group-sm" style="max-width: 220px;">
+            <span class="input-group-text">フレーム</span>
+            <input type="number" id="manualFrameInput" class="form-control" min="0" value="0">
+          </div>
+          <input type="range" class="form-range flex-grow-1" id="manualFrameRange" min="0" max="0" value="0">
+          <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="-30" title="-30 frames"><i
+                class="bi bi-chevron-double-left"></i></button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="-10" title="-10 frames"><i
+                class="bi bi-chevron-left"></i></button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="-1" title="-1 frame"><i
+                class="bi bi-caret-left-fill"></i></button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="1" title="+1 frame"><i
+                class="bi bi-caret-right-fill"></i></button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="10" title="+10 frames"><i
+                class="bi bi-chevron-right"></i></button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="30" title="+30 frames"><i
+                class="bi bi-chevron-double-right"></i></button>
+          </div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="manualJumpFirstBicycle" disabled
+            title="自転車初検知へ移動">
+            <i class="bi bi-bicycle"></i> Check First
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="manualJumpGroupFirst" disabled
+            title="選択自転車 初検知へ">
+            <i class="bi bi-skip-start-fill"></i> Group Start
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="manualJumpGroupNext" disabled
+            title="選択自転車 次の検知へ">
+            <i class="bi bi-skip-end-fill"></i> Group End
+          </button>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="manualPlayToggle" data-playing="0">
+            <i class="bi bi-play-fill"></i> 再生
+          </button>
+        </div>
+        <div id="manualPrefetchStatus" class="small text-muted mt-2 d-none"></div>
+        <div id="manualOrientationSummary" class="small text-muted mt-2 d-none"></div>
+        <div id="manualSelectionSummary" class="alert alert-secondary small mt-3 d-none" role="alert"></div>
+        <div id="manualErrorInline" class="alert alert-danger small mt-3 d-none" role="alert"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-4">
+    <div class="card shadow-sm mb-3">
+      <div class="card-header">フレーム内の検出</div>
+      <div class="card-body">
+        <p class="small text-muted mb-2">BBOXをクリックすると追い越し側→追い越され側の順に選択できます。</p>
+        <div id="manualDetectionList" class="list-group list-group-flush small"></div>
+        <div id="manualNoDetection" class="alert alert-info small mb-0 d-none">このフレームには検出がありません。</div>
+      </div>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-header">追い越しイベント登録</div>
+      <div class="card-body">
+        <p class="small text-muted">追い越し側と追い越され側を選択し、必要であればメモを記入して保存してください。</p>
+        <div class="mb-2">
+          <label for="manualNotes" class="form-label small">メモ (任意)</label>
+          <textarea id="manualNotes" class="form-control form-control-sm" rows="2" maxlength="500"
+            placeholder="例: 目視で追い越しを確認"></textarea>
+          <div class="form-text">最大500文字まで入力できます。</div>
+        </div>
+        <button type="button" class="btn btn-primary w-100 btn-sm" id="manualSaveButton" disabled>追い越しを保存</button>
+        <button type="button" class="btn btn-outline-primary w-100 btn-sm mt-2" id="manualScalePreviewButton"
+          disabled>View lane scale</button>
+        <div id="manualSaveMessage" class="alert alert-success small mt-3 d-none" role="alert"></div>
+        <div id="manualSaveNotice" class="alert alert-warning small mt-3 d-none" role="alert"></div>
+        <div id="manualSaveError" class="alert alert-danger small mt-3 d-none" role="alert"></div>
+        <div class="d-flex align-items-center gap-2 mt-3">
+          <span id="manualProcessingIndicator" class="manual-processing-indicator" data-state="idle"
+            aria-hidden="true"></span>
+          <span id="manualProcessingLabel" class="small text-muted" aria-live="polite">保存処理待機中</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm mt-4">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-2">
+      <span>保存済みイベント</span>
+      <span id="manualEventCountBadge" class="badge rounded-pill text-bg-primary">
+        {{ events|length if events is defined else 0 }}
+      </span>
+      <span id="manualEventStatusText" class="text-muted small">
+        {% if events is defined and events|length %}
+        登録済み {{ events|length }} 件
+        {% else %}
+        まだイベントが登録されていません
+        {% endif %}
+      </span>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="manualEventsRefreshButton" {% if not
+          selected_run_id %}disabled{% endif %}>更新</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="manualEventsVerifyButton" {% if not
+          selected_run_id %}disabled{% endif %}>確認</button>
+      </div>
+      <div class="btn-group btn-group-sm">
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='csv') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">CSV出力</a>
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='xlsx') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">Excel出力</a>
+      </div>
+      <div class="btn-group btn-group-sm">
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='csv', scope='context') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">全フレームCSV</a>
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='xlsx', scope='context') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">全フレームExcel</a>
+      </div>
+      <div class="btn-group btn-group-sm">
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='csv', scope='context_legacy') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">従来±150f CSV</a>
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='xlsx', scope='context_legacy') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">従来±150f Excel</a>
+      </div>
+      <div class="btn-group btn-group-sm">
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='csv', scope='context_fixed') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">修正グループCSV</a>
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='xlsx', scope='context_fixed') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">修正グループExcel</a>
+      </div>
+      <div class="btn-group btn-group-sm">
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='csv', scope='groups') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">グループID別CSV</a>
+        <a href="{% if selected_run_id %}{{ url_for('main.manual_overtake_export', run_id=selected_run_id, format='xlsx', scope='groups') }}{% else %}#{% endif %}"
+          class="btn btn-outline-secondary{% if not selected_run_id %} disabled{% endif %}" role="button"
+          aria-disabled="{% if not selected_run_id %}true{% else %}false{% endif %}">グループID別Excel</a>
+      </div>
+      <form method="post" action="{{ url_for('main.manual_overtake_reset') }}" class="d-inline">
+        <input type="hidden" name="scope" value="events">
+        <input type="hidden" name="run_id" value="{{ selected_run_id }}">
+        <button type="submit" class="btn btn-outline-danger btn-sm" {% if not selected_run_id %}disabled{% else %}
+          onclick="return confirm('Run #{{ selected_run_id }} の手動追い越しイベントと追い越しフラグを初期化しますか？');" {% endif %}>リセット</button>
+      </form>
+      <div class="form-text small text-muted mb-0">
+        イベントCSVは追い越し側/追い越され側グループが映る全フレームのコンテキストCSVを同梱したZIP形式でダウンロードされます。コンテキストのみは専用ボタンから取得できます。
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    {% if selected_run_id %}
+    <p class="small text-muted">「リセット」を実行すると、このRunで登録済みの手動追い越しイベントと関連する追い越しフラグが初期化されます。</p>
+    <div class="border rounded bg-body-tertiary px-3 py-2 mb-3" id="manualDbStatusPanel">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="fw-semibold small text-muted">DB反映状況</span>
+        <span id="manualDbStatusBadge" class="badge rounded-pill text-bg-secondary">未確認</span>
+        <span id="manualDbStatusMessage" class="small text-muted flex-grow-1">DB照合はまだ実行されていません。</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="manualDbStatusRefresh">DBと照合</button>
+      </div>
+      <div id="manualDbStatusDetails" class="small text-muted mt-2"></div>
+    </div>
+    {% endif %}
+    <div class="table-responsive" data-manual-events-wrapper>
+      <table id="manualEventsTable" class="table table-sm table-striped align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Run</th>
+            <th scope="col">動画名</th>
+            <th scope="col">フレーム</th>
+            <th scope="col">動画時間(s)</th>
+            <th scope="col">追い越し側 (Track/XY)</th>
+            <th scope="col">追い越し側BBOX(x1,y1,x2,y2)</th>
+            <th scope="col">追い越し側 時速(km/h)</th>
+            <th scope="col">追い越し側 ピクセル速度(px/s)</th>
+            <th scope="col">追い越され側</th>
+            <th scope="col">追い越され側BBOX(x1,y1,x2,y2)</th>
+            <th scope="col">追い越され側 時速(km/h)</th>
+            <th scope="col">追い越され側 ピクセル速度(px/s)</th>
+            <th scope="col">接近距離(m)</th>
+            <th scope="col">離隔距離</th>
+            <th scope="col">追い越し側 白線距離</th>
+            <th scope="col">追い越され側 白線距離</th>
+            <th scope="col">登録日時</th>
+            <th scope="col">メモ</th>
+          </tr>
+        </thead>
+        <tbody id="manualEventsBody">
+          {% for event in events %}
+          <tr data-event-id="{{ event.manual_event_id }}">
+            <td>{{ event.manual_event_id }}</td>
+            <td>{{ event.run_id }}</td>
+            <td>{{ event.video_filename or '-' }}</td>
+            <td>{{ event.frame_num }}</td>
+            <td>{{ "%.2f"|format(event.video_time_s) if event.video_time_s is not none else "-" }}</td>
+            <td>
+              <div>Group {{ event.overtaker_group_id }}</div>
+              <div class="text-muted">{{ event.overtaker_class_name or '-' }}</div>
+              <div class="text-muted small">Track {{ event.overtaker_track_id if event.overtaker_track_id is not none
+                else '-' }}</div>
+              {% set ot_mx = event.overtaker_measure_x %}
+              {% set ot_my = event.overtaker_measure_y %}
+              {% if ot_mx is not none or ot_my is not none %}
+              <div class="text-muted small">XY {{ ot_mx is not none and "%.1f"|format(ot_mx) or '-' }}, {{ ot_my is not
+                none and "%.1f"|format(ot_my) or '-' }}</div>
+              {% else %}
+              <div class="text-muted small">XY -</div>
+              {% endif %}
+            </td>
+            <td>
+              {% set ot_x1 = event.overtaker_x1 %}
+              {% set ot_y1 = event.overtaker_y1 %}
+              {% set ot_x2 = event.overtaker_x2 %}
+              {% set ot_y2 = event.overtaker_y2 %}
+              {% if ot_x1 is not none or ot_y1 is not none or ot_x2 is not none or ot_y2 is not none %}
+              <div class="text-muted small">({{ ot_x1 is not none and "%.1f"|format(ot_x1) or '-' }}, {{ ot_y1 is not
+                none and "%.1f"|format(ot_y1) or '-' }}) → ({{ ot_x2 is not none and "%.1f"|format(ot_x2) or '-' }}, {{
+                ot_y2 is not none and "%.1f"|format(ot_y2) or '-' }})</div>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>{{ "%.1f"|format(event.overtaker_speed_km_h) ~ " km/h" if event.overtaker_speed_km_h is not none else
+              "-" }}</td>
+            <td>
+              {% if event.overtaker_pixel_speed is not none %}
+              <div>{{ "%.1f"|format(event.overtaker_pixel_speed) }} px/s</div>
+              {% else %}
+              <div>-</div>
+              {% endif %}
+              {% if event.overtaker_pixel_speed_frame is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(event.overtaker_pixel_speed_frame) }} px/f</div>
+              {% endif %}
+            </td>
+            <td>
+              <div>Group {{ event.overtaken_group_id }}</div>
+              <div class="text-muted">{{ event.overtaken_class_name or '-' }}</div>
+              <div class="text-muted small">Track {{ event.overtaken_track_id if event.overtaken_track_id is not none
+                else '-' }}</div>
+              {% set on_mx = event.overtaken_measure_x %}
+              {% set on_my = event.overtaken_measure_y %}
+              {% if on_mx is not none or on_my is not none %}
+              <div class="text-muted small">XY {{ on_mx is not none and "%.1f"|format(on_mx) or '-' }}, {{ on_my is not
+                none and "%.1f"|format(on_my) or '-' }}</div>
+              {% else %}
+              <div class="text-muted small">XY -</div>
+              {% endif %}
+            </td>
+            <td>
+              {% set on_x1 = event.overtaken_x1 %}
+              {% set on_y1 = event.overtaken_y1 %}
+              {% set on_x2 = event.overtaken_x2 %}
+              {% set on_y2 = event.overtaken_y2 %}
+              {% if on_x1 is not none or on_y1 is not none or on_x2 is not none or on_y2 is not none %}
+              <div class="text-muted small">({{ on_x1 is not none and "%.1f"|format(on_x1) or '-' }}, {{ on_y1 is not
+                none and "%.1f"|format(on_y1) or '-' }}) → ({{ on_x2 is not none and "%.1f"|format(on_x2) or '-' }}, {{
+                on_y2 is not none and "%.1f"|format(on_y2) or '-' }})</div>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>{{ "%.1f"|format(event.overtaken_speed_km_h) ~ " km/h" if event.overtaken_speed_km_h is not none else
+              "-" }}</td>
+            <td>
+              {% if event.overtaken_pixel_speed is not none %}
+              <div>{{ "%.1f"|format(event.overtaken_pixel_speed) }} px/s</div>
+              {% else %}
+              <div>-</div>
+              {% endif %}
+              {% if event.overtaken_pixel_speed_frame is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(event.overtaken_pixel_speed_frame) }} px/f</div>
+              {% endif %}
+            </td>
+            <td>{{ "%.2f"|format(event.approach_distance_m) if event.approach_distance_m is not none else "-" }}</td>
+            <td>
+              {% if event.clearance_distance_cm is not none %}
+              {{ "%.0f"|format(event.clearance_distance_cm) }} cm
+              {% elif event.clearance_distance_m is not none %}
+              {{ "%.2f"|format(event.clearance_distance_m) }} m
+              {% else %}
+              -
+              {% endif %}
+              {% if event.clearance_distance_px is not none %}
+              <div class="text-muted small">{{ "%.0f"|format(event.clearance_distance_px) }} px</div>
+              {% endif %}
+              {% if event.clearance_distance_px_ratio is not none %}
+              <div class="text-muted small">比率: {{ "%.1f"|format(event.clearance_distance_px_ratio) }}%</div>
+              {% endif %}
+            </td>
+            <td>
+              {% if event.overtaker_line_distance_m is not none %}
+              <div>{{ "%.2f"|format(event.overtaker_line_distance_m) }} m</div>
+              {% if event.overtaker_line_distance_cm is not none %}
+              <div class="text-muted small">{{ "%.0f"|format(event.overtaker_line_distance_cm) }} cm</div>
+              {% endif %}
+              {% endif %}
+              {% if event.overtaker_line_distance_px is not none %}
+              <div class="text-muted small">{{ "%.0f"|format(event.overtaker_line_distance_px) }} px</div>
+              {% endif %}
+              {% if event.overtaker_line_distance_px_ratio is not none %}
+              <div class="text-muted small">比率: {{ "%.1f"|format(event.overtaker_line_distance_px_ratio) }}%</div>
+              {% endif %}
+              <div class="text-muted small">
+                L:
+                {% if event.overtaker_left_line_distance_m is not none %}
+                {{ "%.2f"|format(event.overtaker_left_line_distance_m) }} m
+                {% if event.overtaker_left_line_distance_cm is not none %}
+                ({{ "%.0f"|format(event.overtaker_left_line_distance_cm) }} cm)
+                {% endif %}
+                {% elif event.overtaker_left_line_distance_px is not none %}
+                {{ "%.0f"|format(event.overtaker_left_line_distance_px) }} px
+                {% else %}
+                -
+                {% endif %}
+                /
+                R:
+                {% if event.overtaker_right_line_distance_m is not none %}
+                {{ "%.2f"|format(event.overtaker_right_line_distance_m) }} m
+                {% if event.overtaker_right_line_distance_cm is not none %}
+                ({{ "%.0f"|format(event.overtaker_right_line_distance_cm) }} cm)
+                {% endif %}
+                {% elif event.overtaker_right_line_distance_px is not none %}
+                {{ "%.0f"|format(event.overtaker_right_line_distance_px) }} px
+                {% else %}
+                -
+                {% endif %}
+              </div>
+            </td>
+            <td>
+              {% if event.overtaken_line_distance_m is not none %}
+              <div>{{ "%.2f"|format(event.overtaken_line_distance_m) }} m</div>
+              {% if event.overtaken_line_distance_cm is not none %}
+              <div class="text-muted small">{{ "%.0f"|format(event.overtaken_line_distance_cm) }} cm</div>
+              {% endif %}
+              {% endif %}
+              {% if event.overtaken_line_distance_px is not none %}
+              <div class="text-muted small">{{ "%.0f"|format(event.overtaken_line_distance_px) }} px</div>
+              {% endif %}
+              {% if event.overtaken_line_distance_px_ratio is not none %}
+              <div class="text-muted small">比率: {{ "%.1f"|format(event.overtaken_line_distance_px_ratio) }}%</div>
+              {% endif %}
+              <div class="text-muted small">
+                L:
+                {% if event.overtaken_left_line_distance_m is not none %}
+                {{ "%.2f"|format(event.overtaken_left_line_distance_m) }} m
+                {% if event.overtaken_left_line_distance_cm is not none %}
+                ({{ "%.0f"|format(event.overtaken_left_line_distance_cm) }} cm)
+                {% endif %}
+                {% elif event.overtaken_left_line_distance_px is not none %}
+                {{ "%.0f"|format(event.overtaken_left_line_distance_px) }} px
+                {% else %}
+                -
+                {% endif %}
+                /
+                R:
+                {% if event.overtaken_right_line_distance_m is not none %}
+                {{ "%.2f"|format(event.overtaken_right_line_distance_m) }} m
+                {% if event.overtaken_right_line_distance_cm is not none %}
+                ({{ "%.0f"|format(event.overtaken_right_line_distance_cm) }} cm)
+                {% endif %}
+                {% elif event.overtaken_right_line_distance_px is not none %}
+                {{ "%.0f"|format(event.overtaken_right_line_distance_px) }} px
+                {% else %}
+                -
+                {% endif %}
+              </div>
+            </td>
+            <td>{{ event.created_at or '-' }}</td>
+            <td>{{ event.notes or '-' }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="19" class="text-center text-muted py-3">まだ手動登録された追い越しイベントはありません。</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm mt-4">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="flex-grow-1">
+      <span class="me-2">グループ出現フレーム コンテキスト一覧</span>
+      <span class="small text-muted">追い越し側/追い越され側グループが映る全フレームのBBOXと速度・距離情報を確認できます。ホイール操作でスクロール表示が可能です。</span>
+    </div>
+    <form method="post" action="{{ url_for('main.manual_overtake_context_process') }}"
+      class="d-inline-flex align-items-center gap-2 flex-wrap">
+      {% if selected_run_id %}
+      <input type="hidden" name="run_id" value="{{ selected_run_id }}">
+      {% endif %}
+      <button type="submit" class="btn btn-outline-secondary btn-sm" {% if not selected_run_id %}disabled{% endif %}>
+        手動追い越しで後処理
+      </button>
+    </form>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive manual-context-scroll" tabindex="0">
+      <table class="table table-sm table-striped align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">イベントID</th>
+            <th scope="col">Run</th>
+            <th scope="col">動画名</th>
+            <th scope="col">オフセット</th>
+            <th scope="col">フレーム</th>
+            <th scope="col">動画時間(s)</th>
+            <th scope="col">追い越し側 Group/Track</th>
+            <th scope="col">追い越し側BBOX(x1,y1,x2,y2)</th>
+            <th scope="col">追い越し側 速度</th>
+            <th scope="col">追い越され側 Group/Track</th>
+            <th scope="col">追い越され側BBOX(x1,y1,x2,y2)</th>
+            <th scope="col">追い越され側 速度</th>
+            <th scope="col">離隔距離</th>
+          </tr>
+        </thead>
+        <tbody id="manualContextBody">
+          {% if context_rows %}
+          {% for row in context_rows %}
+          <tr>
+            <td>{{ row.manual_event_id }}</td>
+            <td>{{ row.run_id }}</td>
+            <td>{{ row.video_filename or '-' }}</td>
+            <td>{{ row.offset_frames }}</td>
+            <td>{{ row.frame_num }}</td>
+            <td>{{ row.video_time_s is not none and "%.2f"|format(row.video_time_s) or '-' }}</td>
+            <td>
+              <div>Group {{ row.overtaker_group_id }}</div>
+              <div class="text-muted small">Track {{ row.overtaker_track_id if row.overtaker_track_id is not none else
+                '-' }}</div>
+            </td>
+            <td>
+              {% set ctx_ot_x1 = row.overtaker_x1 %}
+              {% set ctx_ot_y1 = row.overtaker_y1 %}
+              {% set ctx_ot_x2 = row.overtaker_x2 %}
+              {% set ctx_ot_y2 = row.overtaker_y2 %}
+              {% if ctx_ot_x1 is not none or ctx_ot_y1 is not none or ctx_ot_x2 is not none or ctx_ot_y2 is not none %}
+              <div class="text-muted small">({{ ctx_ot_x1 is not none and "%.1f"|format(ctx_ot_x1) or '-' }}, {{
+                ctx_ot_y1 is not none and "%.1f"|format(ctx_ot_y1) or '-' }}) → ({{ ctx_ot_x2 is not none and
+                "%.1f"|format(ctx_ot_x2) or '-' }}, {{ ctx_ot_y2 is not none and "%.1f"|format(ctx_ot_y2) or '-' }})
+              </div>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>
+              {% if row.overtaker_speed_km_h is not none %}
+              <div>{{ "%.1f"|format(row.overtaker_speed_km_h) }} km/h</div>
+              {% endif %}
+              {% if row.overtaker_pixel_speed is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(row.overtaker_pixel_speed) }} px/s</div>
+              {% endif %}
+              {% if row.overtaker_pixel_speed_frame is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(row.overtaker_pixel_speed_frame) }} px/f</div>
+              {% endif %}
+            </td>
+            <td>
+              <div>Group {{ row.overtaken_group_id }}</div>
+              <div class="text-muted small">Track {{ row.overtaken_track_id if row.overtaken_track_id is not none else
+                '-' }}</div>
+            </td>
+            <td>
+              {% set ctx_on_x1 = row.overtaken_x1 %}
+              {% set ctx_on_y1 = row.overtaken_y1 %}
+              {% set ctx_on_x2 = row.overtaken_x2 %}
+              {% set ctx_on_y2 = row.overtaken_y2 %}
+              {% if ctx_on_x1 is not none or ctx_on_y1 is not none or ctx_on_x2 is not none or ctx_on_y2 is not none %}
+              <div class="text-muted small">({{ ctx_on_x1 is not none and "%.1f"|format(ctx_on_x1) or '-' }}, {{
+                ctx_on_y1 is not none and "%.1f"|format(ctx_on_y1) or '-' }}) → ({{ ctx_on_x2 is not none and
+                "%.1f"|format(ctx_on_x2) or '-' }}, {{ ctx_on_y2 is not none and "%.1f"|format(ctx_on_y2) or '-' }})
+              </div>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>
+              {% if row.overtaken_speed_km_h is not none %}
+              <div>{{ "%.1f"|format(row.overtaken_speed_km_h) }} km/h</div>
+              {% endif %}
+              {% if row.overtaken_pixel_speed is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(row.overtaken_pixel_speed) }} px/s</div>
+              {% endif %}
+              {% if row.overtaken_pixel_speed_frame is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(row.overtaken_pixel_speed_frame) }} px/f</div>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.clearance_distance_cm is not none %}
+              <div>{{ "%.0f"|format(row.clearance_distance_cm) }} cm</div>
+              {% endif %}
+              {% if row.clearance_distance_m is not none %}
+              <div class="text-muted small">{{ "%.2f"|format(row.clearance_distance_m) }} m</div>
+              {% endif %}
+              {% if row.clearance_distance_px is not none %}
+              <div class="text-muted small">{{ "%.0f"|format(row.clearance_distance_px) }} px</div>
+              {% endif %}
+              {% if row.clearance_distance_px_ratio is not none %}
+              <div class="text-muted small">比率: {{ "%.1f"|format(row.clearance_distance_px_ratio) }}%</div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+          {% else %}
+          <tr>
+            <td colspan="13" class="text-center text-muted py-3">追い越し側/追い越され側グループのコンテキストデータがまだ登録されていません。</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="modal fade" id="manualScaleModal" tabindex="-1" aria-labelledby="manualScaleModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="manualScaleModalLabel">Lane scale info</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div data-scale-loading class="text-center py-3">
+          <div class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+          Loading...
+        </div>
+        <div data-scale-error class="alert alert-danger d-none"></div>
+        <div data-scale-content class="d-none">
+          <p class="small text-muted mb-2" data-scale-description></p>
+          <div class="mb-3" data-scale-image-wrapper>
+            <img data-scale-image class="img-fluid border rounded" alt="Lane scale preview">
+            <div class="form-text small" data-scale-image-note></div>
+          </div>
+          <div class="mb-3">
+            <h6 class="fw-bold small mb-1">Scale overview</h6>
+            <ul class="small mb-0" data-scale-segments></ul>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col">対象</th>
+                  <th scope="col">測定点 (px)</th>
+                  <th scope="col">Scale distance</th>
+                  <th scope="col">白線距離(px)</th>
+                  <th scope="col">白線距離(cm)</th>
+                </tr>
+              </thead>
+              <tbody data-scale-detail-body></tbody>
+            </table>
+          </div>
+          <div class="small text-muted mt-2" data-scale-footnote></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-info">Runを選択すると手動追い越しイベントを登録できます。</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{% if selected_run_id %}
+<script>
+  (function () {
+    const configEl = document.getElementById('manualOvertakeConfig');
+    if (!configEl) {
+      return;
+    }
+
+    const metadataUrl = configEl.dataset.metadataUrl;
+    const frameUrl = configEl.dataset.frameUrl;
+    const detectionsUrl = configEl.dataset.detectionsUrl;
+    const eventsUrl = configEl.dataset.eventsUrl;
+    const verifyUrl = configEl.dataset.verifyUrl;
+    const prefetchUrl = configEl.dataset.prefetchUrl;
+    const groupSeekUrl = configEl.dataset.groupSeekUrl;
+    const scalePreviewUrl = configEl.dataset.scalePreviewUrl;
+    const scalePreviewImageBase = configEl.dataset.scalePreviewImageBase;
+
+    const frameImage = document.getElementById('manualFrameImage');
+    const overlayCanvas = document.getElementById('manualOverlayCanvas');
+    const overlayCtx = overlayCanvas.getContext('2d');
+    const frameCounter = document.getElementById('manualFrameCounter');
+    const frameInput = document.getElementById('manualFrameInput');
+    const frameRange = document.getElementById('manualFrameRange');
+    const loader = document.getElementById('manualFrameLoader');
+    const playToggle = document.getElementById('manualPlayToggle');
+    const detectionList = document.getElementById('manualDetectionList');
+    const noDetectionAlert = document.getElementById('manualNoDetection');
+    const selectionSummary = document.getElementById('manualSelectionSummary');
+    const saveButton = document.getElementById('manualSaveButton');
+    const saveMessage = document.getElementById('manualSaveMessage');
+    const saveNotice = document.getElementById('manualSaveNotice');
+    const saveError = document.getElementById('manualSaveError');
+    const scalePreviewButton = document.getElementById('manualScalePreviewButton');
+    const inlineError = document.getElementById('manualErrorInline');
+    const notesInput = document.getElementById('manualNotes');
+    const processingIndicator = document.getElementById('manualProcessingIndicator');
+    const processingLabel = document.getElementById('manualProcessingLabel');
+    const eventsBody = document.getElementById('manualEventsBody');
+    const contextBody = document.getElementById('manualContextBody');
+    const eventsTable = document.getElementById('manualEventsTable');
+    const contextScrollContainer = document.querySelector('.manual-context-scroll');
+    const eventsWrapper = document.querySelector('[data-manual-events-wrapper]');
+    const eventCountBadge = document.getElementById('manualEventCountBadge');
+    const eventStatusText = document.getElementById('manualEventStatusText');
+    const eventsRefreshButton = document.getElementById('manualEventsRefreshButton');
+    const eventsVerifyButton = document.getElementById('manualEventsVerifyButton');
+    const prefetchButton = document.getElementById('manualPrefetchButton');
+    const prefetchStatus = document.getElementById('manualPrefetchStatus');
+    const prefetchDefaultLabel = prefetchButton ? (prefetchButton.dataset.defaultLabel || prefetchButton.textContent.trim()) : '';
+    const runSelect = document.getElementById('manualRunSelect');
+    const runForm = document.getElementById('manualRunForm');
+    const nextRunButton = document.getElementById('manualNextRunButton');
+    const jumpFirstBicycleButton = document.getElementById('manualJumpFirstBicycle');
+    const jumpGroupFirstButton = document.getElementById('manualJumpGroupFirst');
+    const jumpGroupNextButton = document.getElementById('manualJumpGroupNext');
+    const orientationSummary = document.getElementById('manualOrientationSummary');
+    const dbStatusButton = document.getElementById('manualDbStatusRefresh');
+    const dbStatusBadge = document.getElementById('manualDbStatusBadge');
+    const dbStatusMessage = document.getElementById('manualDbStatusMessage');
+    const dbStatusDetails = document.getElementById('manualDbStatusDetails');
+    const selectedRunIdValue = configEl.dataset.runId || '';
+    const initialEventCount = Number(configEl.dataset.eventCount || '0');
+    const scaleModalEl = document.getElementById('manualScaleModal');
+    const scaleModal = scaleModalEl && window.bootstrap ? new window.bootstrap.Modal(scaleModalEl) : null;
+    const scaleLoading = scaleModalEl ? scaleModalEl.querySelector('[data-scale-loading]') : null;
+    const scaleError = scaleModalEl ? scaleModalEl.querySelector('[data-scale-error]') : null;
+    const scaleContent = scaleModalEl ? scaleModalEl.querySelector('[data-scale-content]') : null;
+    const scaleDescription = scaleModalEl ? scaleModalEl.querySelector('[data-scale-description]') : null;
+    const scaleImageWrapper = scaleModalEl ? scaleModalEl.querySelector('[data-scale-image-wrapper]') : null;
+    const scaleImage = scaleModalEl ? scaleModalEl.querySelector('[data-scale-image]') : null;
+    const scaleImageNote = scaleModalEl ? scaleModalEl.querySelector('[data-scale-image-note]') : null;
+    const scaleSegmentsList = scaleModalEl ? scaleModalEl.querySelector('[data-scale-segments]') : null;
+    const scaleDetailBody = scaleModalEl ? scaleModalEl.querySelector('[data-scale-detail-body]') : null;
+    const scaleFootnote = scaleModalEl ? scaleModalEl.querySelector('[data-scale-footnote]') : null;
+    const dbStatusUrl = configEl.dataset.dbStatusUrl || '';
+    const contextFlushUrl = configEl.dataset.contextFlushUrl || '';
+
+    let metadata = null;
+    let currentFrame = 0;
+    let frameRequestId = 0;
+    let detections = [];
+    let detectionMap = new Map();
+    let animationId = null;
+    let selectedOvertaker = null;
+    let selectedOvertaken = null;
+    let leftWhiteLine = null;
+    let rightWhiteLine = null;
+    let detectionOffset = 0;
+    let firstDetectionFrame = null;
+    let prefetchPollTimer = null;
+    let firstBicycleFrame = null;
+    const EVENTS_FETCH_LIMIT = 500;
+    let latestEvents = [];
+    let eventsRefreshPromise = null;
+    let eventsRefreshQueued = null;
+    let autoRefreshInFlight = false;
+    let currentScalePreviewParams = null;
+    let nextSelectionRole = 'overtaker';
+    let lastSelectionRole = null;
+    let nextRunValue = null;
+    let nextRunLabel = '';
+    let navigationGroupId = null;
+    let bicycleClassSet = new Set();
+    const groupFirstFrameCache = new Map();
+    const scrollStorageKey = 'manualOvertakeScrollY';
+    let pendingHighlightEventId = null;
+    let lastDbSummary = null;
+    let dbStatusFetchPromise = null;
+    let dbStatusLoading = false;
+    let dbStatusErrorMessage = null;
+    let contextFlushPromise = null;
+
+    try {
+      const storedScrollRaw = sessionStorage.getItem(scrollStorageKey);
+      if (storedScrollRaw !== null) {
+        const storedScroll = Number(storedScrollRaw);
+        if (Number.isFinite(storedScroll)) {
+          window.scrollTo(0, storedScroll);
+        }
+        sessionStorage.removeItem(scrollStorageKey);
+      }
+    } catch (err) {
+      console.warn('Failed to restore scroll position', err);
+    }
+
+    if (prefetchStatus) {
+      prefetchStatus.className = 'small text-muted mt-2 d-none';
+    }
+    if (prefetchButton) {
+      prefetchButton.disabled = true;
+    }
+
+    if (contextScrollContainer) {
+      contextScrollContainer.addEventListener('mouseenter', () => {
+        if (document.activeElement !== contextScrollContainer) {
+          try {
+            contextScrollContainer.focus({ preventScroll: true });
+          } catch (err) {
+            // ignore focus errors
+          }
+        }
+      });
+    }
+
+    function applyRunStatus(status) {
+      if (!runSelect || !selectedRunIdValue) {
+        return;
+      }
+      const option = runSelect.querySelector(`option[value="${selectedRunIdValue}"]`);
+      if (!option) {
+        return;
+      }
+      const normalized = status || 'new';
+      option.dataset.status = normalized;
+      option.classList.add('manual-run-option');
+      let titleText = '未訪問';
+      if (normalized === 'annotated') {
+        titleText = '手動追い越し付与済み';
+      } else if (normalized === 'visited') {
+        titleText = '観覧済み (付与なし)';
+      }
+      option.title = titleText;
+    }
+
+    function updateRunStatusFromCount(count) {
+      if (!selectedRunIdValue) {
+        return;
+      }
+      if (count === null || count === undefined) {
+        return;
+      }
+      const numeric = Number(count);
+      if (!Number.isFinite(numeric)) {
+        return;
+      }
+      const status = numeric > 0 ? 'annotated' : 'visited';
+      applyRunStatus(status);
+    }
+
+    function updateEventSummary(count) {
+      updateRunStatusFromCount(count);
+      if (eventCountBadge) {
+        const numeric = Number(count);
+        eventCountBadge.textContent = Number.isFinite(numeric) && numeric >= 0 ? numeric.toString() : '0';
+        eventCountBadge.classList.toggle('text-bg-secondary', !numeric);
+        eventCountBadge.classList.toggle('text-bg-primary', !!numeric);
+      }
+      if (eventStatusText) {
+        if (count && Number(count) > 0) {
+          eventStatusText.textContent = `登録済み ${count} 件`;
+          eventStatusText.classList.remove('text-danger');
+        } else {
+          eventStatusText.textContent = 'まだイベントが登録されていません';
+          eventStatusText.classList.remove('text-danger');
+        }
+      }
+    }
+
+    function setEventStatusLoading(message, action) {
+      if (!eventStatusText) {
+        return;
+      }
+      if (action) {
+        eventStatusText.dataset.loadingAction = action;
+      } else {
+        delete eventStatusText.dataset.loadingAction;
+      }
+      eventStatusText.dataset.previousText = eventStatusText.textContent;
+      eventStatusText.textContent = message;
+      eventStatusText.classList.remove('text-danger');
+      eventStatusText.classList.add('text-muted');
+    }
+
+    function clearEventStatusLoading(action, options = {}) {
+      if (!eventStatusText) {
+        return;
+      }
+      if (action && eventStatusText.dataset.loadingAction !== action) {
+        return;
+      }
+      const { keepCurrent = false } = options || {};
+      if (!keepCurrent && (eventStatusText.textContent === '更新中...' || eventStatusText.textContent === '確認中...')) {
+        if (eventStatusText.dataset.previousText !== undefined) {
+          eventStatusText.textContent = eventStatusText.dataset.previousText;
+        }
+      }
+      delete eventStatusText.dataset.loadingAction;
+      delete eventStatusText.dataset.previousText;
+    }
+
+    function flushContextBacklog() {
+      if (!contextFlushUrl) {
+        return Promise.resolve({ processed: 0, remaining: null });
+      }
+      if (contextFlushPromise) {
+        return contextFlushPromise;
+      }
+      try {
+        const url = new URL(contextFlushUrl, window.location.origin);
+        url.searchParams.set('_', Date.now().toString());
+        contextFlushPromise = fetch(url.toString(), {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          cache: 'no-store',
+          keepalive: true,
+        })
+          .then(resp => resp.json().catch(() => ({})).then(body => ({ ok: resp.ok, body })))
+          .then(result => {
+            if (!result.ok) {
+              const body = result.body || {};
+              const message = body.error || body.message || '手動追い越し後処理に失敗しました。';
+              throw new Error(message);
+            }
+            return result.body || {};
+          })
+          .catch(err => {
+            console.error('Failed to flush context backlog', err);
+            throw err;
+          })
+          .finally(() => {
+            contextFlushPromise = null;
+          });
+        return contextFlushPromise;
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+
+    function setPendingEventHighlight(eventId) {
+      const numeric = Number(eventId);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        pendingHighlightEventId = numeric;
+      }
+    }
+
+    function highlightEventRow(eventId) {
+      const numeric = Number(eventId);
+      if (!eventsBody || !Number.isFinite(numeric) || numeric <= 0) {
+        return null;
+      }
+      const row = eventsBody.querySelector(`[data-event-id="${numeric}"]`);
+      if (!row) {
+        return null;
+      }
+      row.classList.remove('manual-event-highlight');
+      // reflow to restart animation
+      void row.offsetWidth;
+      row.classList.add('manual-event-highlight');
+      const wrapper = eventsWrapper || (eventsTable && eventsTable.closest('.table-responsive'));
+      if (wrapper && typeof wrapper.scrollTo === 'function') {
+        const top = row.offsetTop - Math.max(wrapper.clientHeight * 0.25, 24);
+        wrapper.scrollTo({ top: top < 0 ? 0 : top, behavior: 'smooth' });
+      } else if (typeof row.scrollIntoView === 'function') {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      window.setTimeout(() => {
+        row.classList.remove('manual-event-highlight');
+      }, 3200);
+      return row;
+    }
+
+    function isEventRowPresent(eventId) {
+      if (!eventsBody) {
+        return false;
+      }
+      const numeric = Number(eventId);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        return false;
+      }
+      return Boolean(eventsBody.querySelector(`[data-event-id="${numeric}"]`));
+    }
+
+    function applyPendingEventHighlight() {
+      if (!Number.isFinite(pendingHighlightEventId) || pendingHighlightEventId <= 0) {
+        return;
+      }
+      const applied = highlightEventRow(pendingHighlightEventId);
+      if (applied) {
+        pendingHighlightEventId = null;
+      }
+    }
+
+    function updateNextRunButtonState() {
+      if (!nextRunButton) {
+        return;
+      }
+      if (nextRunValue) {
+        nextRunButton.disabled = false;
+        nextRunButton.textContent = nextRunLabel ? `次のRunへ (${nextRunLabel})` : '次のRunへ';
+      } else {
+        nextRunButton.disabled = true;
+        nextRunButton.textContent = '次のRunへ';
+      }
+    }
+
+    function computeNextRunOption() {
+      if (!runSelect || !selectedRunIdValue) {
+        nextRunValue = null;
+        nextRunLabel = '';
+        updateNextRunButtonState();
+        return;
+      }
+      const options = Array.from(runSelect.options);
+      const currentIndex = options.findIndex(option => option.value === selectedRunIdValue);
+      let nextOption = null;
+      if (currentIndex >= 0) {
+        for (let idx = currentIndex + 1; idx < options.length; idx += 1) {
+          const candidate = options[idx];
+          if (candidate && candidate.value) {
+            nextOption = candidate;
+            break;
+          }
+        }
+      }
+      nextRunValue = nextOption ? nextOption.value : null;
+      nextRunLabel = nextOption ? nextOption.textContent.trim() : '';
+      updateNextRunButtonState();
+    }
+
+    if (selectedRunIdValue) {
+      updateEventSummary(initialEventCount);
+    }
+    computeNextRunOption();
+
+    if (dbStatusButton) {
+      dbStatusButton.addEventListener('click', () => {
+        fetchDbStatus().catch(() => { });
+      });
+    }
+
+    if (eventsRefreshButton) {
+      eventsRefreshButton.addEventListener('click', async () => {
+        if (eventsRefreshButton.disabled) {
+          return;
+        }
+        const originalLabel = eventsRefreshButton.dataset.originalLabel || eventsRefreshButton.textContent.trim();
+        eventsRefreshButton.dataset.originalLabel = originalLabel;
+        eventsRefreshButton.disabled = true;
+        eventsRefreshButton.textContent = '更新中...';
+        setEventStatusLoading('更新中...', 'refresh');
+        try {
+          await refreshEventsFromServer();
+        } catch (err) {
+          // エラー表示は refreshEventsFromServer 内で行われる
+        } finally {
+          eventsRefreshButton.disabled = false;
+          eventsRefreshButton.textContent = originalLabel;
+          clearEventStatusLoading('refresh');
+        }
+      });
+    }
+
+    if (eventsVerifyButton) {
+      eventsVerifyButton.addEventListener('click', async () => {
+        if (eventsVerifyButton.disabled) {
+          return;
+        }
+        const originalLabel = eventsVerifyButton.dataset.originalLabel || eventsVerifyButton.textContent.trim();
+        eventsVerifyButton.dataset.originalLabel = originalLabel;
+        eventsVerifyButton.disabled = true;
+        eventsVerifyButton.textContent = '確認中...';
+        setEventStatusLoading('確認中...', 'verify');
+        try {
+          const result = await ensureLatestEventsSynced();
+          if (result && typeof result === 'object') {
+            if (result.timeout) {
+              if (eventStatusText) {
+                eventStatusText.textContent = 'イベントの確認がタイムアウトしました。';
+                eventStatusText.classList.add('text-danger');
+                eventStatusText.classList.remove('text-muted');
+              }
+            } else if (!result.synced) {
+              if (eventStatusText) {
+                eventStatusText.textContent = 'イベントの確認に失敗しました。';
+                eventStatusText.classList.add('text-danger');
+                eventStatusText.classList.remove('text-muted');
+              }
+            } else if (!result.changed && eventStatusText) {
+              const currentCount = eventCountBadge ? Number(eventCountBadge.textContent) : null;
+              if (Number.isFinite(currentCount) && currentCount >= 0) {
+                eventStatusText.textContent = `登録済み ${currentCount} 件 (確認済み)`;
+              } else {
+                eventStatusText.textContent = '保存済みイベントを再確認しました。';
+              }
+              eventStatusText.classList.remove('text-danger');
+              eventStatusText.classList.add('text-muted');
+            }
+          }
+          await fetchDbStatus().catch(() => { });
+        } catch (err) {
+          console.error('Failed to verify events manually', err);
+          if (eventStatusText) {
+            eventStatusText.textContent = 'イベントの確認に失敗しました。';
+            eventStatusText.classList.add('text-danger');
+            eventStatusText.classList.remove('text-muted');
+          }
+        } finally {
+          eventsVerifyButton.disabled = false;
+          eventsVerifyButton.textContent = originalLabel;
+          clearEventStatusLoading('verify');
+        }
+      });
+    }
+
+    if (runForm) {
+      runForm.addEventListener('submit', () => {
+        rememberScrollPosition();
+      });
+    }
+
+    if (nextRunButton && runForm) {
+      nextRunButton.addEventListener('click', () => {
+        if (!nextRunValue) {
+          return;
+        }
+        nextRunButton.disabled = true;
+        ensureLatestEventsSynced()
+          .finally(() => {
+            rememberScrollPosition();
+            runSelect.value = nextRunValue;
+            runForm.submit();
+          });
+      });
+    }
+
+    if (jumpFirstBicycleButton) {
+      jumpFirstBicycleButton.addEventListener('click', () => {
+        if (!Number.isFinite(firstBicycleFrame)) {
+          return;
+        }
+        stopPlayback();
+        setFrame(firstBicycleFrame);
+      });
+    }
+
+    if (jumpGroupFirstButton) {
+      jumpGroupFirstButton.addEventListener('click', () => {
+        if (navigationGroupId === null) {
+          return;
+        }
+        jumpGroupFirstButton.disabled = true;
+        ensureGroupFirstFrame(navigationGroupId)
+          .then(frame => {
+            if (Number.isFinite(frame)) {
+              stopPlayback();
+              setFrame(Math.max(0, Math.round(frame)));
+            } else {
+              showInlineFeedback('初検知フレームが見つかりませんでした。', 'warning');
+            }
+          })
+          .finally(() => {
+            updateGroupNavigationButtons();
+          });
+      });
+    }
+
+    if (jumpGroupNextButton) {
+      jumpGroupNextButton.addEventListener('click', () => {
+        if (navigationGroupId === null) {
+          return;
+        }
+        jumpGroupNextButton.disabled = true;
+        requestGroupSeek(navigationGroupId, currentFrame)
+          .then(data => {
+            const rawNext = data ? data.next_frame : null;
+            const numeric = typeof rawNext === 'number' ? rawNext : Number(rawNext);
+            if (Number.isFinite(numeric)) {
+              delete jumpGroupNextButton.dataset.noNext;
+              stopPlayback();
+              setFrame(Math.max(0, Math.round(numeric)));
+            } else {
+              jumpGroupNextButton.dataset.noNext = '1';
+              showInlineFeedback('これより後の検知はありません。', 'warning');
+            }
+          })
+          .catch(err => {
+            console.error('Failed to fetch next detection frame', err);
+            showInlineFeedback(err && err.message ? err.message : '次の検知フレームを取得できませんでした。', 'warning');
+          })
+          .finally(() => {
+            updateGroupNavigationButtons();
+          });
+      });
+    }
+
+    function setPlaying(state) {
+      playToggle.dataset.playing = state ? '1' : '0';
+      playToggle.textContent = state ? '⏸ 停止' : '▶ 再生';
+    }
+
+    function updateSaveState() {
+      const enabled = selectedOvertaker !== null && selectedOvertaken !== null;
+      saveButton.disabled = !enabled;
+      if (scalePreviewButton) {
+        scalePreviewButton.disabled = !(scalePreviewUrl && enabled);
+      }
+    }
+
+    function updateSaveNotice(messages) {
+      if (!saveNotice) {
+        return;
+      }
+      if (!messages || !messages.length) {
+        saveNotice.classList.add('d-none');
+        saveNotice.textContent = '';
+        return;
+      }
+      const lines = messages
+        .map(msg => (typeof msg === 'string' ? msg.trim() : ''))
+        .filter(text => text.length > 0);
+      if (!lines.length) {
+        saveNotice.classList.add('d-none');
+        saveNotice.textContent = '';
+        return;
+      }
+      saveNotice.textContent = lines.join(' / ');
+      saveNotice.classList.remove('d-none');
+    }
+
+    function clearMessages() {
+      saveMessage.classList.add('d-none');
+      updateSaveNotice([]);
+      saveError.classList.add('d-none');
+      if (inlineError) {
+        inlineError.textContent = '';
+        inlineError.className = 'alert alert-danger small mt-3 d-none';
+      }
+      resetProcessingIndicator();
+    }
+
+    function showInlineFeedback(message, variant = 'danger') {
+      if (!inlineError) {
+        return;
+      }
+      inlineError.textContent = message || '';
+      inlineError.className = `alert alert-${variant} small mt-3`;
+    }
+
+    function setProcessingIndicatorState(state = 'idle', message) {
+      if (processingIndicator) {
+        processingIndicator.dataset.state = state;
+      }
+      if (processingLabel) {
+        processingLabel.textContent = message || '';
+        processingLabel.classList.toggle('text-danger', state === 'error');
+        processingLabel.classList.toggle('text-muted', state !== 'error');
+      }
+    }
+
+    function resetProcessingIndicator() {
+      setProcessingIndicatorState('idle', '保存処理待機中');
+    }
+
+    resetProcessingIndicator();
+
+    function stopPrefetchPolling() {
+      if (prefetchPollTimer !== null) {
+        window.clearTimeout(prefetchPollTimer);
+        prefetchPollTimer = null;
+      }
+    }
+
+    function updatePrefetchStatusDisplay(data) {
+      if (!prefetchStatus) {
+        return;
+      }
+      if (!data) {
+        prefetchStatus.textContent = '';
+        prefetchStatus.className = 'small text-muted mt-2 d-none';
+        return;
+      }
+      const totalFrames = data.frame_count ?? (metadata ? metadata.frame_count : null);
+      const prefetched = data.prefetched_frames ?? data.cached_frames ?? 0;
+      let text;
+      let variant = 'text-muted';
+      if (data.error) {
+        text = `事前生成エラー: ${data.error}`;
+        variant = 'text-danger';
+      } else if (data.prefetching) {
+        text = totalFrames
+          ? `事前生成中: ${prefetched} / ${totalFrames} フレーム`
+          : `事前生成中: ${prefetched} フレーム`;
+        variant = 'text-primary';
+      } else if (data.prefetch_completed) {
+        text = totalFrames
+          ? `事前生成完了: ${prefetched} / ${totalFrames} フレーム`
+          : '事前生成が完了しました。';
+        variant = 'text-success';
+      } else if (prefetched) {
+        text = totalFrames
+          ? `キャッシュ済み: ${prefetched} / ${totalFrames} フレーム`
+          : `キャッシュ済み: ${prefetched} フレーム`;
+      } else {
+        text = '事前生成は未実行です。';
+      }
+      prefetchStatus.textContent = text;
+      prefetchStatus.className = `small mt-2 ${variant}`;
+    }
+
+    function fetchPrefetchStatus(repeat = false) {
+      if (!prefetchUrl) {
+        return;
+      }
+      fetch(prefetchUrl, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      })
+        .then(resp => (resp.ok ? resp.json() : Promise.reject(resp)))
+        .then(data => {
+          updatePrefetchStatusDisplay(data);
+          if (data && data.prefetching && repeat) {
+            stopPrefetchPolling();
+            prefetchPollTimer = window.setTimeout(() => fetchPrefetchStatus(true), 1500);
+          } else if (prefetchButton) {
+            prefetchButton.disabled = false;
+            if (data && (data.prefetched_frames || data.cached_frames)) {
+              prefetchButton.textContent = '再生成';
+            } else {
+              prefetchButton.textContent = prefetchDefaultLabel || '動画フレーム一括生成';
+            }
+          }
+        })
+        .catch(err => {
+          console.error('Failed to fetch prefetch status', err);
+          if (prefetchStatus) {
+            prefetchStatus.textContent = '事前生成状況を取得できませんでした。';
+            prefetchStatus.className = 'small text-danger mt-2';
+          }
+          if (prefetchButton) {
+            prefetchButton.disabled = false;
+            prefetchButton.textContent = prefetchDefaultLabel || '動画フレーム一括生成';
+          }
+        });
+    }
+
+    function formatDistance(dist) {
+      if (dist === null || dist === undefined) {
+        return '-';
+      }
+      const value = Number(dist);
+      if (Number.isNaN(value)) {
+        return '-';
+      }
+      return value.toFixed(2);
+    }
+
+    function normalizeLine(raw) {
+      if (!Array.isArray(raw)) {
+        return null;
+      }
+      const points = raw
+        .map(pt => Array.isArray(pt) && pt.length >= 2 ? [Number(pt[0]), Number(pt[1])] : null)
+        .filter(pt => pt && Number.isFinite(pt[0]) && Number.isFinite(pt[1]));
+      return points.length >= 2 ? points : null;
+    }
+
+    function getMeasurePoint(det) {
+      if (!det) {
+        return null;
+      }
+      const xCandidates = [
+        det.tire_measure_x,
+        det.measure_x,
+        det.manual_measure_x,
+        det.x2,
+      ];
+      const yCandidates = [
+        det.tire_measure_y,
+        det.measure_y,
+        det.manual_measure_y,
+        det.y2,
+      ];
+      let x = null;
+      for (const candidate of xCandidates) {
+        if (candidate === null || candidate === undefined) {
+          continue;
+        }
+        const value = Number(candidate);
+        if (Number.isFinite(value)) {
+          x = value;
+          break;
+        }
+      }
+      let y = null;
+      for (const candidate of yCandidates) {
+        if (candidate === null || candidate === undefined) {
+          continue;
+        }
+        const value = Number(candidate);
+        if (Number.isFinite(value)) {
+          y = value;
+          break;
+        }
+      }
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return null;
+      }
+      return { x, y };
+    }
+
+    function getHorizontalScale(det) {
+      if (!det) {
+        return null;
+      }
+      const candidates = [det.manual_x_pixels_per_meter, det.x_pixels_per_meter];
+      for (const candidate of candidates) {
+        if (candidate === null || candidate === undefined) {
+          continue;
+        }
+        const num = Number(candidate);
+        if (Number.isFinite(num) && num > 0) {
+          return num;
+        }
+      }
+      const x1 = Number(det.x1);
+      const x2 = Number(det.x2);
+      if (Number.isFinite(x1) && Number.isFinite(x2)) {
+        const width = Math.abs(x2 - x1);
+        if (width > 0) {
+          const fallback = width / 2.5;
+          if (fallback > 0) {
+            return fallback;
+          }
+        }
+      }
+      return null;
+    }
+
+    function getVerticalScale(det) {
+      if (!det) {
+        return null;
+      }
+      if (det.scale_pixels_per_meter === null || det.scale_pixels_per_meter === undefined) {
+        return null;
+      }
+      const value = Number(det.scale_pixels_per_meter);
+      if (Number.isFinite(value) && value > 0) {
+        return value;
+      }
+      return null;
+    }
+
+    function horizontalDistanceToLine(point, line) {
+      if (!Array.isArray(line) || line.length < 2) {
+        return Number.POSITIVE_INFINITY;
+      }
+      let best = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < line.length - 1; i += 1) {
+        const current = line[i];
+        const next = line[i + 1];
+        if (!current || !next) {
+          continue;
+        }
+        const x1 = Number(current[0]);
+        const y1 = Number(current[1]);
+        const x2 = Number(next[0]);
+        const y2 = Number(next[1]);
+        if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) {
+          continue;
+        }
+        const yLow = Math.min(y1, y2);
+        const yHigh = Math.max(y1, y2);
+        if (point.y < yLow || point.y > yHigh) {
+          continue;
+        }
+        if (y2 === y1) {
+          continue;
+        }
+        const xLine = x2 === x1 ? x1 : x1 + ((point.y - y1) * (x2 - x1)) / (y2 - y1);
+        const dist = Math.abs(point.x - xLine);
+        if (dist < best) {
+          best = dist;
+        }
+      }
+      return best;
+    }
+
+    function euclidDistanceToPolyline(point, line) {
+      if (!Array.isArray(line) || line.length < 2) {
+        return Number.POSITIVE_INFINITY;
+      }
+      let best = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < line.length - 1; i += 1) {
+        const current = line[i];
+        const next = line[i + 1];
+        if (!current || !next) {
+          continue;
+        }
+        const x1 = Number(current[0]);
+        const y1 = Number(current[1]);
+        const x2 = Number(next[0]);
+        const y2 = Number(next[1]);
+        if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) {
+          continue;
+        }
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const denom = dx * dx + dy * dy;
+        let dist;
+        if (denom <= 0) {
+          dist = Math.hypot(point.x - x1, point.y - y1);
+        } else {
+          let t = ((point.x - x1) * dx + (point.y - y1) * dy) / denom;
+          t = Math.max(0, Math.min(1, t));
+          const projX = x1 + t * dx;
+          const projY = y1 + t * dy;
+          dist = Math.hypot(point.x - projX, point.y - projY);
+        }
+        if (dist < best) {
+          best = dist;
+        }
+      }
+      return best;
+    }
+
+    function computeLaneDistanceForDetection(det) {
+      const point = getMeasurePoint(det);
+      if (!point || (!leftWhiteLine && !rightWhiteLine)) {
+        return { distance_px: null, distance_m: null };
+      }
+      const candidates = [];
+      if (leftWhiteLine) {
+        candidates.push(horizontalDistanceToLine(point, leftWhiteLine));
+      }
+      if (rightWhiteLine) {
+        candidates.push(horizontalDistanceToLine(point, rightWhiteLine));
+      }
+      const finite = candidates.filter(value => Number.isFinite(value));
+      if (!finite.length) {
+        if (leftWhiteLine) {
+          finite.push(euclidDistanceToPolyline(point, leftWhiteLine));
+        }
+        if (rightWhiteLine) {
+          finite.push(euclidDistanceToPolyline(point, rightWhiteLine));
+        }
+      }
+      if (!finite.length) {
+        return { distance_px: null, distance_m: null };
+      }
+      const distancePx = Math.min(...finite);
+      if (!Number.isFinite(distancePx)) {
+        return { distance_px: null, distance_m: null };
+      }
+      const xScale = getHorizontalScale(det);
+      const distanceM = xScale ? distancePx / xScale : null;
+      return { distance_px: distancePx, distance_m: Number.isFinite(distanceM) ? distanceM : null };
+    }
+
+    function computeClearanceBetween(detA, detB) {
+      const pointA = getMeasurePoint(detA);
+      const pointB = getMeasurePoint(detB);
+      if (!pointA || !pointB) {
+        return null;
+      }
+      const dx = pointA.x - pointB.x;
+      const dy = pointA.y - pointB.y;
+      const distancePx = Math.hypot(dx, dy);
+      const xScales = [getHorizontalScale(detA), getHorizontalScale(detB)].filter(value => Number.isFinite(value) && value > 0);
+      const yScales = [getVerticalScale(detA), getVerticalScale(detB)].filter(value => Number.isFinite(value) && value > 0);
+
+      let distanceM = null;
+      if (xScales.length && yScales.length) {
+        const avgX = xScales.reduce((acc, cur) => acc + cur, 0) / xScales.length;
+        const avgY = yScales.reduce((acc, cur) => acc + cur, 0) / yScales.length;
+        distanceM = Math.hypot(dx / avgX, dy / avgY);
+      } else if (xScales.length) {
+        const avgX = xScales.reduce((acc, cur) => acc + cur, 0) / xScales.length;
+        distanceM = Math.abs(dx) / avgX;
+      } else if (yScales.length) {
+        const avgY = yScales.reduce((acc, cur) => acc + cur, 0) / yScales.length;
+        distanceM = Math.abs(dy) / avgY;
+      }
+
+      const distanceCm = typeof distanceM === 'number' ? distanceM * 100 : null;
+      return {
+        distance_px: distancePx,
+        distance_m: Number.isFinite(distanceM) ? distanceM : null,
+        distance_cm: Number.isFinite(distanceCm) ? distanceCm : null,
+      };
+    }
+
+    function formatLaneDisplay(result) {
+      if (!result) {
+        return '-';
+      }
+      if (Number.isFinite(result.distance_m)) {
+        return Number(result.distance_m).toFixed(2) + ' m';
+      }
+      if (Number.isFinite(result.distance_px)) {
+        return Number(result.distance_px).toFixed(0) + ' px';
+      }
+      return '-';
+    }
+
+    function formatClearance(event) {
+      if (event.clearance_distance_cm !== null && event.clearance_distance_cm !== undefined) {
+        const cm = Number(event.clearance_distance_cm);
+        if (!Number.isNaN(cm)) {
+          return cm.toFixed(0) + ' cm';
+        }
+      }
+      if (event.clearance_distance_m !== null && event.clearance_distance_m !== undefined) {
+        const m = Number(event.clearance_distance_m);
+        if (!Number.isNaN(m)) {
+          return m.toFixed(2) + ' m';
+        }
+      }
+      return '-';
+    }
+
+    function formatNumber(value, digits) {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return null;
+      }
+      return num.toFixed(digits);
+    }
+
+    function formatTrack(trackId) {
+      if (trackId === null || trackId === undefined) {
+        return 'Track -';
+      }
+      const num = Number(trackId);
+      if (!Number.isFinite(num)) {
+        return 'Track -';
+      }
+      return 'Track ' + Math.trunc(num);
+    }
+
+    function formatMeasurement(x, y) {
+      const xText = formatNumber(x, 1);
+      const yText = formatNumber(y, 1);
+      if (xText === null && yText === null) {
+        return 'XY -';
+      }
+      const displayX = xText !== null ? xText : '-';
+      const displayY = yText !== null ? yText : '-';
+      return `XY ${displayX}, ${displayY}`;
+    }
+
+    function formatLaneComponent(distanceM, distancePx) {
+      const mText = formatNumber(distanceM, 2);
+      if (mText !== null) {
+        return `${mText} m`;
+      }
+      const pxText = formatNumber(distancePx, 0);
+      if (pxText !== null) {
+        return `${pxText} px`;
+      }
+      return '-';
+    }
+
+    function formatRatio(value) {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      const numeric = Number(value);
+      if (Number.isNaN(numeric)) {
+        return null;
+      }
+      return numeric.toFixed(1);
+    }
+
+    function formatLaneCell(distanceM, distancePx, leftM, leftPx, rightM, rightPx, ratio) {
+      const main = formatLaneComponent(distanceM, distancePx);
+      const left = formatLaneComponent(leftM, leftPx);
+      const right = formatLaneComponent(rightM, rightPx);
+      const ratioText = formatRatio(ratio);
+      const ratioHtml = ratioText ? `<span class="text-muted small ms-2">比率 ${ratioText}%</span>` : '';
+      return `<div>${main}${ratioHtml}</div><div class="text-muted small">L: ${left} / R: ${right}</div>`;
+    }
+
+    function formatSpeed(value) {
+      if (value === null || value === undefined) {
+        return '-';
+      }
+      const num = Number(value);
+      return Number.isNaN(num) ? '-' : num.toFixed(1) + ' km/h';
+    }
+
+    function formatPixelSpeed(value) {
+      if (value === null || value === undefined) {
+        return '-';
+      }
+      const num = Number(value);
+      return Number.isNaN(num) ? '-' : num.toFixed(1) + ' px/s';
+    }
+
+    function formatPixelSpeeds(pxPerSecond, pxPerFrame) {
+      const elements = [];
+      elements.push(`<div>${formatPixelSpeed(pxPerSecond)}</div>`);
+      if (pxPerFrame !== null && pxPerFrame !== undefined) {
+        const numeric = Number(pxPerFrame);
+        if (!Number.isNaN(numeric)) {
+          elements.push(`<div class="text-muted small">${numeric.toFixed(1)} px/f</div>`);
+        }
+      }
+      return elements.join('');
+    }
+
+    function formatBbox(x1, y1, x2, y2) {
+      const coords = [x1, y1, x2, y2].map(value => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric.toFixed(1) : null;
+      });
+      if (coords.every(value => value === null)) {
+        return '-';
+      }
+      const [sx1, sy1, sx2, sy2] = coords.map(value => value ?? '-');
+      return `<div class="text-muted small">(${sx1}, ${sy1}) → (${sx2}, ${sy2})</div>`;
+    }
+
+    function formatTime(seconds) {
+      if (seconds === null || seconds === undefined) {
+        return '-';
+      }
+      const num = Number(seconds);
+      if (!Number.isFinite(num)) {
+        return '-';
+      }
+      const minutes = Math.floor(num / 60);
+      const remain = num - minutes * 60;
+      return minutes.toString().padStart(2, '0') + ':' + remain.toFixed(2).padStart(5, '0');
+    }
+
+    function formatOrientation(direction) {
+      if (direction === null || direction === undefined) {
+        return '';
+      }
+      const upper = String(direction).trim().toUpperCase();
+      if (!upper) {
+        return '';
+      }
+      if (upper === 'F') {
+        return '前向き';
+      }
+      if (upper === 'B') {
+        return '後ろ向き';
+      }
+      if (upper === 'L') {
+        return '左向き';
+      }
+      if (upper === 'R') {
+        return '右向き';
+      }
+      return '';
+    }
+
+    function formatContextSpeeds(kmPerHour, pxPerSecond, pxPerFrame) {
+      const pieces = [];
+      if (kmPerHour !== null && kmPerHour !== undefined) {
+        const numeric = Number(kmPerHour);
+        if (!Number.isNaN(numeric)) {
+          pieces.push(`${numeric.toFixed(1)} km/h`);
+        }
+      }
+      if (pxPerSecond !== null && pxPerSecond !== undefined) {
+        const numeric = Number(pxPerSecond);
+        if (!Number.isNaN(numeric)) {
+          pieces.push(`<span class="text-muted small">${numeric.toFixed(1)} px/s</span>`);
+        }
+      }
+      if (pxPerFrame !== null && pxPerFrame !== undefined) {
+        const numeric = Number(pxPerFrame);
+        if (!Number.isNaN(numeric)) {
+          pieces.push(`<span class="text-muted small">${numeric.toFixed(1)} px/f</span>`);
+        }
+      }
+      if (!pieces.length) {
+        return '-';
+      }
+      return pieces.join('<br>');
+    }
+
+    function renderContextTable(events) {
+      if (!contextBody) {
+        return;
+      }
+      const contexts = [];
+      if (Array.isArray(events)) {
+        events.forEach(event => {
+          const frames = Array.isArray(event.context_frames) ? event.context_frames : [];
+          frames.forEach(entry => {
+            contexts.push({ event, entry });
+          });
+        });
+      }
+      if (!contexts.length) {
+        contextBody.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-3">追い越し側/追い越され側グループのコンテキストデータがまだ登録されていません。</td></tr>';
+        return;
+      }
+      const rows = contexts.map(({ event, entry }) => {
+        const clearanceParts = [];
+        if (entry.clearance_distance_cm !== null && entry.clearance_distance_cm !== undefined) {
+          const cm = Number(entry.clearance_distance_cm);
+          if (!Number.isNaN(cm)) {
+            clearanceParts.push(`${cm.toFixed(0)} cm`);
+          }
+        }
+        if (entry.clearance_distance_m !== null && entry.clearance_distance_m !== undefined) {
+          const meters = Number(entry.clearance_distance_m);
+          if (!Number.isNaN(meters)) {
+            clearanceParts.push(`<span class="text-muted small">${meters.toFixed(2)} m</span>`);
+          }
+        }
+        if (entry.clearance_distance_px !== null && entry.clearance_distance_px !== undefined) {
+          const px = Number(entry.clearance_distance_px);
+          if (!Number.isNaN(px)) {
+            clearanceParts.push(`<span class="text-muted small">${px.toFixed(0)} px</span>`);
+          }
+        }
+        if (entry.clearance_distance_px_ratio !== null && entry.clearance_distance_px_ratio !== undefined) {
+          const ratio = Number(entry.clearance_distance_px_ratio);
+          if (!Number.isNaN(ratio)) {
+            clearanceParts.push(`<span class="text-muted small">比率 ${ratio.toFixed(1)}%</span>`);
+          }
+        }
+        if (!clearanceParts.length) {
+          clearanceParts.push('-');
+        }
+        return `
+        <tr>
+          <td>${event.manual_event_id ?? '-'}</td>
+          <td>${event.run_id ?? '-'}</td>
+          <td>${event.video_filename || '-'}</td>
+          <td>${entry.offset_frames ?? '-'}</td>
+          <td>${entry.frame_num ?? '-'}</td>
+          <td>${formatTime(entry.video_time_s)}</td>
+          <td>
+            <div>Group ${entry.overtaker_group_id ?? '-'}</div>
+            <div class="text-muted small">${formatTrack(entry.overtaker_track_id)}</div>
+          </td>
+          <td>${formatBbox(entry.overtaker_x1, entry.overtaker_y1, entry.overtaker_x2, entry.overtaker_y2)}</td>
+          <td>${formatContextSpeeds(entry.overtaker_speed_km_h, entry.overtaker_pixel_speed, entry.overtaker_pixel_speed_frame)}</td>
+          <td>
+            <div>Group ${entry.overtaken_group_id ?? '-'}</div>
+            <div class="text-muted small">${formatTrack(entry.overtaken_track_id)}</div>
+          </td>
+          <td>${formatBbox(entry.overtaken_x1, entry.overtaken_y1, entry.overtaken_x2, entry.overtaken_y2)}</td>
+          <td>${formatContextSpeeds(entry.overtaken_speed_km_h, entry.overtaken_pixel_speed, entry.overtaken_pixel_speed_frame)}</td>
+          <td>${clearanceParts.join('<br>')}</td>
+        </tr>`;
+      });
+      contextBody.innerHTML = rows.join('');
+      const container = contextBody.closest('.manual-context-scroll');
+      if (container && !container.hasAttribute('data-preserve-scroll')) {
+        container.scrollTop = 0;
+      }
+    }
+
+    function normalizeGroupId(value) {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+
+    function isBicycleDetection(det) {
+      if (!det || !det.class_name) {
+        return false;
+      }
+      if (!(det.group_id || det.group_id === 0)) {
+        return false;
+      }
+      const name = String(det.class_name).toLowerCase();
+      if (!name) {
+        return false;
+      }
+      return bicycleClassSet.has(name);
+    }
+
+    function updateNextSelectionRole(lastRole = null) {
+      if (selectedOvertaker === null) {
+        nextSelectionRole = 'overtaker';
+        return;
+      }
+      if (selectedOvertaken === null) {
+        nextSelectionRole = 'overtaken';
+        return;
+      }
+      if (lastRole === 'overtaker') {
+        nextSelectionRole = 'overtaken';
+      } else if (lastRole === 'overtaken') {
+        nextSelectionRole = 'overtaker';
+      } else {
+        nextSelectionRole = nextSelectionRole === 'overtaker' ? 'overtaken' : 'overtaker';
+      }
+    }
+
+    function syncRadioSelection() {
+      if (!detectionList) {
+        return;
+      }
+      const overtakerRadios = detectionList.querySelectorAll('input[name="manualOvertaker"]');
+      overtakerRadios.forEach(radio => {
+        const value = normalizeGroupId(radio.value);
+        radio.checked = value !== null && value === selectedOvertaker;
+      });
+      const overtakenRadios = detectionList.querySelectorAll('input[name="manualOvertaken"]');
+      overtakenRadios.forEach(radio => {
+        const value = normalizeGroupId(radio.value);
+        radio.checked = value !== null && value === selectedOvertaken;
+      });
+    }
+
+    function selectRole(role, groupId) {
+      if (role !== 'overtaker' && role !== 'overtaken') {
+        return;
+      }
+      const normalized = normalizeGroupId(groupId);
+      if (normalized === null) {
+        return;
+      }
+      if (role === 'overtaker') {
+        if (selectedOvertaken === normalized) {
+          selectedOvertaken = null;
+        }
+        selectedOvertaker = normalized;
+      } else {
+        if (selectedOvertaker === normalized) {
+          selectedOvertaker = null;
+        }
+        selectedOvertaken = normalized;
+      }
+      lastSelectionRole = role;
+      updateNextSelectionRole(role);
+      setNavigationGroup(normalized);
+      syncRadioSelection();
+      updateSelectionPanel();
+    }
+
+    function getDetectionBounds(det) {
+      if (!det) {
+        return null;
+      }
+      const x1 = Number(det.x1 ?? det.left ?? det.x ?? 0);
+      const y1 = Number(det.y1 ?? det.top ?? det.y ?? 0);
+      const x2 = Number(det.x2 ?? det.x1 ?? x1);
+      const y2 = Number(det.y2 ?? det.y1 ?? y1);
+      if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) {
+        return null;
+      }
+      const minX = Math.min(x1, x2);
+      const maxX = Math.max(x1, x2);
+      const minY = Math.min(y1, y2);
+      const maxY = Math.max(y1, y2);
+      const area = Math.abs((maxX - minX) * (maxY - minY));
+      return { minX, maxX, minY, maxY, area: area || Number.POSITIVE_INFINITY };
+    }
+
+    function findDetectionAtPoint(videoX, videoY) {
+      if (!Array.isArray(detections) || !detections.length) {
+        return null;
+      }
+      let best = null;
+      let bestArea = Number.POSITIVE_INFINITY;
+      detections.forEach(det => {
+        const bounds = getDetectionBounds(det);
+        if (!bounds) {
+          return;
+        }
+        if (videoX < bounds.minX || videoX > bounds.maxX || videoY < bounds.minY || videoY > bounds.maxY) {
+          return;
+        }
+        if (bounds.area < bestArea) {
+          best = det;
+          bestArea = bounds.area;
+        }
+      });
+      return best;
+    }
+
+    function updateFirstBicycleButton() {
+      if (!jumpFirstBicycleButton) {
+        return;
+      }
+      if (Number.isFinite(firstBicycleFrame)) {
+        jumpFirstBicycleButton.disabled = false;
+        jumpFirstBicycleButton.title = `フレーム ${firstBicycleFrame} へ移動`;
+      } else {
+        jumpFirstBicycleButton.disabled = true;
+        jumpFirstBicycleButton.title = '自転車の検出がまだありません';
+      }
+    }
+
+    function updateOrientationSummary(counts) {
+      if (!orientationSummary) {
+        return;
+      }
+      if (!counts) {
+        orientationSummary.textContent = '';
+        orientationSummary.classList.add('d-none');
+        return;
+      }
+      const front = Math.max(0, Number(counts.front || 0));
+      const back = Math.max(0, Number(counts.back || 0));
+      const other = Math.max(0, Number(counts.other || 0));
+      const total = front + back + other;
+      if (total === 0) {
+        orientationSummary.textContent = 'この動画では自転車の向き情報が見つかりませんでした。';
+        orientationSummary.classList.remove('d-none');
+        return;
+      }
+      const segments = [`前向き: ${front}台`, `後ろ向き: ${back}台`];
+      if (other > 0) {
+        segments.push(`その他: ${other}台`);
+      }
+      orientationSummary.textContent = `この動画の自転車向き ｜ ${segments.join(' ／ ')}`;
+      orientationSummary.classList.remove('d-none');
+    }
+
+    function rememberScrollPosition() {
+      try {
+        sessionStorage.setItem(scrollStorageKey, String(window.scrollY || 0));
+      } catch (err) {
+        console.warn('Failed to store scroll position', err);
+      }
+    }
+
+    function requestGroupSeek(groupId, frame) {
+      if (!groupSeekUrl) {
+        return Promise.reject(new Error('グループ検索APIが利用できません。'));
+      }
+      const params = new URLSearchParams();
+      params.set('group_id', String(groupId));
+      if (Number.isFinite(frame)) {
+        params.set('frame', String(frame));
+      }
+      const url = `${groupSeekUrl}?${params.toString()}`;
+      return fetch(url, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      }).then(resp => {
+        if (resp.ok) {
+          return resp.json();
+        }
+        return resp.json().catch(() => ({})).then(data => {
+          const message = data && data.error ? data.error : 'グループ検出情報を取得できませんでした。';
+          const error = new Error(message);
+          error.response = resp;
+          error.payload = data;
+          throw error;
+        });
+      });
+    }
+
+    function ensureGroupFirstFrame(groupId) {
+      if (!Number.isFinite(groupId)) {
+        return Promise.resolve(null);
+      }
+      if (groupFirstFrameCache.has(groupId)) {
+        return Promise.resolve(groupFirstFrameCache.get(groupId));
+      }
+      return requestGroupSeek(groupId)
+        .then(data => {
+          const raw = data ? data.first_frame : null;
+          const numeric = typeof raw === 'number' ? raw : Number(raw);
+          const frame = Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : null;
+          groupFirstFrameCache.set(groupId, frame);
+          updateGroupNavigationButtons();
+          return frame;
+        })
+        .catch(err => {
+          console.error('Failed to fetch group first frame', err);
+          groupFirstFrameCache.set(groupId, null);
+          updateGroupNavigationButtons();
+          showInlineFeedback(err && err.message ? err.message : '初検知フレームを取得できませんでした。', 'warning');
+          return null;
+        });
+    }
+
+    function updateGroupNavigationButtons() {
+      if (!jumpGroupFirstButton || !jumpGroupNextButton) {
+        return;
+      }
+      if (navigationGroupId === null) {
+        jumpGroupFirstButton.disabled = true;
+        jumpGroupFirstButton.title = '自転車のグループを選択してください';
+        jumpGroupNextButton.disabled = true;
+        jumpGroupNextButton.title = '自転車のグループを選択してください';
+        return;
+      }
+      const det = detectionMap.get(navigationGroupId);
+      if (!det || !isBicycleDetection(det) || !groupSeekUrl) {
+        jumpGroupFirstButton.disabled = true;
+        jumpGroupFirstButton.title = '自転車の検出を選択してください';
+        jumpGroupNextButton.disabled = true;
+        jumpGroupNextButton.title = '自転車の検出を選択してください';
+        return;
+      }
+      const cached = groupFirstFrameCache.has(navigationGroupId)
+        ? groupFirstFrameCache.get(navigationGroupId)
+        : undefined;
+      if (cached === undefined) {
+        jumpGroupFirstButton.disabled = false;
+        jumpGroupFirstButton.title = '選択自転車の初検知へ移動';
+      } else if (cached === null) {
+        jumpGroupFirstButton.disabled = true;
+        jumpGroupFirstButton.title = '初検知フレームが見つかりませんでした';
+      } else {
+        jumpGroupFirstButton.disabled = false;
+        jumpGroupFirstButton.title = `フレーム ${cached} に移動`;
+      }
+      if (jumpGroupNextButton.dataset.noNext === '1') {
+        jumpGroupNextButton.disabled = true;
+        jumpGroupNextButton.title = 'これより後の検知はありません';
+      } else {
+        jumpGroupNextButton.disabled = false;
+        jumpGroupNextButton.title = '次の検知へ移動';
+      }
+    }
+
+    function setNavigationGroup(groupId) {
+      const normalized = normalizeGroupId(groupId);
+      if (normalized === null) {
+        navigationGroupId = null;
+        updateGroupNavigationButtons();
+        return;
+      }
+      navigationGroupId = normalized;
+      if (jumpGroupNextButton) {
+        delete jumpGroupNextButton.dataset.noNext;
+      }
+      ensureGroupFirstFrame(navigationGroupId);
+      updateGroupNavigationButtons();
+    }
+
+    function renderEventsTable(events) {
+      if (!eventsBody) {
+        return;
+      }
+      if (!events || !events.length) {
+        eventsBody.innerHTML = '<tr><td colspan="19" class="text-center text-muted py-3">まだ手動登録された追い越しイベントはありません。</td></tr>';
+        updateEventSummary(0);
+        renderContextTable([]);
+        updateDbStatusIndicator();
+        clearEventStatusLoading();
+        return;
+      }
+      latestEvents = events.slice();
+      const rows = events.map(event => {
+        const overtakerBbox = formatBbox(event.overtaker_x1, event.overtaker_y1, event.overtaker_x2, event.overtaker_y2);
+        const overtakenBbox = formatBbox(event.overtaken_x1, event.overtaken_y1, event.overtaken_x2, event.overtaken_y2);
+        const overtakerLane = formatLaneCell(
+          event.overtaker_line_distance_m,
+          event.overtaker_line_distance_px,
+          event.overtaker_left_line_distance_m,
+          event.overtaker_left_line_distance_px,
+          event.overtaker_right_line_distance_m,
+          event.overtaker_right_line_distance_px,
+          event.overtaker_line_distance_px_ratio,
+        );
+        const overtakenLane = formatLaneCell(
+          event.overtaken_line_distance_m,
+          event.overtaken_line_distance_px,
+          event.overtaken_left_line_distance_m,
+          event.overtaken_left_line_distance_px,
+          event.overtaken_right_line_distance_m,
+          event.overtaken_right_line_distance_px,
+          event.overtaken_line_distance_px_ratio,
+        );
+        const manualIdAttr = event.manual_event_id ?? '';
+        const runIdAttr = event.run_id ?? '';
+        return `
+        <tr data-event-id="${manualIdAttr}" data-run-id="${runIdAttr}">
+          <td>${event.manual_event_id}</td>
+          <td>${event.run_id}</td>
+          <td>${event.video_filename || '-'}</td>
+          <td>${event.frame_num}</td>
+          <td>${formatTime(event.video_time_s)}</td>
+          <td>
+            <div>Group ${event.overtaker_group_id}</div>
+            <div class="text-muted">${event.overtaker_class_name || '-'}</div>
+            <div class="text-muted small">${formatTrack(event.overtaker_track_id)}</div>
+            <div class="text-muted small">${formatMeasurement(event.overtaker_measure_x, event.overtaker_measure_y)}</div>
+          </td>
+          <td>${overtakerBbox}</td>
+          <td>${formatSpeed(event.overtaker_speed_km_h)}</td>
+          <td>${formatPixelSpeeds(event.overtaker_pixel_speed, event.overtaker_pixel_speed_frame)}</td>
+          <td>
+            <div>Group ${event.overtaken_group_id}</div>
+            <div class="text-muted">${event.overtaken_class_name || '-'}</div>
+            <div class="text-muted small">${formatTrack(event.overtaken_track_id)}</div>
+            <div class="text-muted small">${formatMeasurement(event.overtaken_measure_x, event.overtaken_measure_y)}</div>
+          </td>
+          <td>${overtakenBbox}</td>
+          <td>${formatSpeed(event.overtaken_speed_km_h)}</td>
+          <td>${formatPixelSpeeds(event.overtaken_pixel_speed, event.overtaken_pixel_speed_frame)}</td>
+          <td>${formatDistance(event.approach_distance_m)}</td>
+          <td>${formatClearance(event)}</td>
+          <td>${overtakerLane}</td>
+          <td>${overtakenLane}</td>
+          <td>${event.created_at || '-'}</td>
+          <td>${event.notes ? event.notes : '-'}</td>
+        </tr>`;
+      }).join('');
+      eventsBody.innerHTML = rows;
+      updateEventSummary(events.length);
+      renderContextTable(events);
+      applyPendingEventHighlight();
+      updateDbStatusIndicator();
+      clearEventStatusLoading();
+    }
+
+    function buildEventIdentityList(events) {
+      if (!Array.isArray(events)) {
+        return [];
+      }
+      return events.map(event => {
+        const manualId = Number(event && event.manual_event_id);
+        if (Number.isFinite(manualId) && manualId > 0) {
+          return `id:${manualId}`;
+        }
+        const runId = Number(event && event.run_id);
+        const frameNum = Number(event && event.frame_num);
+        const overtaker = Number(event && event.overtaker_group_id);
+        const overtaken = Number(event && event.overtaken_group_id);
+        return `fallback:${runId}:${frameNum}:${overtaker}:${overtaken}`;
+      }).sort();
+    }
+
+    function areEventListsEquivalent(current, fetched) {
+      const currentKeys = buildEventIdentityList(current);
+      const fetchedKeys = buildEventIdentityList(fetched);
+      if (currentKeys.length !== fetchedKeys.length) {
+        return false;
+      }
+      for (let idx = 0; idx < currentKeys.length; idx += 1) {
+        if (currentKeys[idx] !== fetchedKeys[idx]) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function describeDbEvent(event) {
+      if (!event || typeof event !== 'object') {
+        return '';
+      }
+      const parts = [];
+      const manualId = event.manual_event_id;
+      if (manualId !== undefined && manualId !== null && manualId !== '') {
+        parts.push(`ID ${manualId}`);
+      }
+      const frameNum = event.frame_num;
+      if (frameNum !== undefined && frameNum !== null && frameNum !== '') {
+        parts.push(`Frame ${frameNum}`);
+      }
+      const overtaker = event.overtaker_group_id;
+      const overtaken = event.overtaken_group_id;
+      if (overtaker !== undefined && overtaker !== null && overtaken !== undefined && overtaken !== null) {
+        parts.push(`G${overtaker} → G${overtaken}`);
+      }
+      const createdAt = event.created_at || event.latest_created_at;
+      if (createdAt) {
+        parts.push(createdAt);
+      }
+      return parts.join(' / ');
+    }
+
+    function showDbStatusError(message) {
+      dbStatusErrorMessage = message || 'DBステータスの取得に失敗しました。';
+      if (dbStatusBadge) {
+        dbStatusBadge.className = 'badge rounded-pill text-bg-danger';
+        dbStatusBadge.textContent = 'エラー';
+      }
+      if (dbStatusMessage) {
+        dbStatusMessage.textContent = dbStatusErrorMessage;
+      }
+      if (dbStatusDetails) {
+        dbStatusDetails.textContent = '';
+      }
+    }
+
+    function updateDbStatusIndicator() {
+      if (!dbStatusBadge || !dbStatusMessage) {
+        return;
+      }
+      if (dbStatusLoading) {
+        dbStatusBadge.className = 'badge rounded-pill text-bg-info';
+        dbStatusBadge.textContent = '照合中';
+        dbStatusMessage.textContent = 'DBと照合しています...';
+        if (dbStatusDetails) {
+          dbStatusDetails.textContent = '';
+        }
+        return;
+      }
+      if (dbStatusErrorMessage) {
+        dbStatusBadge.className = 'badge rounded-pill text-bg-danger';
+        dbStatusBadge.textContent = 'エラー';
+        dbStatusMessage.textContent = dbStatusErrorMessage;
+        if (dbStatusDetails) {
+          dbStatusDetails.textContent = '';
+        }
+        return;
+      }
+      if (!lastDbSummary) {
+        dbStatusBadge.className = 'badge rounded-pill text-bg-secondary';
+        dbStatusBadge.textContent = '未確認';
+        dbStatusMessage.textContent = 'DB照合はまだ実行されていません。';
+        if (dbStatusDetails) {
+          dbStatusDetails.textContent = '';
+        }
+        return;
+      }
+
+      const summary = lastDbSummary;
+      const dbCount = Number(summary.event_count || 0);
+      const latestId = Number(summary.latest_event_id);
+      const frontCount = Array.isArray(latestEvents) ? latestEvents.length : 0;
+      let frontLatestId = null;
+      if (frontCount > 0) {
+        const frontIdCandidate = Number(latestEvents[0] && latestEvents[0].manual_event_id);
+        if (Number.isFinite(frontIdCandidate) && frontIdCandidate > 0) {
+          frontLatestId = frontIdCandidate;
+        }
+      }
+
+      let badgeClass = 'text-bg-warning';
+      let badgeText = '差分あり';
+      let message = '';
+      if (dbCount === 0) {
+        badgeClass = 'text-bg-secondary';
+        badgeText = '登録なし';
+        message = 'DBには手動追い越しイベントが登録されていません。';
+      } else if (Number.isFinite(latestId) && latestId > 0 && Number.isFinite(frontLatestId)) {
+        if (latestId === frontLatestId) {
+          badgeClass = 'text-bg-success';
+          badgeText = '一致';
+          message = `DBと画面の最新イベントが一致しています（${dbCount}件）。`;
+        } else {
+          message = `DBの最新ID #${latestId} と画面の最新ID #${frontLatestId} が一致しません。`;
+        }
+      } else if (dbCount > 0 && frontCount === 0) {
+        message = `DBには ${dbCount} 件のイベントがありますが、画面に表示されていません。`;
+      } else {
+        badgeClass = 'text-bg-warning';
+        badgeText = '差分あり';
+        message = `DBには ${dbCount} 件のイベントがあります。最新データを再取得してください。`;
+      }
+
+      dbStatusBadge.className = `badge rounded-pill ${badgeClass}`;
+      dbStatusBadge.textContent = badgeText;
+      dbStatusMessage.textContent = message;
+
+      if (dbStatusDetails) {
+        const detailParts = [];
+        if (summary.run_id !== undefined && summary.run_id !== null) {
+          detailParts.push(`Run #${summary.run_id}`);
+        }
+        if (dbCount > 0) {
+          detailParts.push(`登録件数: ${dbCount}件`);
+        }
+        if (summary.latest_event) {
+          detailParts.push(describeDbEvent(summary.latest_event));
+        } else if (summary.latest_created_at) {
+          detailParts.push(`最終登録: ${summary.latest_created_at}`);
+        }
+        if (summary.snapshot_taken_at) {
+          try {
+            const snapshotDate = new Date(summary.snapshot_taken_at);
+            if (!Number.isNaN(snapshotDate.valueOf())) {
+              detailParts.push(`確認時刻: ${snapshotDate.toLocaleString()}`);
+            } else {
+              detailParts.push(`確認時刻: ${summary.snapshot_taken_at}`);
+            }
+          } catch (err) {
+            detailParts.push(`確認時刻: ${summary.snapshot_taken_at}`);
+          }
+        }
+        dbStatusDetails.textContent = detailParts.join(' / ');
+      }
+    }
+
+    function fetchDbStatus() {
+      if (!dbStatusUrl) {
+        return Promise.resolve(null);
+      }
+      if (dbStatusFetchPromise) {
+        return dbStatusFetchPromise;
+      }
+      dbStatusLoading = true;
+      dbStatusErrorMessage = null;
+      updateDbStatusIndicator();
+
+      try {
+        const url = new URL(dbStatusUrl, window.location.origin);
+        url.searchParams.set('_', Date.now().toString());
+        dbStatusFetchPromise = fetch(url.toString(), {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          cache: 'no-store',
+        })
+          .then(resp => resp.json().catch(() => ({})).then(body => ({ ok: resp.ok, body })))
+          .then(result => {
+            if (!result.ok) {
+              const errorMessage = result.body && result.body.error
+                ? result.body.error
+                : 'DBステータスの取得に失敗しました。';
+              throw new Error(errorMessage);
+            }
+            lastDbSummary = result.body || null;
+            dbStatusErrorMessage = null;
+            updateDbStatusIndicator();
+            maybeAutoRefreshEvents(lastDbSummary);
+            return lastDbSummary;
+          })
+          .catch(err => {
+            showDbStatusError(err && err.message ? err.message : 'DBステータスの取得に失敗しました。');
+            throw err;
+          })
+          .finally(() => {
+            dbStatusLoading = false;
+            dbStatusFetchPromise = null;
+            updateDbStatusIndicator();
+          });
+        return dbStatusFetchPromise;
+      } catch (err) {
+        dbStatusLoading = false;
+        dbStatusFetchPromise = null;
+        showDbStatusError(err && err.message ? err.message : 'DBステータスの取得に失敗しました。');
+        updateDbStatusIndicator();
+        return Promise.reject(err);
+      }
+    }
+
+    function requestEventsSnapshot() {
+      if (!eventsUrl) {
+        return Promise.resolve([]);
+      }
+      const url = new URL(eventsUrl, window.location.origin);
+      if (EVENTS_FETCH_LIMIT) {
+        url.searchParams.set('limit', String(EVENTS_FETCH_LIMIT));
+      }
+      url.searchParams.set('_', Date.now().toString());
+      return fetch(url.toString(), {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        cache: 'no-store',
+      })
+        .then(resp => (resp.ok ? resp.json() : resp.json().catch(() => ({})).then(body => {
+          const message = body && body.error ? body.error : 'イベント一覧の更新に失敗しました。';
+          const error = new Error(message);
+          error.response = resp;
+          error.payload = body;
+          throw error;
+        })))
+        .then(data => (data && Array.isArray(data.events)) ? data.events : []);
+    }
+
+    function ensureLatestEventsSynced(timeoutMs = 1500) {
+      if (!eventsUrl) {
+        return Promise.resolve({ synced: true, changed: false });
+      }
+      let settled = false;
+      const finalize = (result) => {
+        settled = true;
+        return result;
+      };
+      const snapshotPromise = requestEventsSnapshot()
+        .then(events => {
+          const changed = !areEventListsEquivalent(latestEvents, events);
+          if (changed) {
+            renderEventsTable(events);
+          }
+          return finalize({ synced: true, changed });
+        })
+        .catch(err => {
+          console.error('Failed to verify events before navigation', err);
+          return finalize({ synced: false, changed: false, error: err });
+        });
+
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        return snapshotPromise;
+      }
+
+      return Promise.race([
+        snapshotPromise,
+        new Promise(resolve => {
+          window.setTimeout(() => {
+            if (!settled) {
+              resolve({ synced: false, changed: false, timeout: true });
+            }
+          }, timeoutMs);
+        }),
+      ]);
+    }
+
+    function mergeRefreshRequest(current, next) {
+      if (!next) {
+        return current;
+      }
+      const normalizedHighlight = Number.isFinite(Number(next.highlightId))
+        ? Number(next.highlightId)
+        : null;
+      const normalizedSkip = Boolean(next.skipDbStatus);
+      if (!current) {
+        return { highlightId: normalizedHighlight, skipDbStatus: normalizedSkip };
+      }
+      const highlightId = normalizedHighlight !== null
+        ? normalizedHighlight
+        : (Number.isFinite(Number(current.highlightId)) ? Number(current.highlightId) : null);
+      const skipDbStatus = Boolean(current.skipDbStatus) && normalizedSkip;
+      return { highlightId, skipDbStatus };
+    }
+
+    function executeEventsRefresh({ highlightId = null, skipDbStatus = false }) {
+      if (highlightId !== null && Number.isFinite(Number(highlightId))) {
+        setPendingEventHighlight(Number(highlightId));
+      }
+      setEventStatusLoading('更新中...', 'refresh');
+      return requestEventsSnapshot()
+        .then(events => {
+          if (Array.isArray(events)) {
+            renderEventsTable(events);
+          }
+          return events;
+        })
+        .catch(err => {
+          console.error('Failed to refresh events', err);
+          clearEventStatusLoading('refresh', { keepCurrent: true });
+          if (eventStatusText) {
+            eventStatusText.textContent = 'イベント一覧の更新に失敗しました。';
+            eventStatusText.classList.add('text-danger');
+            eventStatusText.classList.remove('text-muted');
+          }
+          throw err;
+        })
+        .finally(() => {
+          if (skipDbStatus) {
+            updateDbStatusIndicator();
+          } else if (dbStatusUrl) {
+            fetchDbStatus().catch(() => { });
+          }
+          clearEventStatusLoading('refresh');
+        });
+    }
+
+    function processEventsRefreshQueue() {
+      if (eventsRefreshPromise) {
+        return eventsRefreshPromise;
+      }
+      if (!eventsRefreshQueued) {
+        return Promise.resolve(latestEvents);
+      }
+      const initialRequest = eventsRefreshQueued;
+      eventsRefreshQueued = null;
+      eventsRefreshPromise = (async () => {
+        let latestResult = null;
+        try {
+          let pending = initialRequest;
+          while (pending) {
+            latestResult = await executeEventsRefresh(pending);
+            pending = eventsRefreshQueued;
+            eventsRefreshQueued = null;
+          }
+          return latestResult;
+        } finally {
+          eventsRefreshPromise = null;
+        }
+      })();
+      return eventsRefreshPromise;
+    }
+
+    function refreshEventsFromServer(highlightEventId = null, options = {}) {
+      const highlightId = Number.isFinite(Number(highlightEventId))
+        ? Number(highlightEventId)
+        : null;
+      const skipDbStatus = Boolean(options && options.skipDbStatus);
+      eventsRefreshQueued = mergeRefreshRequest(eventsRefreshQueued, {
+        highlightId,
+        skipDbStatus,
+      });
+      return processEventsRefreshQueue();
+    }
+
+    function shouldAutoRefreshFromSummary(summary) {
+      if (!summary || typeof summary !== 'object' || !eventsUrl) {
+        return false;
+      }
+      const dbCount = Number(summary.event_count || 0);
+      const frontCount = Array.isArray(latestEvents) ? latestEvents.length : 0;
+      if (dbCount === 0 && frontCount === 0) {
+        return false;
+      }
+      if (dbCount !== frontCount) {
+        return true;
+      }
+      const latestDbId = Number(summary.latest_event_id);
+      if (!Number.isFinite(latestDbId) || latestDbId <= 0) {
+        return frontCount === 0 && dbCount > 0;
+      }
+      if (!frontCount) {
+        return true;
+      }
+      const frontLatestCandidate = Number(latestEvents[0] && latestEvents[0].manual_event_id);
+      if (!Number.isFinite(frontLatestCandidate) || frontLatestCandidate <= 0) {
+        return true;
+      }
+      return latestDbId !== frontLatestCandidate;
+    }
+
+    function maybeAutoRefreshEvents(summary) {
+      if (!shouldAutoRefreshFromSummary(summary)) {
+        return;
+      }
+      if (autoRefreshInFlight || eventsRefreshPromise) {
+        return;
+      }
+      autoRefreshInFlight = true;
+      refreshEventsFromServer(null, { skipDbStatus: true })
+        .catch(err => {
+          console.error('Failed to auto-refresh events after DB check', err);
+        })
+        .finally(() => {
+          autoRefreshInFlight = false;
+          updateDbStatusIndicator();
+        });
+    }
+
+    function verifyEventSaved(eventId) {
+      const numeric = Number(eventId);
+      if (!verifyUrl || !Number.isFinite(numeric) || numeric <= 0) {
+        return Promise.resolve(null);
+      }
+      try {
+        const url = new URL(verifyUrl, window.location.origin);
+        url.searchParams.set('event_id', String(numeric));
+        url.searchParams.set('_', Date.now().toString());
+        return fetch(url.toString(), {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          cache: 'no-store',
+        })
+          .then(resp => resp.json().catch(() => ({})).then(body => ({ ok: resp.ok, body })))
+          .then(result => {
+            if (!result.ok) {
+              const body = result.body || {};
+              const message = body.error || body.message || '保存確認に失敗しました。';
+              return { verified: false, message };
+            }
+            const body = result.body || {};
+            return {
+              verified: Boolean(body.verified),
+              event: body.event || null,
+              message: body.message || '',
+            };
+          })
+          .catch(err => ({
+            verified: false,
+            message: err && err.message ? err.message : '保存確認中に予期せぬエラーが発生しました。',
+          }));
+      } catch (err) {
+        return Promise.resolve({
+          verified: false,
+          message: err && err.message ? err.message : '保存確認用URLの生成に失敗しました。',
+        });
+      }
+    }
+
+    function mergeEventIntoLatest(event) {
+      if (!event || typeof event !== 'object') {
+        return false;
+      }
+      const clonedEvent = Object.assign({}, event);
+      const updated = latestEvents.slice();
+      const manualIdRaw = clonedEvent.manual_event_id;
+      const manualId = Number(manualIdRaw);
+      let replaced = false;
+      if (Number.isFinite(manualId)) {
+        const index = updated.findIndex(item => Number(item && item.manual_event_id) === manualId);
+        if (index >= 0) {
+          updated[index] = clonedEvent;
+          replaced = true;
+        }
+      }
+      if (!replaced) {
+        updated.unshift(clonedEvent);
+      }
+      const limit = EVENTS_FETCH_LIMIT;
+      const limited = limit && limit > 0 ? updated.slice(0, limit) : updated;
+      if (Number.isFinite(manualId) && manualId > 0) {
+        setPendingEventHighlight(manualId);
+      }
+      renderEventsTable(limited);
+      return true;
+    }
+
+    function drawLaneLine(line, color, scaleX, scaleY) {
+      if (!Array.isArray(line) || line.length < 2) {
+        return;
+      }
+      overlayCtx.save();
+      overlayCtx.beginPath();
+      let started = false;
+      for (const rawPoint of line) {
+        if (!Array.isArray(rawPoint) || rawPoint.length < 2) {
+          continue;
+        }
+        const px = Number(rawPoint[0]);
+        const py = Number(rawPoint[1]);
+        if (!Number.isFinite(px) || !Number.isFinite(py)) {
+          continue;
+        }
+        const sx = px * scaleX;
+        const sy = py * scaleY;
+        if (!started) {
+          overlayCtx.moveTo(sx, sy);
+          started = true;
+        } else {
+          overlayCtx.lineTo(sx, sy);
+        }
+      }
+      if (!started) {
+        overlayCtx.restore();
+        return;
+      }
+      overlayCtx.strokeStyle = color;
+      overlayCtx.lineWidth = 3;
+      overlayCtx.lineJoin = 'round';
+      overlayCtx.lineCap = 'round';
+      overlayCtx.stroke();
+      overlayCtx.restore();
+    }
+
+    function drawLaneLines(scaleX, scaleY) {
+      if (leftWhiteLine) {
+        drawLaneLine(leftWhiteLine, 'rgba(13, 110, 253, 0.85)', scaleX, scaleY);
+      }
+      if (rightWhiteLine) {
+        drawLaneLine(rightWhiteLine, 'rgba(255, 193, 7, 0.85)', scaleX, scaleY);
+      }
+    }
+
+    function drawMeasurePoint(det, baseColor, scaleX, scaleY, highlighted) {
+      const point = getMeasurePoint(det);
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        return;
+      }
+      const cx = point.x * scaleX;
+      const cy = point.y * scaleY;
+      const radius = highlighted ? 6 : 4;
+
+      overlayCtx.save();
+      overlayCtx.globalAlpha = highlighted ? 0.95 : 0.7;
+      overlayCtx.beginPath();
+      overlayCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+      overlayCtx.fillStyle = baseColor;
+      overlayCtx.fill();
+      overlayCtx.globalAlpha = 1;
+      overlayCtx.lineWidth = 2;
+      overlayCtx.strokeStyle = '#ffffff';
+      overlayCtx.stroke();
+
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(cx - radius - 2, cy);
+      overlayCtx.lineTo(cx + radius + 2, cy);
+      overlayCtx.moveTo(cx, cy - radius - 2);
+      overlayCtx.lineTo(cx, cy + radius + 2);
+      overlayCtx.strokeStyle = 'rgba(33, 37, 41, 0.65)';
+      overlayCtx.lineWidth = 1.2;
+      overlayCtx.stroke();
+      overlayCtx.restore();
+    }
+
+    function drawDetections() {
+      if (!metadata || !frameImage || !overlayCanvas) {
+        return;
+      }
+      const width = frameImage.naturalWidth || frameImage.width;
+      const height = frameImage.naturalHeight || frameImage.height;
+      overlayCanvas.width = width;
+      overlayCanvas.height = height;
+      overlayCanvas.style.width = frameImage.clientWidth + 'px';
+      overlayCanvas.style.height = frameImage.clientHeight + 'px';
+      overlayCtx.clearRect(0, 0, width, height);
+
+      const metaWidthRaw = Number(metadata.width);
+      const metaHeightRaw = Number(metadata.height);
+      const metaWidth = Number.isFinite(metaWidthRaw) && metaWidthRaw > 0 ? metaWidthRaw : width;
+      const metaHeight = Number.isFinite(metaHeightRaw) && metaHeightRaw > 0 ? metaHeightRaw : height;
+      const scaleX = width / metaWidth;
+      const scaleY = height / metaHeight;
+
+      drawLaneLines(scaleX, scaleY);
+
+      detections.forEach(det => {
+        const isOvertaker = det.group_id === selectedOvertaker;
+        const isOvertaken = det.group_id === selectedOvertaken;
+        const baseColor = isOvertaker ? '#198754' : isOvertaken ? '#dc3545' : '#0d6efd';
+        const strokeWidth = isOvertaker || isOvertaken ? 3 : 2;
+        const x1 = Number(det.x1 ?? 0);
+        const y1 = Number(det.y1 ?? 0);
+        const x2 = Number(det.x2 ?? det.x1 ?? 0);
+        const y2 = Number(det.y2 ?? det.y1 ?? 0);
+        const x = x1 * scaleX;
+        const y = y1 * scaleY;
+        const w = Math.max((x2 - x1) * scaleX, 1);
+        const h = Math.max((y2 - y1) * scaleY, 1);
+        overlayCtx.lineWidth = strokeWidth;
+        overlayCtx.strokeStyle = baseColor;
+        overlayCtx.strokeRect(x, y, w, h);
+        overlayCtx.fillStyle = baseColor;
+        overlayCtx.font = '14px sans-serif';
+        overlayCtx.fillText(`G${det.group_id}`, x + 4, y + 16);
+
+        drawMeasurePoint(det, baseColor, scaleX, scaleY, isOvertaker || isOvertaken);
+      });
+    }
+
+    function renderDetectionList() {
+      detectionMap = new Map();
+      detectionList.innerHTML = '';
+      if (!detections.length) {
+        detectionList.classList.add('d-none');
+        noDetectionAlert.classList.remove('d-none');
+        const firstAvailableFrame = Number.isFinite(firstDetectionFrame) ? firstDetectionFrame : null;
+        if (firstAvailableFrame !== null && currentFrame < firstAvailableFrame) {
+          noDetectionAlert.textContent = `このフレームには検出がありません。（検出はフレーム ${firstAvailableFrame} 以降で開始）`;
+        } else if (typeof detectionOffset === 'number' && detectionOffset > 0 && currentFrame < detectionOffset) {
+          noDetectionAlert.textContent = `このフレームには検出がありません。（検出はフレーム ${detectionOffset} 以降で開始）`;
+        } else {
+          noDetectionAlert.textContent = 'このフレームには検出がありません。';
+        }
+        updateNextSelectionRole();
+        syncRadioSelection();
+        updateSaveState();
+        navigationGroupId = null;
+        updateGroupNavigationButtons();
+        return;
+      }
+      detectionList.classList.remove('d-none');
+      noDetectionAlert.classList.add('d-none');
+
+      const fragment = document.createDocumentFragment();
+      detections.forEach(det => {
+        const normalizedGroup = normalizeGroupId(det.group_id);
+        if (normalizedGroup !== null) {
+          det.group_id = normalizedGroup;
+          detectionMap.set(normalizedGroup, det);
+        } else {
+          detectionMap.set(det.group_id, det);
+        }
+        const item = document.createElement('div');
+        item.className = 'list-group-item';
+        item.dataset.groupId = det.group_id;
+        const orientationLabel = formatOrientation(det.travel_direction);
+        const orientationLine = orientationLabel ? `<div class="text-muted">向き: ${orientationLabel}</div>` : '';
+        item.innerHTML = `
+        <div class="d-flex align-items-start gap-2">
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="manualOvertaker" id="manualOvertaker-${det.group_id}" value="${det.group_id}">
+            <label class="form-check-label" for="manualOvertaker-${det.group_id}">追い越し側</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="manualOvertaken" id="manualOvertaken-${det.group_id}" value="${det.group_id}">
+            <label class="form-check-label" for="manualOvertaken-${det.group_id}">追い越され側</label>
+          </div>
+          <div>
+            <div class="fw-semibold">Group ${det.group_id} <span class="text-muted">${det.class_name || '-'}</span></div>
+            <div class="text-muted">速度: ${formatSpeed(det.speed_km_h)}</div>
+            ${orientationLine}
+          </div>
+        </div>`;
+        const overtakerRadio = item.querySelector(`#manualOvertaker-${det.group_id}`);
+        const overtakenRadio = item.querySelector(`#manualOvertaken-${det.group_id}`);
+        overtakerRadio.addEventListener('change', () => {
+          if (overtakerRadio.checked) {
+            selectRole('overtaker', det.group_id);
+          }
+        });
+        overtakenRadio.addEventListener('change', () => {
+          if (overtakenRadio.checked) {
+            selectRole('overtaken', det.group_id);
+          }
+        });
+        item.addEventListener('click', event => {
+          if (event.target && event.target.closest('input')) {
+            return;
+          }
+          setNavigationGroup(det.group_id);
+        });
+        fragment.appendChild(item);
+      });
+      detectionList.appendChild(fragment);
+      syncRadioSelection();
+      updateSaveState();
+      if (navigationGroupId !== null && !detectionMap.has(navigationGroupId)) {
+        navigationGroupId = null;
+      }
+      if (navigationGroupId === null) {
+        if (selectedOvertaker !== null && detectionMap.has(selectedOvertaker)) {
+          navigationGroupId = selectedOvertaker;
+        } else if (selectedOvertaken !== null && detectionMap.has(selectedOvertaken)) {
+          navigationGroupId = selectedOvertaken;
+        }
+      }
+      updateGroupNavigationButtons();
+    }
+
+    function updateSelectionPanel() {
+      updateSaveState();
+      if (selectedOvertaker === null || selectedOvertaken === null) {
+        selectionSummary.classList.add('d-none');
+        drawDetections();
+        return;
+      }
+      const overtaker = detectionMap.get(selectedOvertaker);
+      const overtaken = detectionMap.get(selectedOvertaken);
+      let approach = null;
+      let clearance = null;
+      let clearanceText = '-';
+
+      if (overtaker && overtaker.approach_partner_group_id === selectedOvertaken) {
+        approach = overtaker.approach_distance_m;
+        clearance = overtaker.clearance_distance_m;
+        clearanceText = formatClearance(overtaker);
+      } else if (overtaken && overtaken.approach_partner_group_id === selectedOvertaker) {
+        approach = overtaken.approach_distance_m;
+        clearance = overtaken.clearance_distance_m;
+        clearanceText = formatClearance(overtaken);
+      }
+
+      let manualClearance = null;
+      if (overtaker && overtaken) {
+        manualClearance = computeClearanceBetween(overtaker, overtaken);
+        if (clearance === null && manualClearance && Number.isFinite(manualClearance.distance_m)) {
+          clearance = manualClearance.distance_m;
+          clearanceText = manualClearance.distance_m.toFixed(2) + ' m';
+        } else if (clearanceText === '-' && manualClearance) {
+          if (Number.isFinite(manualClearance.distance_cm)) {
+            clearanceText = manualClearance.distance_cm.toFixed(0) + ' cm';
+          } else if (Number.isFinite(manualClearance.distance_px)) {
+            clearanceText = manualClearance.distance_px.toFixed(0) + ' px';
+          }
+        }
+      }
+
+      const overtakerLane = computeLaneDistanceForDetection(overtaker);
+      const overtakenLane = computeLaneDistanceForDetection(overtaken);
+
+      const parts = [
+        `追い越し側: Group ${selectedOvertaker}`,
+        `追い越され側: Group ${selectedOvertaken}`,
+        `接近距離: ${formatDistance(approach)} m`,
+        `離隔距離: ${clearanceText}`,
+        `追い越し側白線距離: ${formatLaneDisplay(overtakerLane)}`,
+        `追い越され側白線距離: ${formatLaneDisplay(overtakenLane)}`,
+      ];
+      selectionSummary.textContent = parts.join(' ｜ ');
+      selectionSummary.classList.remove('d-none');
+      drawDetections();
+    }
+
+    function stopPlayback() {
+      if (animationId !== null) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      setPlaying(false);
+    }
+
+    function playLoop(timestamp) {
+      if (!metadata || playToggle.dataset.playing !== '1') {
+        animationId = null;
+        return;
+      }
+      const frameDuration = metadata.fps ? 1000 / metadata.fps : 1000 / 15;
+      if (!playLoop.lastTime) {
+        playLoop.lastTime = timestamp;
+      }
+      const elapsed = timestamp - playLoop.lastTime;
+      if (elapsed >= frameDuration) {
+        playLoop.lastTime = timestamp;
+        const nextFrame = currentFrame + 1;
+        if (nextFrame >= metadata.frame_count) {
+          stopPlayback();
+        } else {
+          setFrame(nextFrame);
+        }
+      }
+      animationId = requestAnimationFrame(playLoop);
+    }
+
+    function refreshFrameCounter() {
+      if (!metadata) {
+        frameCounter.textContent = '0 / 0';
+        return;
+      }
+      frameCounter.textContent = `${currentFrame} / ${metadata.frame_count - 1}`;
+    }
+
+    function updateFrameControls() {
+      frameInput.value = currentFrame;
+      frameRange.value = currentFrame;
+      refreshFrameCounter();
+    }
+
+    function setFrame(frame) {
+      if (!metadata) {
+        return;
+      }
+      const clamped = Math.max(0, Math.min(frame, metadata.frame_count - 1));
+      currentFrame = clamped;
+      if (jumpGroupNextButton) {
+        delete jumpGroupNextButton.dataset.noNext;
+      }
+      updateFrameControls();
+      loadFrame();
+    }
+
+    function loadFrame() {
+      clearMessages();
+      loader.classList.remove('d-none');
+      frameImage.classList.add('d-none');
+      selectedOvertaker = null;
+      selectedOvertaken = null;
+      lastSelectionRole = null;
+      nextSelectionRole = 'overtaker';
+      syncRadioSelection();
+      updateSaveState();
+      if (selectionSummary) {
+        selectionSummary.classList.add('d-none');
+        selectionSummary.textContent = '';
+      }
+      const requestId = ++frameRequestId;
+      const url = new URL(frameUrl, window.location.origin);
+      url.searchParams.set('frame', currentFrame);
+      if (metadata && metadata.width) {
+        const displayWidth = Math.min(metadata.width, 1280);
+        url.searchParams.set('width', displayWidth);
+      }
+      const img = new Image();
+      img.onload = () => {
+        if (requestId !== frameRequestId) {
+          return;
+        }
+        frameImage.src = img.src;
+        frameImage.classList.remove('d-none');
+        loader.classList.add('d-none');
+        drawDetections();
+      };
+      img.onerror = () => {
+        if (requestId !== frameRequestId) {
+          return;
+        }
+        loader.classList.add('d-none');
+        showInlineFeedback('フレームを読み込めませんでした。');
+      };
+      img.src = url.toString() + '&ts=' + Date.now();
+
+      fetch(`${detectionsUrl}?frame=${currentFrame}`)
+        .then(resp => resp.ok ? resp.json() : Promise.reject(resp))
+        .then(data => {
+          if (requestId !== frameRequestId) {
+            return;
+          }
+          detections = (data.detections || []).map(det => {
+            if (det && Object.prototype.hasOwnProperty.call(det, 'group_id')) {
+              const normalized = normalizeGroupId(det.group_id);
+              if (normalized !== null) {
+                det.group_id = normalized;
+              }
+            }
+            return det;
+          });
+          renderDetectionList();
+          updateSelectionPanel();
+        })
+        .catch(err => {
+          if (requestId !== frameRequestId) {
+            return;
+          }
+          console.error('Failed to load detections', err);
+          detections = [];
+          renderDetectionList();
+          updateSelectionPanel();
+          showInlineFeedback('検出データを取得できませんでした。');
+        });
+    }
+
+    function formatNumberIntl(value, options = {}) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return '-';
+      }
+      const { digits, maxDigits } = options;
+      const intlOptions = {};
+      if (typeof digits === 'number') {
+        intlOptions.minimumFractionDigits = digits;
+        intlOptions.maximumFractionDigits = digits;
+      } else if (typeof maxDigits === 'number') {
+        intlOptions.maximumFractionDigits = maxDigits;
+      }
+      return numeric.toLocaleString('ja-JP', intlOptions);
+    }
+
+    function resetScaleModal(state) {
+      if (!scaleModalEl) {
+        return;
+      }
+      if (scaleLoading) {
+        scaleLoading.classList.toggle('d-none', state !== 'loading');
+      }
+      if (scaleError) {
+        scaleError.classList.add('d-none');
+        scaleError.textContent = '';
+      }
+      if (scaleContent) {
+        scaleContent.classList.toggle('d-none', state !== 'content');
+      }
+      if (scaleDescription) {
+        scaleDescription.textContent = '';
+      }
+      if (scaleSegmentsList) {
+        scaleSegmentsList.innerHTML = '';
+      }
+      if (scaleDetailBody) {
+        scaleDetailBody.innerHTML = '';
+      }
+      if (scaleImageWrapper) {
+        scaleImageWrapper.classList.remove('d-none');
+      }
+      if (scaleImage) {
+        scaleImage.src = '';
+      }
+      if (scaleImageNote) {
+        scaleImageNote.textContent = '';
+      }
+      if (scaleFootnote) {
+        scaleFootnote.textContent = '';
+      }
+    }
+
+    function populateScaleModal(data) {
+      if (!scaleModalEl) {
+        return;
+      }
+      resetScaleModal('content');
+
+      if (scaleDescription) {
+        const parts = [];
+        if (data.run_id !== undefined && data.run_id !== null) {
+          parts.push(`Run ${data.run_id}`);
+        }
+        if (data.frame_num !== undefined && data.frame_num !== null) {
+          parts.push(`Frame ${data.frame_num}`);
+        }
+        if (data.video_filename) {
+          parts.push(data.video_filename);
+        }
+        scaleDescription.textContent = parts.join(' / ');
+      }
+
+      if (scaleSegmentsList) {
+        scaleSegmentsList.innerHTML = '';
+        const segments = Array.isArray(data.scale_segments) ? data.scale_segments : [];
+        if (segments.length) {
+          segments.forEach(segment => {
+            const li = document.createElement('li');
+            const yText = formatNumberIntl(segment.y, { maxDigits: 1 });
+            const pxText = formatNumberIntl(segment.lane_width_px, { maxDigits: 1 });
+            const cmPerPx = formatNumberIntl(segment.centimeters_per_pixel, { maxDigits: 2 });
+            const pieces = [];
+            pieces.push(`Y=${yText} px`);
+            if (pxText !== '-') {
+              pieces.push(`${pxText} px`);
+            }
+            if (cmPerPx !== '-') {
+              pieces.push(`${cmPerPx} cm/px`);
+            }
+            li.textContent = pieces.join(' : ');
+            scaleSegmentsList.appendChild(li);
+          });
+        } else {
+          const li = document.createElement('li');
+          li.textContent = 'Failed to retrieve lane scale information.';
+          scaleSegmentsList.appendChild(li);
+        }
+      }
+
+      if (scaleDetailBody) {
+        scaleDetailBody.innerHTML = '';
+        const details = Array.isArray(data.role_details) ? data.role_details : [];
+        if (details.length) {
+          details.forEach(detail => {
+            const row = document.createElement('tr');
+            const measureX = formatNumberIntl(detail.measure_x, { maxDigits: 1 });
+            const measureY = formatNumberIntl(detail.measure_y, { maxDigits: 1 });
+            const scaleInfo = detail.lane_scale || {};
+            const laneWidthPx = formatNumberIntl(scaleInfo.lane_width_px, { maxDigits: 1 });
+            const cmPerPx = formatNumberIntl(scaleInfo.centimeters_per_pixel, { maxDigits: 2 });
+            let scaleCell = '-';
+            if (laneWidthPx !== '-') {
+              scaleCell = `${laneWidthPx} px`;
+              if (cmPerPx !== '-') {
+                scaleCell += `<div class="text-muted small">${cmPerPx} cm/px</div>`;
+              }
+            }
+
+            const distPx = formatNumberIntl(detail.distance_px, { maxDigits: 1 });
+            const storedPx = formatNumberIntl(detail.stored_distance_px, { maxDigits: 1 });
+            let distancePxCell = distPx !== '-' ? `${distPx} px` : '-';
+            if (storedPx !== '-' && storedPx !== distPx) {
+              distancePxCell += `<div class="text-muted small">保存値 ${storedPx} px</div>`;
+            }
+
+            const distCm = formatNumberIntl(detail.distance_cm, { maxDigits: 0 });
+            const storedCm = formatNumberIntl(detail.stored_distance_cm, { maxDigits: 0 });
+            let distanceCmCell = distCm !== '-' ? `${distCm} cm` : '-';
+            if (storedCm !== '-' && storedCm !== distCm) {
+              distanceCmCell += `<div class="text-muted small">保存値 ${storedCm} cm</div>`;
+            }
+
+            row.innerHTML = `
+            <th scope="row">${detail.label || detail.role || '-'}</th>
+            <td>${measureX}, ${measureY}</td>
+            <td>${scaleCell}</td>
+            <td>${distancePxCell}</td>
+            <td>${distanceCmCell}</td>
+          `;
+            scaleDetailBody.appendChild(row);
+          });
+        } else {
+          const row = document.createElement('tr');
+          row.innerHTML = '<td colspan="5" class="text-center text-muted">No distance data available.</td>';
+          scaleDetailBody.appendChild(row);
+        }
+      }
+
+      if (scaleImageWrapper) {
+        if (data.image_url) {
+          const previewUrl = buildScaleImageUrl();
+          if (scaleImage) {
+            scaleImage.src = `${previewUrl}&t=${Date.now()}`;
+          }
+          scaleImageWrapper.classList.remove('d-none');
+          if (scaleImageNote) {
+            scaleImageNote.textContent = 'Reference image with lane scale markers.';
+          }
+        } else {
+          scaleImageWrapper.classList.add('d-none');
+          if (scaleImageNote) {
+            scaleImageNote.textContent = data.video_available === false
+              ? 'Video file not found; preview image cannot be generated.'
+              : 'Lane information is missing; preview image cannot be generated.';
+          }
+        }
+      }
+
+      if (scaleFootnote) {
+        const baseMeters = formatNumberIntl(data.lane_width_m, { maxDigits: 1 });
+        const profileNote = data.calibration_profile
+          ? `Profile: ${data.calibration_profile}`
+          : 'Profile not set';
+        const noticesText = Array.isArray(data.notices) && data.notices.length
+          ? `Note: ${data.notices.join(' / ')}`
+          : '';
+        const parts = [];
+        if (baseMeters !== '-') {
+          parts.push(`Using ${baseMeters} m lane width as the base conversion.`);
+        }
+        parts.push(profileNote);
+        if (noticesText) {
+          parts.push(noticesText);
+        }
+        scaleFootnote.textContent = parts.join(' ');
+      }
+    }
+
+    function showScaleError(message) {
+      if (!scaleModalEl) {
+        return;
+      }
+      resetScaleModal('loading');
+      if (scaleLoading) {
+        scaleLoading.classList.add('d-none');
+      }
+      if (scaleContent) {
+        scaleContent.classList.add('d-none');
+      }
+      if (scaleError) {
+        scaleError.textContent = message || 'Failed to load lane scale info.';
+        scaleError.classList.remove('d-none');
+      }
+    }
+
+    function buildScaleImageUrl() {
+      if (!scalePreviewImageBase || !currentScalePreviewParams) {
+        return '';
+      }
+      const url = new URL(scalePreviewImageBase, window.location.origin);
+      url.searchParams.set('frame', currentScalePreviewParams.frame);
+      url.searchParams.set('overtaker_group_id', currentScalePreviewParams.overtaker);
+      url.searchParams.set('overtaken_group_id', currentScalePreviewParams.overtaken);
+      return url.toString();
+    }
+
+    function fetchMetadata() {
+      stopPrefetchPolling();
+      if (prefetchStatus) {
+        updatePrefetchStatusDisplay(null);
+      }
+      if (prefetchButton) {
+        prefetchButton.disabled = true;
+        prefetchButton.textContent = prefetchDefaultLabel || '動画フレーム一括生成';
+      }
+      firstDetectionFrame = null;
+      firstBicycleFrame = null;
+      bicycleClassSet = new Set();
+      groupFirstFrameCache.clear();
+      navigationGroupId = null;
+      if (jumpGroupNextButton) {
+        delete jumpGroupNextButton.dataset.noNext;
+      }
+      updateGroupNavigationButtons();
+      updateFirstBicycleButton();
+      updateOrientationSummary(null);
+      fetch(metadataUrl)
+        .then(resp => resp.ok ? resp.json() : Promise.reject(resp))
+        .then(data => {
+          metadata = data;
+          const aliasList = Array.isArray(data.bicycle_class_aliases) ? data.bicycle_class_aliases : [];
+          bicycleClassSet = new Set(aliasList.map(alias => (typeof alias === 'string' ? alias.toLowerCase() : '')));
+          updateOrientationSummary(data.bicycle_orientation_counts || null);
+          leftWhiteLine = normalizeLine(data.left_white_line);
+          rightWhiteLine = normalizeLine(data.right_white_line);
+          detectionOffset = Number(data.detection_frame_offset || 0);
+          const rawFirstDetection = data.first_detection_frame;
+          const numericFirstDetection = typeof rawFirstDetection === 'number' ? rawFirstDetection : Number(rawFirstDetection);
+          if (Number.isFinite(numericFirstDetection)) {
+            firstDetectionFrame = Math.max(0, Math.round(numericFirstDetection));
+          } else {
+            firstDetectionFrame = null;
+          }
+          const firstFrameRaw = data.first_bicycle_frame;
+          const parsedFirst = typeof firstFrameRaw === 'number' ? firstFrameRaw : Number(firstFrameRaw);
+          if (Number.isFinite(parsedFirst)) {
+            firstBicycleFrame = Math.max(0, Math.round(parsedFirst));
+          } else {
+            firstBicycleFrame = null;
+          }
+          updateFirstBicycleButton();
+          currentFrame = 0;
+          frameInput.min = 0;
+          frameInput.max = Math.max(data.frame_count - 1, 0);
+          frameRange.min = 0;
+          frameRange.max = Math.max(data.frame_count - 1, 0);
+          frameRange.value = 0;
+          const bufferStatus = data.buffer_status || null;
+          if (prefetchStatus) {
+            if (bufferStatus) {
+              updatePrefetchStatusDisplay(bufferStatus);
+            } else {
+              updatePrefetchStatusDisplay(null);
+            }
+          }
+          if (prefetchButton) {
+            const isPrefetching = Boolean(bufferStatus && bufferStatus.prefetching);
+            prefetchButton.disabled = isPrefetching;
+            if (isPrefetching) {
+              prefetchButton.textContent = '生成中...';
+              fetchPrefetchStatus(true);
+            } else if (bufferStatus && (bufferStatus.prefetched_frames || bufferStatus.cached_frames)) {
+              prefetchButton.textContent = '再生成';
+            } else {
+              prefetchButton.textContent = prefetchDefaultLabel || '動画フレーム一括生成';
+            }
+          } else if (bufferStatus && bufferStatus.prefetching) {
+            fetchPrefetchStatus(true);
+          }
+          updateFrameControls();
+          loadFrame();
+        })
+        .catch(err => {
+          console.error('Failed to load metadata', err);
+          showInlineFeedback('動画メタデータを取得できませんでした。');
+          detectionOffset = 0;
+          firstDetectionFrame = null;
+          if (prefetchStatus) {
+            updatePrefetchStatusDisplay(null);
+          }
+          if (prefetchButton) {
+            prefetchButton.disabled = true;
+            prefetchButton.textContent = prefetchDefaultLabel || '動画フレーム一括生成';
+          }
+          firstBicycleFrame = null;
+          updateFirstBicycleButton();
+          updateOrientationSummary(null);
+        });
+    }
+
+    if (prefetchButton) {
+      prefetchButton.addEventListener('click', () => {
+        if (!prefetchUrl) {
+          return;
+        }
+        stopPrefetchPolling();
+        if (prefetchStatus) {
+          prefetchStatus.className = 'small text-primary mt-2';
+          prefetchStatus.textContent = '事前生成を開始しています...';
+        }
+        prefetchButton.disabled = true;
+        prefetchButton.textContent = '生成中...';
+        fetch(prefetchUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        })
+          .then(resp => (resp.ok ? resp.json() : Promise.reject(resp)))
+          .then(data => {
+            const payload = data && data.buffer_status ? data.buffer_status : data;
+            updatePrefetchStatusDisplay(payload);
+            prefetchButton.textContent = '再生成';
+            fetchPrefetchStatus(true);
+          })
+          .catch(err => {
+            console.error('Failed to start prefetch', err);
+            if (prefetchStatus) {
+              prefetchStatus.textContent = '事前生成を開始できませんでした。';
+              prefetchStatus.className = 'small text-danger mt-2';
+            }
+            prefetchButton.disabled = false;
+            prefetchButton.textContent = prefetchDefaultLabel || '動画フレーム一括生成';
+          });
+      });
+    }
+
+    frameInput.addEventListener('change', () => {
+      const value = Number(frameInput.value);
+      if (Number.isNaN(value)) {
+        return;
+      }
+      stopPlayback();
+      setFrame(value);
+    });
+
+    frameRange.addEventListener('input', () => {
+      stopPlayback();
+      setFrame(Number(frameRange.value));
+    });
+
+    document.querySelectorAll('[data-frame-step]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const step = Number(btn.getAttribute('data-frame-step')) || 0;
+        stopPlayback();
+        setFrame(currentFrame + step);
+      });
+    });
+
+    if (overlayCanvas) {
+      overlayCanvas.addEventListener('click', event => {
+        if (!metadata || !Array.isArray(detections) || !detections.length) {
+          return;
+        }
+        const rect = overlayCanvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+          return;
+        }
+        const scaleX = metadata.width / overlayCanvas.clientWidth;
+        const scaleY = metadata.height / overlayCanvas.clientHeight;
+        if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) {
+          return;
+        }
+        const videoX = (event.clientX - rect.left) * scaleX;
+        const videoY = (event.clientY - rect.top) * scaleY;
+        const target = findDetectionAtPoint(videoX, videoY);
+        if (!target) {
+          return;
+        }
+        const role = nextSelectionRole === 'overtaken' ? 'overtaken' : 'overtaker';
+        selectRole(role, target.group_id);
+      });
+    }
+
+    playToggle.addEventListener('click', () => {
+      if (!metadata) {
+        return;
+      }
+      const playing = playToggle.dataset.playing === '1';
+      if (playing) {
+        stopPlayback();
+        playLoop.lastTime = null;
+      } else {
+        setPlaying(true);
+        playLoop.lastTime = null;
+        animationId = requestAnimationFrame(playLoop);
+      }
+    });
+
+    saveButton.addEventListener('click', () => {
+      if (saveButton.disabled || selectedOvertaker === null || selectedOvertaken === null) {
+        return;
+      }
+      clearMessages();
+      setProcessingIndicatorState('processing', 'データ処理中...');
+      const payload = {
+        frame_num: currentFrame,
+        overtaker_group_id: selectedOvertaker,
+        overtaken_group_id: selectedOvertaken,
+        notes: notesInput.value.trim(),
+      };
+      saveButton.disabled = true;
+      fetch(eventsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+        .then(resp => resp.json().then(body => ({ ok: resp.ok, status: resp.status, body })))
+        .then(result => {
+          if (!result.ok) {
+            throw new Error(result.body && result.body.error ? result.body.error : '保存に失敗しました。');
+          }
+          const body = result.body || {};
+          setProcessingIndicatorState('success', 'データ処理完了');
+          const databaseVerified = Boolean(body.database_verified);
+          const displayVerifiedFlag = Boolean(body.display_verified);
+          const savedEvent = body.event && typeof body.event === 'object' ? body.event : null;
+          const eventIdFromBody = Number(body.event_id);
+          const eventIdFromEvent = (savedEvent && savedEvent.manual_event_id !== undefined)
+            ? Number(savedEvent.manual_event_id)
+            : Number.NaN;
+          const resolvedId = Number.isFinite(eventIdFromBody) && eventIdFromBody > 0 ? eventIdFromBody : eventIdFromEvent;
+          if (!databaseVerified) {
+            throw new Error('イベントは保存されましたが、DB検証に失敗しました。');
+          }
+          if (!Number.isFinite(resolvedId) || resolvedId <= 0 || !savedEvent) {
+            throw new Error('保存結果を取得できませんでした。');
+          }
+
+          const statusPieces = [];
+          if (databaseVerified) {
+            statusPieces.push('DB確認済み');
+          }
+          if (displayVerifiedFlag) {
+            statusPieces.push('一覧確認済み');
+          }
+          const statusLabel = statusPieces.length ? ` (${statusPieces.join(' / ')})` : '';
+          const baseMessage = `イベント #${resolvedId} を保存しました${statusLabel}。`;
+          if (verifyUrl) {
+            saveMessage.textContent = `${baseMessage}保存確認中...`;
+          } else {
+            saveMessage.textContent = baseMessage;
+          }
+          saveMessage.classList.remove('d-none');
+
+          const noticeMessages = [];
+          if (Array.isArray(body.notices)) {
+            body.notices.forEach(msg => {
+              if (typeof msg === 'string' && msg.trim().length) {
+                noticeMessages.push(msg.trim());
+              }
+            });
+          }
+          if (body.context_queued) {
+            const queueMessage = '追い越し側/追い越され側グループの全フレーム情報を後処理キューに登録しました。';
+            if (!noticeMessages.some(msg => msg === queueMessage)) {
+              noticeMessages.push(queueMessage);
+            }
+          }
+          if (!displayVerifiedFlag) {
+            noticeMessages.push('一覧への反映を確認するため再読み込みを実行します。');
+          }
+          updateSaveNotice(noticeMessages);
+
+          if (body.db_summary && typeof body.db_summary === 'object') {
+            lastDbSummary = body.db_summary;
+            dbStatusErrorMessage = null;
+            dbStatusLoading = false;
+            updateDbStatusIndicator();
+            maybeAutoRefreshEvents(lastDbSummary);
+          }
+
+          notesInput.value = '';
+
+          const highlightId = Number.isFinite(resolvedId) ? resolvedId : null;
+          const rowExists = () => highlightId !== null && isEventRowPresent(highlightId);
+
+          const refreshWithHighlight = () => {
+            if (highlightId !== null) {
+              setPendingEventHighlight(highlightId);
+              refreshEventsFromServer(highlightId);
+            } else {
+              refreshEventsFromServer();
+            }
+          };
+
+          const triggerRefresh = () => {
+            refreshWithHighlight();
+            if (highlightId === null) {
+              return;
+            }
+            window.setTimeout(() => {
+              if (!rowExists()) {
+                saveError.textContent = 'イベントは保存されましたが、一覧の更新を確認できませんでした。ページを再読み込みしてください。';
+                saveError.classList.remove('d-none');
+              }
+            }, 900);
+          };
+
+          const merged = mergeEventIntoLatest(savedEvent);
+          if (!merged) {
+            triggerRefresh();
+            return;
+          }
+
+          refreshWithHighlight();
+
+          const initialDelay = displayVerifiedFlag ? 150 : 250;
+          window.setTimeout(() => {
+            if (rowExists()) {
+              return;
+            }
+            triggerRefresh();
+          }, initialDelay);
+
+          const baseNotices = noticeMessages.slice();
+          verifyEventSaved(resolvedId)
+            .then(result => {
+              if (!result) {
+                saveMessage.textContent = baseMessage;
+                updateSaveNotice(baseNotices);
+                setProcessingIndicatorState('success', 'データ処理完了');
+                return;
+              }
+              if (result.verified) {
+                saveMessage.textContent = `${baseMessage}保存確認済み。`;
+                if (result.event && !rowExists()) {
+                  mergeEventIntoLatest(result.event);
+                }
+                updateSaveNotice(baseNotices);
+                setProcessingIndicatorState('success', 'データ処理完了');
+              } else {
+                const updatedNotices = baseNotices.slice();
+                if (result.message) {
+                  updatedNotices.push(result.message);
+                } else {
+                  updatedNotices.push('保存確認に失敗しました。時間をおいて再度ご確認ください。');
+                }
+                saveMessage.textContent = baseMessage;
+                updateSaveNotice(updatedNotices);
+                setProcessingIndicatorState('error', '保存確認で問題が発生しました');
+              }
+            })
+            .catch(err => {
+              const updatedNotices = baseNotices.slice();
+              const message = err && err.message ? err.message : '保存確認中にエラーが発生しました。';
+              updatedNotices.push(message);
+              saveMessage.textContent = baseMessage;
+              updateSaveNotice(updatedNotices);
+              setProcessingIndicatorState('error', '保存確認でエラーが発生しました');
+            });
+        })
+        .catch(err => {
+          console.error('Failed to save manual event', err);
+          saveError.textContent = err.message || '保存に失敗しました。';
+          saveError.classList.remove('d-none');
+          setProcessingIndicatorState('error', '保存処理に失敗しました');
+        })
+        .finally(() => {
+          saveButton.disabled = false;
+        });
+    });
+
+    if (scalePreviewButton) {
+      scalePreviewButton.addEventListener('click', () => {
+        if (scalePreviewButton.disabled || !scalePreviewUrl || selectedOvertaker === null || selectedOvertaken === null) {
+          return;
+        }
+        if (scaleModal) {
+          scaleModal.show();
+        }
+        resetScaleModal('loading');
+        const url = new URL(scalePreviewUrl, window.location.origin);
+        url.searchParams.set('frame', currentFrame);
+        url.searchParams.set('overtaker_group_id', selectedOvertaker);
+        url.searchParams.set('overtaken_group_id', selectedOvertaken);
+        currentScalePreviewParams = {
+          frame: currentFrame,
+          overtaker: selectedOvertaker,
+          overtaken: selectedOvertaken,
+        };
+        fetch(url.toString(), {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        })
+          .then(resp => resp.json().then(body => ({ ok: resp.ok, body })))
+          .then(result => {
+            if (!result.ok) {
+              throw new Error(result.body && result.body.error ? result.body.error : 'Failed to load lane scale info.');
+            }
+            populateScaleModal(result.body || {});
+          })
+          .catch(err => {
+            console.error('Failed to preview scale', err);
+            showScaleError(err && err.message ? err.message : 'Failed to load lane scale info.');
+          });
+      });
+    }
+
+    refreshEventsFromServer();
+    fetchMetadata();
+  })();
+</script>
+{% endif %}
+{% endblock %}

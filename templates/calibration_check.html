@@ -1,0 +1,1768 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 text-center">
+        <h2><i class="bi bi-rulers text-primary"></i> フォルダ別 キャリブレーション確認</h2>
+        <p class="text-muted">各フォルダに割り当てられているキャリブレーション設定を確認・変更できます。</p>
+    </div>
+</div>
+
+<!-- Batch Control Card -->
+<div class="card mb-3 shadow-sm">
+    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <h5 class="mb-0 text-primary"><i class="bi bi-filter-square"></i> フォルダグループ設定</h5>
+        <div>
+            <span id="filteredCountBadge" class="badge bg-secondary me-2">Loading...</span>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 align-items-center">
+            <!-- Parent Folder Select -->
+            <div class="col-md-5">
+                <label class="form-label small text-muted">対象グループ（親フォルダ/Run）</label>
+                <div class="input-group">
+                    <select class="form-select" id="parentFolderSelect" onchange="onParentChange()">
+                        <!-- Populated by JS -->
+                    </select>
+                    <div class="input-group-text bg-white">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="showAllFoldersToggle"
+                                onchange="onShowAllToggle()">
+                            <label class="form-check-label small" for="showAllFoldersToggle">全表示</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scoped Batch Apply -->
+            <div class="col-md-7 border-start ps-4">
+                <label class="form-label small text-muted mb-2">表示中のフォルダに一括適用</label>
+
+                <!-- Batch Settings Row -->
+                <div class="row g-2 mb-2">
+                    <!-- Year -->
+                    <div class="col-md-3">
+                        <label class="form-label small">年度</label>
+                        <input type="number" class="form-control form-control-sm" id="batchYearInput"
+                            placeholder="例: 2024" min="2000" max="2100">
+                    </div>
+
+                    <!-- Type -->
+                    <div class="col-md-3">
+                        <label class="form-label small">Type</label>
+                        <select class="form-select form-select-sm" id="batchTypeSelect">
+                            <option value="">-- 選択 --</option>
+                            <option value="non-widened">通常</option>
+                            <option value="widened">拡幅</option>
+                        </select>
+                    </div>
+
+                    <!-- Profile -->
+                    <div class="col-md-6">
+                        <label class="form-label small">Profile</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text"><i class="bi bi-layers-half"></i></span>
+                            <select class="form-select" id="batchProfileSelect">
+                                <option value="" selected>適用するプロファイルを選択...</option>
+                                <!-- Populated by JS -->
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Apply Button -->
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <button id="batchApplyBtn" class="btn btn-primary btn-sm w-100" type="button"
+                            onclick="applyBatchSettings()">
+                            <i class="bi bi-check2-all"></i> 選択した設定を一括適用
+                        </button>
+                    </div>
+                    <div class="col-md-6">
+                        <button id="reapplyBtn" class="btn btn-info btn-sm w-100" type="button"
+                            onclick="reapplyCalibrations()" title="既存のプロファイルを再適用してサムネイルを更新">
+                            <i class="bi bi-arrow-repeat"></i> キャリブレーション再適応
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-text small mt-1" id="batchApplyHelp">
+                    ※ 現在リストに表示されているフォルダすべてに、入力された設定が適用されます。空欄の項目はスキップされます。
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual Add & View Toggle -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                <label class="form-label mb-0 fw-bold small">オプション:</label>
+                <!-- File View Toggle Removed -->
+                <div class="form-check form-switch ms-2">
+                    <input class="form-check-input" type="checkbox" id="alwaysDisplayToggle"
+                        onchange="toggleAllPreviews()">
+                    <label class="form-check-label" for="alwaysDisplayToggle">画像プレビュー展開</label>
+                </div>
+
+                <!-- Sort by Subfolder Button -->
+                <button class="btn btn-sm btn-outline-primary ms-3" type="button" onclick="sortBySubfolder()"
+                    id="subfolderSortBtn">
+                    <i class="bi bi-sort-alpha-down" id="sortIcon"></i> サブフォルダ名でソート
+                </button>
+
+                <!-- Sort by Folder Group Button -->
+                <button class="btn btn-sm btn-outline-success ms-2" type="button" onclick="sortByFolderGroup()"
+                    id="folderGroupSortBtn">
+                    <i class="bi bi-folder" id="groupSortIcon"></i> フォルダグループでソート
+                </button>
+            </div>
+            <!-- Manual Add (Collapsible?) -->
+            <div>
+                <a href="/calibration" target="_blank" class="btn btn-sm btn-primary me-2">
+                    <i class="bi bi-file-earmark-plus"></i> 新規作成
+                </a>
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#manualAddCollapse">
+                    <i class="bi bi-plus-lg"></i> フォルダ手動追加
+                </button>
+            </div>
+        </div>
+
+        <div class="collapse mt-2" id="manualAddCollapse">
+            <div class="input-group input-group-sm">
+                <input type="text" class="form-control" id="manualFolderPath" placeholder="C:\Path\To\New_Folder"
+                    list="folderSuggestions">
+                <button class="btn btn-secondary" onclick="addManualFolder()">追加</button>
+            </div>
+            <datalist id="folderSuggestions"></datalist>
+        </div>
+    </div>
+</div>
+
+<!-- MAIN TABLE -->
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 30px;"></th>
+                    <th style="width: 50px;">Img</th>
+                    <th style="width: 20%;" id="nameHeader" onclick="toggleSort('name')" class="sortable"
+                        style="cursor: pointer;">
+                        フォルダ名 <i class="bi bi-sort-alpha-down"></i>
+                    </th>
+                    <th style="width: 25%;" onclick="toggleSort('path')" class="sortable" style="cursor: pointer;"
+                        title="クリックでサブフォルダ名順にソート">
+                        パス <i class="bi bi-sort-alpha-down"></i>
+                    </th>
+                    <th style="width: 80px;" onclick="toggleSort('year')" class="sortable" style="cursor: pointer;">
+                        年度 <i class="bi bi-sort-numeric-down"></i>
+                    </th>
+                    <th style="width: 80px;">Type</th>
+                    <th style="width: 200px;">Profile</th>
+                    <th style="width: 150px;">Status</th>
+                    <th class="text-center" style="width: 60px;" title="この行の設定を一括適用欄にコピー"><i
+                            class="bi bi-arrow-up-circle"></i></th>
+                    <th class="text-end" style="width: 100px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="folderList">
+                <tr>
+                    <td colspan="9" class="text-center py-4">
+                        <div class="spinner-border text-primary"></div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+</div>
+
+<!-- Verification Modal -->
+<div class="modal fade" id="verifyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">キャリブレーション確認 (Visual Verification)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center bg-dark">
+                <div id="verifyLoading" class="text-light py-5">
+                    <div class="spinner-border" role="status"></div>
+                    <p class="mt-2 text-white">サンプル動画からフレームを取得中...</p>
+                </div>
+                <div id="verifyError" class="alert alert-danger d-none"></div>
+
+                <div id="verifyContainer" class="position-relative d-inline-block d-none" style="max-width: 100%;">
+                    <img id="verifyImage" class="img-fluid" alt="Sample Frame" style="max-height: 70vh;">
+                    <svg id="calibrationOverlay" class="position-absolute top-0 start-0 w-100 h-100"
+                        style="pointer-events: none;"></svg>
+                </div>
+                <div class="mt-3 text-light text-start small border-top pt-2 border-secondary">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong>適用プロファイル:</strong> <span id="modalProfileName"
+                                    class="text-info">-</span></p>
+                            <p class="mb-0"><strong>参照ファイル:</strong> <span id="modalVideoPath"
+                                    class="text-monospace">-</span></p>
+                        </div>
+                        <div class="col-md-6 text-end text-muted">
+                            <small>※ フォルダ内の最初の動画ファイルからフレームを抽出しています。</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- File Preview Modal (for individual video files) -->
+<div class="modal fade" id="filePreviewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-camera-reels me-2"></i>キャリブレーションプレビュー</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body bg-dark text-center">
+                <div id="filePreviewLoading" class="py-5">
+                    <div class="spinner-border text-light" role="status"></div>
+                    <p class="mt-2 text-white-50">プレビュー画像を生成中...</p>
+                </div>
+                <div id="filePreviewError" class="alert alert-danger d-none"></div>
+                <div id="filePreviewContent" class="d-none">
+                    <img id="filePreviewImage" class="img-fluid rounded" style="max-height: 60vh;" alt="キャリブレーションプレビュー">
+                    <div class="mt-3 text-start">
+                        <table class="table table-sm table-dark table-borderless mb-0">
+                            <tr>
+                                <th class="text-white-50" style="width: 120px;">ファイル名</th>
+                                <td id="filePreviewFileName" class="text-info font-monospace">-</td>
+                            </tr>
+                            <tr>
+                                <th class="text-white-50">適用プロファイル</th>
+                                <td id="filePreviewProfile" class="text-success">-</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <strong class="me-auto" id="toastTitle">通知</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toastMessage"></div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block styles %}
+<style>
+    /* Batch apply button click feedback */
+    #batchApplyBtn:active:not(:disabled) {
+        transform: scale(0.95);
+        transition: transform 0.1s ease;
+    }
+
+    #batchApplyBtn {
+        transition: all 0.2s ease;
+    }
+
+    /* Table row hover effect for copy-to-batch feature */
+    #folderList tr {
+        transition: background-color 0.2s ease;
+    }
+
+    #folderList tr:hover {
+        background-color: rgba(13, 110, 253, 0.05);
+    }
+
+    /* Copy to batch button in table rows */
+    .copy-to-batch-btn {
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    }
+
+    tr:hover .copy-to-batch-btn {
+        opacity: 1;
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let availableProfiles = [];
+    let profileMetadata = {};
+    let folderData = []; // Track folders for db_profile fallback
+    let allFilesData = []; // Cache for all files
+    let currentDisplayedItems = []; // Currently displayed items (after filtering and sorting)
+    const API_BASE = '/api/calibration_check';
+
+    // View state variables
+    let isShowAllFolders = false;
+    let isFileView = false;
+    let selectedParent = null;
+    let parentGroups = new Map();
+
+    window.currentSort = { key: 'run_id', order: 'desc' };
+
+    // Simple toast notification function
+    function showToast(message, type = 'info') {
+        // Create a simple toast element
+        const toast = document.createElement('div');
+        toast.className = `alert alert-${type === 'error' ? 'danger' : 'success'} position-fixed bottom-0 end-0 m-3`;
+        toast.style.zIndex = '9999';
+        toast.style.minWidth = '300px';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+
+        // Auto remove after 3 seconds
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transition = 'opacity 0.5s';
+            setTimeout(() => toast.remove(), 500);
+        }, 3000);
+    }
+
+    // Copy settings from table row to batch apply form
+    function copyToBatchForm(year, roadType, profile) {
+        // Fill in the batch apply form
+        document.getElementById('batchYearInput').value = year || '';
+
+        // Set road type dropdown
+        const typeSelect = document.getElementById('batchTypeSelect');
+        typeSelect.value = roadType || '';
+
+        // Set profile dropdown
+        const profileSelect = document.getElementById('batchProfileSelect');
+        profileSelect.value = profile || '';
+
+        // Visual feedback - highlight the form briefly
+        const applyBtn = document.getElementById('batchApplyBtn');
+        applyBtn.classList.add('btn-success');
+        applyBtn.classList.remove('btn-primary');
+        applyBtn.innerHTML = '<i class="bi bi-check2"></i> 設定をコピーしました！';
+
+        // Flash animation
+        applyBtn.style.transform = 'scale(1.05)';
+        setTimeout(() => {
+            applyBtn.style.transform = 'scale(1)';
+        }, 150);
+
+        // Restore after 2 seconds
+        setTimeout(() => {
+            applyBtn.classList.remove('btn-success');
+            applyBtn.classList.add('btn-primary');
+            applyBtn.innerHTML = '<i class="bi bi-check2-all"></i> 選択した設定を一括適用';
+        }, 2000);
+
+        // Scroll to the batch form
+        document.getElementById('batchApplyBtn').scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Show toast notification
+        showToast(`✅ 設定をコピーしました（年度: ${year || '未設定'}, Type: ${roadType === 'widened' ? '拡幅' : '通常'}, Profile: ${profile || '未設定'}）`, 'success');
+    }
+
+
+    window.toggleSort = function (key) {
+        if (window.currentSort.key === key) {
+            window.currentSort.order = window.currentSort.order === 'asc' ? 'desc' : 'asc';
+        } else {
+            window.currentSort.key = key;
+            window.currentSort.order = 'asc'; // Default asc
+            if (key === 'run_id' || key === 'year') window.currentSort.order = 'desc'; // Default desc
+        }
+        window.sortFolderData();
+        window.refreshView();
+
+        // Update Icons
+        const iconMap = { 'asc': 'bi-sort-alpha-up', 'desc': 'bi-sort-alpha-down' };
+        const numIconMap = { 'asc': 'bi-sort-numeric-up', 'desc': 'bi-sort-numeric-down' };
+        document.querySelectorAll('.sortable').forEach(th => {
+            const i = th.querySelector('i');
+            if (i) i.className = 'bi bi-filter'; // Reset
+        });
+
+        // Set active icon
+        // This is a simple implementation, ideally specific IDs
+        // For now relying on click event target if needed or simple re-render of headers?
+        // Note: Headers are static HTML, so I should update icons by ID or query.
+        // Let's just update headers dynamically or let user guess? 
+        // Screenshot implies simple sort. I'll stick to logic first.
+        // Actually, update icons based on key.
+        const headerIds = { 'name': 'nameHeader' }; // Others don't have IDs in my replace
+        // I should just re-render table.
+
+        // Update sort button icon
+        if (typeof updateSortButtonIcon === 'function') {
+            updateSortButtonIcon();
+        }
+    };
+
+    window.sortFolderData = function () {
+        const key = window.currentSort.key;
+        const order = window.currentSort.order === 'asc' ? 1 : -1;
+
+        folderData.sort((a, b) => { // Use scoped variable
+            let valA = a[key];
+            let valB = b[key];
+
+            if (key === 'name') {
+                valA = a.alias || a.name || a.path;
+                valB = b.alias || b.name || b.path;
+            } else if (key === 'year') {
+                valA = parseInt(a.collection_year || 0);
+                valB = parseInt(b.collection_year || 0);
+            } else if (key === 'path') {
+                // Extract subfolder name (last part of path) for sorting
+                const extractSubfolder = (path) => {
+                    if (!path) return '';
+                    const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
+                    const parts = normalized.split('/');
+                    return parts[parts.length - 1] || '';
+                };
+                valA = extractSubfolder(a.path);
+                valB = extractSubfolder(b.path);
+            } else if (key === 'subfolder') {
+                // Sort by subfolder name (same as path but explicit)
+                const extractSubfolder = (path) => {
+                    if (!path) return '';
+                    const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
+                    const parts = normalized.split('/');
+                    return parts[parts.length - 1] || '';
+                };
+                valA = extractSubfolder(a.path);
+                valB = extractSubfolder(b.path);
+            } else if (key === 'run_id') {
+                valA = a.run_id || 0;
+                valB = b.run_id || 0;
+            } else if (key === 'group') {
+                // Extract parent folder name (folder group) for sorting
+                const extractParentFolder = (path) => {
+                    if (!path) return '';
+                    const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
+                    const parts = normalized.split('/');
+                    // Parent is the second-to-last part (e.g., output/Run1/Cam1 -> Run1)
+                    return parts.length >= 2 ? parts[parts.length - 2] : '';
+                };
+                valA = extractParentFolder(a.path);
+                valB = extractParentFolder(b.path);
+            }
+
+            if (valA < valB) return -1 * order;
+            if (valA > valB) return 1 * order;
+            return 0;
+        });
+    };
+
+    // Sort by subfolder name
+    function sortBySubfolder() {
+        window.toggleSort('path');
+        updateSortButtonIcon();
+    }
+
+    // Update the sort button icon based on current sort state
+    function updateSortButtonIcon() {
+        const sortIcon = document.getElementById('sortIcon');
+        const groupSortIcon = document.getElementById('groupSortIcon');
+        const subfolderBtn = document.getElementById('subfolderSortBtn');
+        const folderGroupBtn = document.getElementById('folderGroupSortBtn');
+
+        // Update subfolder button
+        if (sortIcon && subfolderBtn) {
+            if (window.currentSort.key === 'path' || window.currentSort.key === 'subfolder') {
+                // Currently sorting by subfolder
+                if (window.currentSort.order === 'asc') {
+                    sortIcon.className = 'bi bi-sort-alpha-down';
+                } else {
+                    sortIcon.className = 'bi bi-sort-alpha-up';
+                }
+                subfolderBtn.classList.add('active');
+            } else {
+                // Not sorting by subfolder
+                sortIcon.className = 'bi bi-sort-alpha-down';
+                subfolderBtn.classList.remove('active');
+            }
+        }
+
+        // Update folder group button
+        if (groupSortIcon && folderGroupBtn) {
+            if (window.currentSort.key === 'group') {
+                // Currently sorting by group
+                if (window.currentSort.order === 'asc') {
+                    groupSortIcon.className = 'bi bi-folder-fill';
+                } else {
+                    groupSortIcon.className = 'bi bi-folder-check';
+                }
+                folderGroupBtn.classList.add('active');
+            } else {
+                // Not sorting by group
+                groupSortIcon.className = 'bi bi-folder';
+                folderGroupBtn.classList.remove('active');
+            }
+        }
+    }
+
+    // Sort by folder group (parent folder)
+    function sortByFolderGroup() {
+        window.toggleSort('group');
+        updateSortButtonIcon();
+    }
+
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadData();
+    });
+
+    // ... showToast ...
+
+    async function loadData() {
+        try {
+            const response = await fetch('/api/calibration_check/folders');
+            const data = await response.json();
+            availableProfiles = data.profiles || [];
+            profileMetadata = data.profile_metadata || {};
+            folderData = data.folders || [];
+
+            // Sort Folder Data: Initial Sort
+            window.sortFolderData();
+
+            // Restore Grouping Logic
+            parentGroups = new Map();
+            const latestFolders = []; // For sorting default
+
+            folderData.forEach(folder => {
+                // Determine Parent Group
+                // Logic: "output/Run1/Cam1" -> Parent: "Run1"
+                // API provides 'run_id' now? Yes, meta.run_id
+                // But fallback to path processing if needed.
+
+                let parentName = "Others";
+                let runId = folder.run_id || 0;
+
+                // If run_id is available and we want to group by it?
+                // Visual requirement: Group by Parent Folder Name (Run)
+                // Let's use path manipulation as primary visual grouping key
+
+                const parts = folder.path.replace(/\\/g, '/').split('/');
+                // output/RunName/SubFolder -> RunName is parts[parts.length-2]
+                if (parts.length >= 2) {
+                    parentName = parts[parts.length - 2];
+                }
+
+                if (!parentGroups.has(parentName)) {
+                    parentGroups.set(parentName, {
+                        name: parentName,
+                        folders: [],
+                        maxRunId: -1
+                    });
+                }
+
+                const group = parentGroups.get(parentName);
+                group.folders.push(folder);
+                if (runId > group.maxRunId) group.maxRunId = runId;
+            });
+
+            // Populate Parent Folder Select
+            const parentSelect = document.getElementById('parentFolderSelect');
+            if (parentSelect) {
+                parentSelect.innerHTML = '';
+
+                // Sort Groups: Latest Run First
+                // We can use maxRunId or just lexicographical desc for timestamps?
+                const sortedGroups = Array.from(parentGroups.values()).sort((a, b) => {
+                    // Try numeric comparison if names are dates/numbers?
+                    // Or use the maxRunId from DB if reliable
+                    if (b.maxRunId !== a.maxRunId) return b.maxRunId - a.maxRunId;
+                    return b.name.localeCompare(a.name);
+                });
+
+                sortedGroups.forEach(g => {
+                    const opt = document.createElement('option');
+                    opt.value = g.name;
+                    opt.textContent = `${g.name} (${g.folders.length})`;
+                    parentSelect.appendChild(opt);
+                });
+
+                // Set Default Selection (First one -> Latest)
+                if (sortedGroups.length > 0) {
+                    selectedParent = sortedGroups[0].name;
+                    parentSelect.value = selectedParent;
+                }
+            }
+
+            // Handle File View Data Loading (Removed)
+
+            // Populate Batch Profile Select
+            const batchSelect = document.getElementById('batchProfileSelect');
+            if (batchSelect) {
+                batchSelect.innerHTML = '<option value="">-- プロファイルを選択してください --</option>';
+                availableProfiles.forEach(p => {
+                    const meta = profileMetadata[p] || {};
+                    const suffix = meta.has_count_line ? ' [Count OK]' : '';
+                    const option = document.createElement('option');
+                    option.value = p;
+                    option.textContent = `${p}${suffix}`;
+                    batchSelect.appendChild(option);
+                });
+            }
+
+            // Populate Datalist
+            const datalist = document.getElementById('folderSuggestions');
+            if (datalist && data.known_folders) {
+                datalist.innerHTML = '';
+                data.known_folders.forEach(folder => {
+                    const option = document.createElement('option');
+                    option.value = folder;
+                    datalist.appendChild(option);
+                });
+            }
+            renderTable(folderData);
+
+            // Update sort button icon to match initial sort state
+            if (typeof updateSortButtonIcon === 'function') {
+                updateSortButtonIcon();
+            }
+        } catch (error) {
+            console.error('Failed to load data:', error);
+            document.getElementById('folderList').innerHTML = `
+                <tr><td colspan="8" class="text-center text-danger">データの読み込みに失敗しました: ${error.message}</td></tr>
+            `;
+        }
+    }
+    async function loadFilesData() {
+        try {
+            const res = await fetch('/api/calibration_check/all_files');
+            const d = await res.json();
+            allFilesData = d.files || [];
+        } catch (e) {
+            console.error("Failed to load files", e);
+            showToast("ファイル一覧の取得に失敗しました", true);
+        }
+    }
+
+    // toggleFileView removed
+
+    async function applyToAll() {
+        const batchSelect = document.getElementById('batchProfileSelect');
+        const selectedProfile = batchSelect.value;
+
+        if (!selectedProfile) {
+            showToast('適用するプロファイルを選択してください。', true);
+            return;
+        }
+
+        let targets = getVisibleItems();
+        // let isFileMode = isFileView; // Removed
+
+
+        if (targets.length === 0) {
+            showToast('適用対象がありません。', true);
+            return;
+        }
+
+        if (!confirm(`表示されている全 ${targets.length} 件のフォルダに、プロファイル「${selectedProfile}」を適用しますか？\n\n※この操作は各フォルダの設定を上書きします。`)) {
+            return;
+        }
+
+        showToast('一括適用を開始します...');
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < targets.length; i++) {
+            const folder = targets[i];
+            const path = folder.path;
+
+            // Update local memory if exists
+            const folderIndex = folderData.findIndex(f => f.path === path);
+            if (folderIndex !== -1) {
+                folderData[folderIndex].profile = selectedProfile;
+                folderData[folderIndex].db_profile = selectedProfile; // Assume success for UI responsiveness
+            }
+
+            try {
+                // We try to preserve existing year/road_type if available in memory
+                const collectionYear = folder.collection_year || null;
+                const roadType = folder.road_type || 'non-widened';
+
+                await fetch('/api/calibration_check/update_folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        folder_path: path,
+                        profile: selectedProfile,
+                        collection_year: collectionYear,
+                        road_type: roadType
+                    })
+                });
+                successCount++;
+            } catch (e) {
+                console.error(`Failed to update ${path}`, e);
+                failCount++;
+            }
+        }
+
+        showToast(`完了しました。成功: ${successCount}, 失敗: ${failCount}`);
+        refreshView();
+    }
+
+    // Handle parent folder selection change
+    function onParentChange() {
+        const select = document.getElementById('parentFolderSelect');
+        selectedParent = select.value;
+        refreshView();
+    }
+
+    // Handle "show all folders" toggle
+    function onShowAllToggle() {
+        const toggle = document.getElementById('showAllFoldersToggle');
+        isShowAllFolders = toggle.checked;
+        refreshView();
+    }
+
+    function getVisibleItems() {
+
+        // Folder View
+        if (isShowAllFolders) {
+            return folderData;
+        }
+
+        const group = parentGroups.get(selectedParent);
+        return group ? group.folders : [];
+    }
+
+    function refreshView() {
+        let items = getVisibleItems();
+
+        // Apply current sort to visible items
+        if (items && items.length > 0) {
+            const key = window.currentSort.key;
+            const order = window.currentSort.order === 'asc' ? 1 : -1;
+
+            items = items.slice().sort((a, b) => {
+                let valA = a[key];
+                let valB = b[key];
+
+                if (key === 'name') {
+                    valA = a.alias || a.name || a.path;
+                    valB = b.alias || b.name || b.path;
+                } else if (key === 'year') {
+                    valA = parseInt(a.collection_year || 0);
+                    valB = parseInt(b.collection_year || 0);
+                } else if (key === 'path' || key === 'subfolder') {
+                    // Extract subfolder name for sorting
+                    const extractSubfolder = (path) => {
+                        if (!path) return '';
+                        const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
+                        const parts = normalized.split('/');
+                        return parts[parts.length - 1] || '';
+                    };
+                    valA = extractSubfolder(a.path);
+                    valB = extractSubfolder(b.path);
+                } else if (key === 'run_id') {
+                    valA = a.run_id || 0;
+                    valB = b.run_id || 0;
+                } else if (key === 'group') {
+                    // Extract parent folder name for sorting
+                    const extractParentFolder = (path) => {
+                        if (!path) return '';
+                        const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
+                        const parts = normalized.split('/');
+                        return parts.length >= 2 ? parts[parts.length - 2] : '';
+                    };
+                    valA = extractParentFolder(a.path);
+                    valB = extractParentFolder(b.path);
+                }
+
+                if (valA < valB) return -1 * order;
+                if (valA > valB) return 1 * order;
+                return 0;
+            });
+        }
+
+        // Update Badge
+        const badge = document.getElementById('filteredCountBadge');
+        if (isFileView) {
+            badge.textContent = `全ファイル: ${items.length} 件`;
+        } else if (isShowAllFolders) {
+            badge.textContent = `全フォルダ: ${items.length} 件`;
+        } else {
+            const group = parentGroups.get(selectedParent);
+            const name = group ? group.name : "選択なし";
+            badge.textContent = `${name}: ${items.length} 件`;
+        }
+
+        // Store currently displayed items for batch apply
+        currentDisplayedItems = items;
+
+        renderTable(items);
+    }
+
+    function renderTable(items) {
+        const tbody = document.getElementById('folderList');
+        tbody.innerHTML = '';
+
+        if (!items || items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">該当するアイテムがありません</td></tr>';
+            return;
+        }
+
+        const frag = document.createDocumentFragment();
+        items.forEach((item, index) => {
+            frag.appendChild(createRow(item, index));
+        });
+        tbody.appendChild(frag);
+    }
+
+    function createRow(item, index) {
+        const tr = document.createElement('tr');
+        tr.className = 'align-middle';
+        tr.id = `row-${index}`; // Add ID for expansion reference
+
+        // For Files, item has folder_path. For Folders, item has path.
+        const path = item.path || item.folder_path;
+        const safePath = (path || "").replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const encodedPath = encodeURIComponent(path || "");
+
+        // Profile
+        const currentProfile = item.profile || item.db_profile || "";
+        const isConfigured = !!currentProfile;
+
+        // Dropdown Generation
+        let options = `<option value="">--</option>`;
+        availableProfiles.forEach(p => {
+            const selected = p === currentProfile ? 'selected' : '';
+            options += `<option value="${p}" ${selected}>${p}</option>`;
+        });
+
+        // Status - 3-tier system based on profile and calibration lines
+        let statusBadge;
+        let statusDetail;
+
+        const hasProfile = !!currentProfile;
+        const hasLines = item.has_calibration_lines || false;
+
+        if (hasProfile && hasLines) {
+            // 🟢 Fully configured - profile set with calibration lines
+            statusBadge = '<span class="badge bg-success">✓ 適用済み</span>';
+            statusDetail = `<small class="text-success d-block"><i class="bi bi-check-circle-fill"></i> ${currentProfile}</small>`;
+        } else if (hasProfile && !hasLines) {
+            // 🟡 Profile set but no calibration lines
+            statusBadge = '<span class="badge bg-warning text-dark">⚠ 線データなし</span>';
+            statusDetail = `<small class="text-warning d-block"><i class="bi bi-exclamation-triangle-fill"></i> ${currentProfile}</small>`;
+        } else {
+            // ⚪ No profile set
+            statusBadge = '<span class="badge bg-secondary">未適用</span>';
+            statusDetail = '<small class="text-danger d-block"><i class="bi bi-x-circle"></i> プロファイル未設定</small>';
+        }
+
+        // Thumb
+        const thumbUrl = `${API_BASE}/thumbnail?folder=${encodedPath}`;
+
+        // Name
+        const nameVal = item.alias || item.name || '-';
+        const icon = '<i class="bi bi-folder2"></i> ';
+
+        // Display Path (short)
+        const shortPath = path.length > 40 ? '...' + path.slice(-40) : path;
+
+        // Suggest a new profile name based on folder name (sanitize)
+        const folderBase = path.split('\\').pop().split('/').pop();
+        const suggestedProfile = folderBase.replace(/[^a-zA-Z0-9_-]/g, '_') + '_calib';
+
+        tr.innerHTML = `
+            <td class="text-center">
+                <button class="btn btn-sm btn-link text-decoration-none p-0" onclick="toggleFolderExpansion(${index}, '${safePath}')">
+                    <i class="bi bi-chevron-right" id="icon-${index}"></i>
+                </button>
+            </td>
+            <td>
+                <div class="position-relative d-inline-block">
+                    <img src="${thumbUrl}" 
+                         class="rounded ${hasProfile && hasLines ? 'border-success' : hasProfile ? 'border-warning' : 'border-secondary'}" 
+                         style="width: 40px; height: 40px; object-fit: cover; cursor: zoom-in; border-width: 2px !important;"
+                         onclick="openImageModal(this.src)" 
+                         onerror="this.style.opacity=0.3">
+                    ${hasProfile && hasLines ? '<span class="position-absolute top-0 end-0 badge bg-success rounded-circle" style="width: 12px; height: 12px; padding: 0;" title="適用済み"></span>' : ''}
+                </div>
+            </td>
+            <td><div class="fw-bold text-truncate" style="max-width: 200px;" title="${nameVal}">${icon}${nameVal}</div></td>
+            <td><div class="small text-muted text-truncate" style="max-width: 250px;" title="${path}">${shortPath}</div></td>
+            
+            <td>
+                <input type="text" class="form-control form-control-sm" value="${item.collection_year || ''}" 
+                   onchange="updateItemLocal('${path}', 'year', this.value)" placeholder="--" style="width: 60px;">
+            </td>
+            <td>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" ${item.road_type === 'widened' ? 'checked' : ''}
+                        onchange="updateItemLocal('${path}', 'road', this.checked)">
+                </div>
+            </td>
+            
+            <td>
+                <div class="input-group input-group-sm">
+                    <select class="form-select" onchange="updateItemLocal('${path}', 'profile', this.value)">
+                        ${options}
+                    </select>
+                    <button class="btn btn-outline-secondary" onclick="saveProfileSingle('${safePath}', this)" title="このフォルダに適用">
+                        <i class="bi bi-check-lg"></i>
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="openEditor(this, ${item.run_id || 0})" title="選択中のプロファイルを編集">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                </div>
+            </td>
+            
+            <td><div>${statusBadge}</div>${statusDetail}</td>
+            
+            <td class="text-center">
+                <button class="btn btn-outline-info btn-sm copy-to-batch-btn" 
+                    onclick="copyToBatchForm('${item.collection_year || ''}', '${item.road_type || ''}', '${currentProfile}')" 
+                    title="この設定を一括適用欄にコピー">
+                    <i class="bi bi-arrow-up-circle"></i>
+                </button>
+            </td>
+            
+            <td class="text-end">
+                <button class="btn btn-outline-success btn-sm" 
+                    onclick="launchFolderCalibration(${index}, '${encodeURIComponent(suggestedProfile)}')" 
+                    title="新規プロファイル作成 (フォルダ名ベース)">
+                    <i class="bi bi-plus-lg"></i> Check
+                </button>
+            </td>`;
+
+        return tr;
+    }
+
+    async function launchFolderCalibration(index, encodedProfileName) {
+        if (!folderData[index]) return;
+        const folder = folderData[index];
+        const folderPath = folder.path || folder.folder_path;
+        const runId = folder.run_id || 0;
+        const profileName = decodeURIComponent(encodedProfileName);
+
+        let pathHint = '';
+
+        // Try to find a file path to use as hint
+        if (allFilesData.length === 0) {
+            await loadFilesData();
+        }
+
+        // Normalize slashes
+        const normFolder = folderPath.replace(/\\/g, '/');
+        const file = allFilesData.find(f => (f.folder_path || '').replace(/\\/g, '/') === normFolder);
+
+        if (file && file.source_path) {
+            pathHint = file.source_path;
+        }
+
+        // Construct URL
+        const url = `/calibration?run_id=${runId}&profile=${encodeURIComponent(profileName)}${pathHint ? '&path_hint=' + encodeURIComponent(pathHint) : ''}`;
+        window.open(url, '_blank');
+    }
+
+    async function toggleFolderExpansion(index, folderPath) {
+        const row = document.getElementById(`row-${index}`);
+        const icon = document.getElementById(`icon-${index}`);
+        const existingChild = document.getElementById(`child-${index}`);
+
+        if (existingChild) {
+            // Toggle
+            if (existingChild.classList.contains('d-none')) {
+                existingChild.classList.remove('d-none');
+                icon.className = 'bi bi-chevron-down';
+            } else {
+                existingChild.classList.add('d-none');
+                icon.className = 'bi bi-chevron-right';
+            }
+            return;
+        }
+
+        // Expand
+        icon.className = 'bi bi-chevron-down';
+
+        // Ensure files loaded
+        if (allFilesData.length === 0) {
+            await loadFilesData();
+        }
+
+        // Filter files
+        // Normalize slashes for comparison
+        const normFolder = folderPath.replace(/\\/g, '/');
+        const files = allFilesData.filter(f => f.folder_path.replace(/\\/g, '/') === normFolder);
+
+        const childRow = document.createElement('tr');
+        childRow.id = `child-${index}`;
+        childRow.className = 'bg-light';
+
+        const cell = document.createElement('td');
+        cell.colSpan = 9;
+        cell.className = 'p-3';
+
+        if (files.length === 0) {
+            cell.innerHTML = '<div class="text-muted text-center">動画ファイルが見つかりません</div>';
+        } else {
+            cell.appendChild(createFileTable(files, folderPath));
+        }
+
+        childRow.appendChild(cell);
+        row.parentNode.insertBefore(childRow, row.nextSibling);
+    }
+
+    function createFileTable(files, folderPath) {
+        const div = document.createElement('div');
+        div.className = 'table-responsive';
+
+        // フォルダに設定されているプロファイルを取得
+        const folderIndex = folderData.findIndex(f => f.path === folderPath || f.folder_path === folderPath);
+        const folderInfo = folderIndex !== -1 ? folderData[folderIndex] : null;
+        const folderProfile = folderInfo ? (folderInfo.profile || folderInfo.db_profile || '') : '';
+
+        let html = `
+            <table class="table table-sm table-bordered mb-0 bg-white">
+                <thead class="table-secondary">
+                    <tr>
+                        <th style="width: 60px;">プレビュー</th>
+                        <th>ファイル名</th>
+                        <th style="width: 80px;">Run ID</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        files.forEach((f, idx) => {
+            const safePath = (f.source_path || "").replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const encodedSourcePath = encodeURIComponent(f.source_path || '');
+
+            // Suggest profile name from filename (remove ext)
+            const baseName = f.filename.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, '_');
+            const newProfileName = `${baseName}_calib`;
+
+            const launchUrl = `/calibration?run_id=${f.run_id || 0}&path_hint=${encodedSourcePath}&profile=${encodeURIComponent(newProfileName)}`;
+
+            // サムネイルURLはファイル固有のパス（video_path）を使用
+            const thumbUrl = `${API_BASE}/file_thumbnail?video_path=${encodedSourcePath}`;
+
+            html += `
+                <tr>
+                    <td class="text-center">
+                         <img src="${thumbUrl}" 
+                              class="rounded border" style="width: 50px; height: 35px; object-fit: cover; cursor: zoom-in;"
+                              onclick="showFilePreview('${safePath}', '${folderProfile}')"
+                              onerror="this.style.opacity=0.3; this.title='サムネイル取得失敗'"
+                              title="クリックでキャリブレーションプレビュー">
+                    </td>
+                    <td>
+                        <span class="small">${f.filename}</span>
+                    </td>
+                    <td class="text-center">
+                        <span class="badge bg-secondary">#${f.run_id || '-'}</span>
+                    </td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-info" onclick="showFilePreview('${safePath}', '${folderProfile}')" title="キャリブレーションプレビュー">
+                                <i class="bi bi-eye"></i> プレビュー
+                            </button>
+                            <a href="${launchUrl}" target="_blank" class="btn btn-outline-primary" title="キャリブレーション編集">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += '</tbody></table>';
+        div.innerHTML = html;
+        return div;
+    }
+
+    // ファイル単位のキャリブレーションプレビューを表示
+    async function showFilePreview(videoPath, profileName) {
+        // モーダルを開いてローディング表示
+        const modal = new bootstrap.Modal(document.getElementById('filePreviewModal'));
+        const loadingEl = document.getElementById('filePreviewLoading');
+        const contentEl = document.getElementById('filePreviewContent');
+        const errorEl = document.getElementById('filePreviewError');
+        const imgEl = document.getElementById('filePreviewImage');
+        const fileNameEl = document.getElementById('filePreviewFileName');
+        const profileEl = document.getElementById('filePreviewProfile');
+
+        loadingEl.classList.remove('d-none');
+        contentEl.classList.add('d-none');
+        errorEl.classList.add('d-none');
+        errorEl.textContent = '';
+
+        modal.show();
+
+        try {
+            const response = await fetch('/api/calibration_check/file_preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ video_path: videoPath, profile: profileName })
+            });
+            const data = await response.json();
+
+            if (!response.ok || data.error) {
+                throw new Error(data.error || 'プレビューの取得に失敗しました。');
+            }
+
+            imgEl.src = 'data:image/jpeg;base64,' + data.image_base64;
+            fileNameEl.textContent = data.filename || videoPath.split(/[/\\]/).pop();
+            profileEl.textContent = data.profile || '未設定';
+
+            loadingEl.classList.add('d-none');
+            contentEl.classList.remove('d-none');
+
+        } catch (error) {
+            loadingEl.classList.add('d-none');
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+    }
+
+    async function loadInlinePreview(index, folderPath) {
+        const loading = document.getElementById(`preview - loading - ${index} `);
+        const errorDiv = document.getElementById(`preview - error - ${index} `);
+        const contentDiv = document.getElementById(`preview - content - ${index} `);
+        const img = document.getElementById(`preview - img - ${index} `);
+        const overlay = document.getElementById(`preview - overlay - ${index} `);
+        const select = document.getElementById(`select - ${index} `);
+
+        // Ensure UI is in loading state
+        loading.classList.remove('d-none');
+        errorDiv.classList.add('d-none');
+        contentDiv.classList.add('d-none');
+
+        let profileName = select.value;
+        if (!profileName && folderData && folderData[index]) {
+            profileName = folderData[index].db_profile || folderData[index].profile;
+        }
+
+        if (!profileName) {
+            loading.classList.add('d-none');
+            errorDiv.textContent = 'プロファイルが設定されていません。';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/calibration_check/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder_path: folderPath, profile: profileName })
+            });
+            const data = await response.json();
+
+            if (!response.ok || data.error) {
+                throw new Error(data.error || 'プレビューの取得に失敗しました。');
+            }
+
+            img.src = 'data:image/jpeg;base64,' + data.image_base64;
+            drawLinesOnOverlay(overlay, data.lines, data.image_width, data.image_height);
+
+            img.onload = () => {
+                loading.classList.add('d-none');
+                contentDiv.classList.remove('d-none');
+            };
+
+        } catch (error) {
+            loading.classList.add('d-none');
+            errorDiv.textContent = error.message;
+            errorDiv.classList.remove('d-none');
+        }
+    }
+
+    async function saveProfile(index, folderPath) {
+        const select = document.getElementById(`select - ${index} `);
+        const newProfile = select.value;
+        const yearInput = document.getElementById(`year - ${index} `);
+        const roadTypeInput = document.getElementById(`roadtype - ${index} `);
+        const verifyBtn = document.getElementById(`verify - ${index} `);
+        const statusCell = document.getElementById(`status - ${index} `);
+
+        // Get year and road type values
+        const collectionYear = yearInput ? yearInput.value.trim() : null;
+        const roadType = roadTypeInput && roadTypeInput.checked ? 'widened' : 'non-widened';
+
+        try {
+            const response = await fetch('/api/calibration_check/update_folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    folder_path: folderPath,
+                    profile: newProfile,
+                    collection_year: collectionYear || null,
+                    road_type: roadType
+                })
+            });
+            const data = await response.json();
+
+            if (!response.ok || data.error) {
+                throw new Error(data.error || '保存に失敗しました。');
+            }
+
+            showToast('設定を保存しました。');
+
+            // UI Update
+            const meta = profileMetadata[newProfile] || {};
+            const countBadge = meta.has_count_line
+                ? '<span class="badge bg-info text-dark ms-1" title="カウントライン設定あり"><i class="bi bi-activity"></i></span>'
+                : '';
+
+            const activeDisplay = newProfile
+                ? `< div class="small mt-1 text-muted" > <i class="bi bi-database"></i> 適用中: <strong>${newProfile}</strong></div > `
+                : `< div class="small mt-1 text-danger" > <i class="bi bi-exclamation-circle"></i> 未適用</div > `;
+
+            if (newProfile) {
+                statusCell.innerHTML = '<span class="badge bg-success">Setting OK</span>' + countBadge + activeDisplay;
+                verifyBtn.disabled = false;
+            } else {
+                statusCell.innerHTML = '<span class="badge bg-warning text-dark">未設定</span>' + activeDisplay;
+                verifyBtn.disabled = true;
+            }
+
+        } catch (error) {
+            showToast(error.message, true);
+        }
+    }
+
+    const verifyModal = new bootstrap.Modal(document.getElementById('verifyModal'));
+    const verifyImage = document.getElementById('verifyImage');
+    const overlay = document.getElementById('calibrationOverlay');
+
+    async function verifyCalibration(index, folderPath) {
+        // Use currently selected value to ensure we verify what is showing
+        const select = document.getElementById(`select - ${index} `);
+        const profileName = select.value;
+
+        if (!profileName) {
+            showToast('プロファイルが選択されていません。', true);
+            return;
+        }
+
+        // Reset Modal
+        document.getElementById('verifyLoading').classList.remove('d-none');
+        document.getElementById('verifyContainer').classList.add('d-none');
+        document.getElementById('verifyError').classList.add('d-none');
+        verifyImage.src = '';
+        overlay.innerHTML = '';
+        document.getElementById('modalProfileName').textContent = profileName;
+        document.getElementById('modalVideoPath').textContent = '-';
+
+        verifyModal.show();
+
+        try {
+            const response = await fetch('/api/calibration_check/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder_path: folderPath, profile: profileName })
+            });
+            const data = await response.json();
+
+            if (!response.ok || data.error) {
+                throw new Error(data.error || '検証に失敗しました。');
+            }
+
+            // Show Image
+            verifyImage.src = 'data:image/jpeg;base64,' + data.image_base64;
+            document.getElementById('modalVideoPath').textContent = data.video_filename || 'Unknown';
+
+            // Draw Calibration Lines
+            drawCalibrationLines(data.lines, data.image_width, data.image_height);
+
+            verifyImage.onload = () => {
+                document.getElementById('verifyLoading').classList.add('d-none');
+                document.getElementById('verifyContainer').classList.remove('d-none');
+            };
+
+        } catch (error) {
+            document.getElementById('verifyLoading').classList.add('d-none');
+            const errEl = document.getElementById('verifyError');
+            errEl.textContent = error.message;
+            errEl.classList.remove('d-none');
+        }
+    }
+
+    function drawCalibrationLines(lines, imgW, imgH) {
+        overlay.innerHTML = '';
+        if (!lines) return;
+
+        overlay.setAttribute('viewBox', `0 0 ${imgW} ${imgH} `);
+
+        const drawPoly = (points, color, width = 2) => {
+            if (!points || points.length < 2) return;
+            const d = points.map((p, i) => (i === 0 ? 'M' : 'L') + ` ${p[0]} ${p[1]} `).join(' ');
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", d);
+            path.setAttribute("stroke", color);
+            path.setAttribute("stroke-width", width);
+            path.setAttribute("fill", "none");
+            overlay.appendChild(path);
+        };
+
+        // Main lines
+        drawPoly(lines.left_white_line, '#00ffff', 4); // Cyan
+        drawPoly(lines.right_white_line, '#00ffff', 4);
+        drawPoly(lines.center_line, '#ffff00', 3); // Yellow
+
+        // Dashed lines
+        const drawDashed = (points, color) => {
+            if (!points || points.length < 2) return;
+            const d = points.map((p, i) => (i === 0 ? 'M' : 'L') + ` ${p[0]} ${p[1]} `).join(' ');
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", d);
+            path.setAttribute("stroke", color);
+            path.setAttribute("stroke-width", 2);
+            path.setAttribute("stroke-dasharray", "8,8");
+            path.setAttribute("fill", "none");
+            overlay.appendChild(path);
+        };
+        drawDashed(lines.left_mid_line, '#ff9900'); // Orange
+        drawDashed(lines.right_mid_line, '#ff9900');
+    }
+
+    async function togglePreview(index, folderPath) {
+        const previewRow = document.getElementById(`preview - row - ${index} `);
+
+        // Toggle visibility state
+        const isHidden = previewRow.classList.contains('d-none');
+
+        // Save state immediately
+        // Note: isHidden means currently hidden, so clicking makes it visible (true)
+        const newState = isHidden;
+
+        if (!isHidden) {
+            // If currently visible, we verify hiding it
+            previewRow.classList.add('d-none');
+        } else {
+            // Show row
+            previewRow.classList.remove('d-none');
+            // Trigger load
+            loadInlinePreview(index, folderPath);
+        }
+
+        // Persist change
+        try {
+            await fetch('/api/calibration_check/update_folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    folder_path: folderPath,
+                    is_always_display: newState
+                })
+            });
+        } catch (e) {
+            console.error("Failed to save preview state", e);
+        }
+    }
+
+    function drawLinesOnOverlay(svgElement, lines, imgW, imgH) {
+        svgElement.innerHTML = '';
+        if (!lines) return;
+
+        svgElement.setAttribute('viewBox', `0 0 ${imgW} ${imgH} `);
+
+        const drawPoly = (points, color, width = 2) => {
+            if (!points || points.length < 2) return;
+            const d = points.map((p, i) => (i === 0 ? 'M' : 'L') + ` ${p[0]} ${p[1]} `).join(' ');
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", d);
+            path.setAttribute("stroke", color);
+            path.setAttribute("stroke-width", width);
+            path.setAttribute("fill", "none");
+            svgElement.appendChild(path);
+        };
+
+        const drawDashed = (points, color) => {
+            if (!points || points.length < 2) return;
+            const d = points.map((p, i) => (i === 0 ? 'M' : 'L') + ` ${p[0]} ${p[1]} `).join(' ');
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", d);
+            path.setAttribute("stroke", color);
+            path.setAttribute("stroke-width", 2);
+            path.setAttribute("stroke-dasharray", "8,8");
+            path.setAttribute("fill", "none");
+            svgElement.appendChild(path);
+        };
+
+        // Main lines
+        drawPoly(lines.left_white_line, '#00ffff', 4);
+        drawPoly(lines.right_white_line, '#00ffff', 4);
+        drawPoly(lines.center_line, '#ffff00', 3);
+
+        // Dashed lines
+        drawDashed(lines.left_mid_line, '#ff9900');
+        drawDashed(lines.right_mid_line, '#ff9900');
+    }
+
+    function togglePath(index, fullPath) {
+        const pathSpan = document.getElementById(`path - ${index} `);
+        const maxPathLen = 40;
+
+        if (pathSpan.textContent === fullPath) {
+            // Currently expanded, collapse it
+            const displayPath = fullPath.length > maxPathLen
+                ? '...' + fullPath.slice(-maxPathLen)
+                : fullPath;
+            pathSpan.textContent = displayPath;
+        } else {
+            // Currently collapsed, expand it
+            pathSpan.textContent = fullPath;
+        }
+    }
+
+    async function toggleAllPreviews() {
+        const toggle = document.getElementById('alwaysDisplayToggle');
+        const isEnabled = toggle.checked;
+
+        localStorage.setItem('calibration_always_display', isEnabled);
+
+        if (!folderData || folderData.length === 0) return;
+
+        for (let i = 0; i < folderData.length; i++) {
+            const previewRow = document.getElementById(`preview - row - ${i}`);
+            const isCurrentlyHidden = previewRow && previewRow.classList.contains('d-none');
+
+            if (isEnabled && isCurrentlyHidden) {
+                await togglePreview(i, folderData[i].path);
+            } else if (!isEnabled && !isCurrentlyHidden) {
+                await togglePreview(i, folderData[i].path);
+            }
+        }
+    }
+
+    // Load always-display state
+    window.addEventListener('load', () => {
+        const savedState = localStorage.getItem('calibration_always_display') === 'true';
+        const toggle = document.getElementById('alwaysDisplayToggle');
+        if (toggle && savedState) {
+            toggle.checked = true;
+        }
+    });
+</script>
+
+<!-- Image Modal -->
+<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body p-0 bg-dark position-relative">
+                <button type="button" class="btn-close btn-close-white position-absolute top-0 end-0 m-3"
+                    data-bs-dismiss="modal" aria-label="Close"></button>
+                <img id="modalImage" src="" class="w-100 h-100" style="object-fit: contain; max-height: 90vh;">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function openImageModal(src) {
+        const modalEl = document.getElementById('imageModal');
+        const imgEl = document.getElementById('modalImage');
+        if (modalEl && imgEl) {
+            imgEl.src = src;
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+        }
+    }
+
+    async function updateItemLocal(path, key, value) {
+        // Find item
+        let item = null;
+        if (folderData) item = folderData.find(f => f.path === path);
+        if (!item && allFilesData) item = allFilesData.find(f => f.folder_path === path);
+
+        if (item) {
+            if (key === 'year') item.collection_year = value;
+            if (key === 'road') item.road_type = value ? 'widened' : 'non-widened';
+            if (key === 'profile') item.profile = value; // Update local model
+        }
+
+        // If it's profile, maybe we wait for the Check button? 
+        // But for year/road it's onchange.
+        // Let's save immediately for year/road.
+        // For profile, the UI has a separate button. But onchange suggests immediate too?
+        // Let's save immediately for all to be safe and consistent.
+
+        const payload = { folder_path: path };
+        if (key === 'year') payload.collection_year = value;
+        if (key === 'road') payload.road_type = value ? 'widened' : 'non-widened';
+        if (key === 'profile') payload.profile = value;
+
+        try {
+            const res = await fetch('/api/calibration_check/update_folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error('API Error');
+            if (window.showToast) showToast('設定を更新しました');
+            // Update badge if profile loaded
+            if (key === 'profile') {
+                // Ideally refresh row visual state, but simple toast is OK.
+            }
+        } catch (e) {
+            console.error("Update failed", e);
+            // alert("保存に失敗しました"); // Optional
+        }
+    }
+
+    async function saveProfileSingle(path, btn) {
+        // Force save current profile selection
+        let item = null;
+        if (folderData) item = folderData.find(f => f.path === path);
+        if (!item && allFilesData) item = allFilesData.find(f => f.folder_path === path);
+        if (!item) return;
+
+        try {
+            await fetch('/api/calibration_check/update_folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    folder_path: path,
+                    profile: item.profile
+                })
+            });
+            if (window.showToast) showToast('プロファイルを適用しました');
+            // Reload page or refresh list to update badges?
+            // refreshView(); // calling refreshView might be safe
+        } catch (e) {
+            alert('保存に失敗しました');
+        }
+    }
+
+    function openEditor(btn, runId) {
+        const div = btn.closest('.input-group');
+        const select = div.querySelector('select');
+        const profile = select.value;
+        if (profile) {
+            let url = '/calibration?load=' + encodeURIComponent(profile);
+            if (runId) url += '&run_id=' + runId;
+            window.open(url, '_blank');
+        } else {
+            alert('編集するプロファイルを選択してください。');
+        }
+    }
+
+    async function applyBatchSettings() {
+        // Get batch settings from UI
+        const batchYear = document.getElementById('batchYearInput').value;
+        const batchType = document.getElementById('batchTypeSelect').value;
+        const batchProfile = document.getElementById('batchProfileSelect').value;
+
+        // Validate: at least one field must be set
+        if (!batchYear && !batchType && !batchProfile) {
+            alert('年度、Type、Profileのいずれかを設定してください。');
+            return;
+        }
+
+        // Confirm with user - use currently displayed items (filtered and sorted)
+        const items = currentDisplayedItems;
+        if (!items || items.length === 0) {
+            alert('適用対象のフォルダがありません。');
+            return;
+        }
+
+        const settingsText = [];
+        if (batchYear) settingsText.push(`年度: ${batchYear}`);
+        if (batchType) settingsText.push(`Type: ${batchType === 'widened' ? '拡幅' : '通常'}`);
+        if (batchProfile) settingsText.push(`Profile: ${batchProfile}`);
+
+        const confirmMsg = `以下の設定を ${items.length} 件のフォルダに一括適用します。よろしいですか？\n\n${settingsText.join('\n')}`;
+        if (!confirm(confirmMsg)) {
+            return;
+        }
+
+        // Get button and help text elements
+        const applyBtn = document.getElementById('batchApplyBtn');
+        const helpText = document.getElementById('batchApplyHelp');
+
+        // Prevent double-click: disable button
+        applyBtn.disabled = true;
+        const originalBtnHtml = applyBtn.innerHTML;
+
+        // Apply settings to all visible items
+        let successCount = 0;
+        let failCount = 0;
+        const total = items.length;
+
+        try {
+            // Call the batch API once with all run_ids
+            const runIds = items.map(item => item.run_id).filter(id => !!id);
+
+            if (runIds.length === 0) {
+                failCount = items.length;
+                helpText.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill"></i> Run IDが見つかりませんでした。</span>`;
+                showToast('Run IDが見つかりませんでした。', 'error');
+                return;
+            }
+
+            applyBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>一括適用中...`;
+            helpText.innerHTML = `<span class="text-primary"><i class="bi bi-hourglass-split"></i> ${runIds.length} 件のフォルダを処理しています...</span>`;
+
+            // Call apply_run_profiles API
+            const response = await fetch('/api/calibration_check/apply_run_profiles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    run_ids: runIds,
+                    profile: batchProfile,
+                    collection_year: batchYear || null,
+                    road_type: batchType || null
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                successCount = result.count || runIds.length;
+
+                // Update local data
+                items.forEach(item => {
+                    if (batchYear) item.collection_year = batchYear;
+                    if (batchType) item.road_type = batchType;
+                    if (batchProfile) {
+                        item.profile = batchProfile;
+                        item.db_profile = batchProfile;
+                    }
+                });
+            } else {
+                failCount = runIds.length;
+                const error = await response.json();
+                console.error('Batch update failed:', error);
+            }
+        } catch (e) {
+            console.error('Batch update failed:', e);
+            failCount = items.length;
+        }
+
+        // Show completion message
+        if (failCount === 0) {
+            helpText.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill"></i> ✅ 完了しました！全 ${successCount} 件の更新に成功しました。</span>`;
+            showToast(`✅ 一括適用完了！全 ${successCount} 件を更新しました。`, 'success');
+        } else {
+            helpText.innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> 完了しました。成功: ${successCount} 件, 失敗: ${failCount} 件</span>`;
+            showToast(`⚠️ 一括適用完了。成功: ${successCount} 件, 失敗: ${failCount} 件`, 'warning');
+        }
+
+        // Reload page to reflect changes (including cache invalidation)
+        setTimeout(() => {
+            location.reload();
+        }, 1500);
+
+        // Re-enable button and restore text (in finally block would be better, but for simplicity)
+        applyBtn.disabled = false;
+        applyBtn.innerHTML = originalBtnHtml;
+
+        // Reset help text after 5 seconds
+        setTimeout(() => {
+            helpText.innerHTML = '※ 現在リストに表示されているフォルダすべてに、入力された設定が適用されます。空欄の項目はスキップされます。';
+        }, 5000);
+    }
+
+    /**
+     * Reapply existing calibration profiles to refresh thumbnails
+     */
+    async function reapplyCalibrations() {
+        // Get currently displayed items
+        const items = currentDisplayedItems;
+        if (!items || items.length === 0) {
+            alert('適用対象のフォルダがありません。');
+            return;
+        }
+
+        // Filter items that have a profile set
+        const itemsWithProfile = items.filter(item => item.profile || item.db_profile);
+
+        if (itemsWithProfile.length === 0) {
+            alert('プロファイルが設定されているフォルダがありません。');
+            return;
+        }
+
+        // Confirmation
+        const confirmMsg = `${itemsWithProfile.length} 件のフォルダのキャリブレーションを再適応します。\nサムネイルキャッシュがクリアされ、再生成されます。\n\nよろしいですか？`;
+        if (!confirm(confirmMsg)) {
+            return;
+        }
+
+        // Get button and help text elements
+        const reapplyBtn = document.getElementById('reapplyBtn');
+        const helpText = document.getElementById('batchApplyHelp');
+
+        // Disable button
+        reapplyBtn.disabled = true;
+        const originalBtnHtml = reapplyBtn.innerHTML;
+        reapplyBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>再適応中...';
+        helpText.innerHTML = '<span class="text-info"><i class="bi bi-hourglass-split"></i> 処理中...</span>';
+
+        try {
+            // Group items by profile
+            const runIdProfileMap = {};
+            itemsWithProfile.forEach(item => {
+                const profile = item.profile || item.db_profile;
+                if (!runIdProfileMap[profile]) {
+                    runIdProfileMap[profile] = [];
+                }
+                if (item.run_id) {
+                    runIdProfileMap[profile].push(item.run_id);
+                }
+            });
+
+            // Call API for each profile
+            let totalSuccess = 0;
+            for (const [profile, runIds] of Object.entries(runIdProfileMap)) {
+                if (runIds.length === 0) continue;
+
+                const response = await fetch('/api/calibration_check/apply_run_profiles', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        run_ids: runIds,
+                        profile: profile
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    totalSuccess += result.count || 0;
+                } else {
+                    console.error(`Failed to reapply profile ${profile}:`, await response.text());
+                }
+            }
+
+            helpText.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill"></i> ✅ 完了！${totalSuccess} 件のフォルダを再適応しました。</span>`;
+            showToast(`✅ 再適応完了！${totalSuccess} 件を処理しました。`, 'success');
+
+            // Reload page to show updated thumbnails
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+
+        } catch (e) {
+            console.error('Reapply failed:', e);
+            helpText.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill"></i> エラーが発生しました。</span>`;
+            showToast('再適応に失敗しました。', 'error');
+            reapplyBtn.disabled = false;
+            reapplyBtn.innerHTML = originalBtnHtml;
+        }
+    }
+</script>
+{% endblock %}

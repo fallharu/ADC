@@ -1,0 +1,3592 @@
+{% extends "base.html" %}
+
+{% block title %}後処理・キャリブレーション{% endblock %}
+
+{% block content %}
+<h2>3. 後処理 & キャリブレーション</h2>
+<p>解析済みのRunに対して、キャリブレーションの作成・適用、および各種後処理を実行します。</p>
+
+<div id="postProcessProgressArea" class="card bg-light mb-4" style="display: none;">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>後処理の進捗</span>
+    <span id="postProcessStatusBadge" class="badge bg-secondary">待機中</span>
+  </div>
+  <div class="card-body">
+    <p class="fw-bold mb-3" id="postProcessStatusMessage">処理を開始しています...</p>
+    <div class="progress" style="height: 1.5rem;">
+      <div id="postProcessProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+        role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width: 0%;">0%</div>
+    </div>
+
+    <!-- Secondary Progress for current batch -->
+    <div id="batchProgressContainer" class="mt-2" style="display: none;">
+      <div class="d-flex justify-content-between align-items-end mb-1">
+        <label class="small text-muted">現在のバッチ進捗</label>
+        <span id="batchPercentLabel" class="small text-muted">0%</span>
+      </div>
+      <div class="progress" style="height: 0.5rem;">
+        <div id="batchProgressBar" class="progress-bar bg-info" role="progressbar" style="width: 0%;" aria-valuenow="0"
+          aria-valuemin="0" aria-valuemax="100"></div>
+      </div>
+      <div id="batchDetailText" class="small text-muted mt-1 text-truncate"></div>
+    </div>
+    <p class="small text-muted mb-0 mt-2" id="postProcessStatusMeta"></p>
+    <div id="postProcessColumnSummary" class="mt-3"></div>
+    <div id="postProcessErrorSummary" class="mt-3"></div>
+  </div>
+</div>
+
+<div id="postProcessQueueCard" class="card bg-light mb-4" style="display: none;">
+  <div class="card-header">待機中のタスク</div>
+  <div class="card-body">
+    <p id="postProcessQueueEmpty" class="text-muted small mb-2">現在待機中のタスクはありません。</p>
+    <ul id="postProcessQueueList" class="list-group list-group-flush"></ul>
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- Step1: キャリブレーション管理 -->
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">Step 1: キャリブレーション管理</div>
+      <div class="card-body d-flex flex-column">
+        <a href="{{ url_for('main.calibration_check_view') }}" target="_blank"
+          class="btn btn-outline-primary mb-3 w-100">
+          <i class="bi bi-rulers me-2"></i>フォルダ別キャリブレーション確認
+        </a>
+
+        <!-- タブナビゲーション -->
+        <ul class="nav nav-tabs mb-3" id="calibTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-new" data-bs-toggle="tab" data-bs-target="#content-new"
+              type="button" role="tab" aria-controls="content-new" aria-selected="true">新規作成</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-edit" data-bs-toggle="tab" data-bs-target="#content-edit" type="button"
+              role="tab" aria-controls="content-edit" aria-selected="false">編集</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-apply" data-bs-toggle="tab" data-bs-target="#content-apply" type="button"
+              role="tab" aria-controls="content-apply" aria-selected="false">適用</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-delete" data-bs-toggle="tab" data-bs-target="#content-delete" type="button"
+              role="tab" aria-controls="content-delete" aria-selected="false" class="text-danger">削除</button>
+          </li>
+        </ul>
+
+        <!-- タブコンテンツ -->
+        <div class="tab-content" id="calibTabsContent">
+          <!-- 新規作成タブ -->
+          <div class="tab-pane fade show active" id="content-new" role="tabpanel" aria-labelledby="tab-new">
+            <form action="{{ url_for('main.calibration_view') }}" method="GET" target="_blank" rel="noopener"
+              class="mb-3" id="calibrationLaunchForm">
+              <h6 class="card-subtitle mb-2 text-muted">新規プロファイルを作成</h6>
+              <p class="small text-muted mb-2">選択したRunの動画をキャリブレーションツールで別タブに表示します。</p>
+              <div class="mb-2">
+                <label for="calibRunSelect" class="form-label small">参照するRun:</label>
+                <select id="calibRunSelect" name="run_id" class="form-select form-select-sm" required>
+                  <option value="" disabled selected>-- 動画を選択 --</option>
+                  {% for log in logs %}
+                  <option value="{{ log.run_id }}">{{ log.video_filename }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="calibPathHint" class="form-label small">動画パスのヒント (任意)</label>
+                <input id="calibPathHint" name="path_hint" type="text" class="form-control form-control-sm"
+                  placeholder="例: uploads/1_250721/1_20250721_000G2598_bike_clips.mp4">
+                <div class="form-text">サブフォルダ名や絶対パスを入力すると、その場所を優先的に探索します。</div>
+              </div>
+              <div class="mb-3">
+                <label for="profileName" class="form-label small">プロファイル名:</label>
+                <input id="profileName" name="profile" type="text" class="form-control form-control-sm"
+                  placeholder="例: highway_daytime" required>
+                <div class="form-text">英数字・ハイフン・アンダースコアのみ利用できます。</div>
+              </div>
+              <button type="submit" class="btn btn-warning btn-sm w-100">キャリブレーションツールを開く</button>
+            </form>
+          </div>
+
+          <!-- 編集タブ -->
+          <div class="tab-pane fade" id="content-edit" role="tabpanel" aria-labelledby="tab-edit">
+            <form action="{{ url_for('main.calibration_view') }}" method="GET" target="_blank" rel="noopener"
+              class="mb-auto" id="calibrationEditForm">
+              <h6 class="card-subtitle mb-2 text-muted">既存プロファイルを修正</h6>
+              <p class="small text-muted mb-2">既存のプロファイルを選択して編集します。</p>
+              <div class="mb-2">
+                <label for="editProfileSelect" class="form-label small">修正するプロファイル:</label>
+                <select id="editProfileSelect" name="profile" class="form-select form-select-sm" required>
+                  <option value="" disabled selected>-- プロファイルを選択 --</option>
+                  {% for profile in available_profiles %}
+                  <option value="{{ profile }}">{{ profile }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-2">
+                <label for="editRunSelect" class="form-label small">参照するRun (任意):</label>
+                <select id="editRunSelect" name="run_id" class="form-select form-select-sm">
+                  <option value="">-- 変更しない --</option>
+                  {% for log in logs %}
+                  <option value="{{ log.run_id }}">{{ log.video_filename }}</option>
+                  {% endfor %}
+                </select>
+                <div class="form-text">別のRunの動画でプロファイルを確認・調整したい場合に選択してください。</div>
+              </div>
+              <button type="submit" class="btn btn-info btn-sm w-100">キャリブレーションツールを開く</button>
+            </form>
+          </div>
+
+          <!-- 適用タブ -->
+          <div class="tab-pane fade" id="content-apply" role="tabpanel" aria-labelledby="tab-apply">
+            <form action="{{ url_for('main.apply_calibration') }}" method="POST">
+              {% if csrf_token is defined %}
+              <input type="hidden" name="csrf_token"
+                value="{{ csrf_token() if csrf_token is callable else csrf_token }}">
+              {% endif %}
+              <h6 class="card-subtitle mb-2 text-muted">既存プロファイルの適用</h6>
+              <div class="mb-2">
+                <label for="applyRunSelect" class="form-label small">適用対象のRun:</label>
+                <select id="applyRunSelect" name="run_id" class="form-select form-select-sm" required>
+                  <option value="" disabled selected>-- Runを選択 --</option>
+                  {% for log in logs %}
+                  <option value="{{ log.run_id }}">Run #{{ log.run_id }} (現在: {{ log.calibration_profile or '未設定'
+                    }})
+                  </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="profileSelect" class="form-label small">適用するプロファイル:</label>
+                <select id="profileSelect" name="profile_name" class="form-select form-select-sm" required>
+                  <option value="" disabled selected>-- プロファイルを選択 --</option>
+                  {% for profile in available_profiles %}
+                  <option value="{{ profile }}">{{ profile }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <button type="submit" class="btn btn-info btn-sm w-100">このプロファイルをRunに適用</button>
+            </form>
+          </div>
+
+          <!-- 削除タブ -->
+          <div class="tab-pane fade" id="content-delete" role="tabpanel" aria-labelledby="tab-delete">
+            <form action="{{ url_for('main.delete_profile') }}" method="POST" class="mt-2">
+              {% if csrf_token is defined %}
+              <input type="hidden" name="csrf_token"
+                value="{{ csrf_token() if csrf_token is callable else csrf_token }}">
+              {% endif %}
+              <h6 class="card-subtitle mb-2 text-danger">既存プロファイルの削除</h6>
+              <div class="mb-2">
+                <label for="deleteProfileSelect" class="form-label small">削除するプロファイル:</label>
+                <select id="deleteProfileSelect" name="profile_name" class="form-select form-select-sm" required>
+                  <option value="" disabled selected>-- プロファイルを選択 --</option>
+                  {% for profile in available_profiles %}
+                  <option value="{{ profile }}">{{ profile }}</option>
+                  {% endfor %}
+                </select>
+                <div class="form-text">削除すると復元できません。適用済みのRunではプロファイルが未設定に戻ります。</div>
+              </div>
+              <button type="submit" class="btn btn-outline-danger btn-sm w-100"
+                onclick="return confirm('選択したプロファイルを削除します。よろしいですか？');">このプロファイルを削除</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step2: 後処理実行 -->
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">Step 2: 後処理実行</div>
+      <div class="card-body">
+        <form action="{{ url_for('main.post_process_action') }}" method="POST" id="postProcessActionForm">
+          {% if csrf_token is defined %}
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is callable else csrf_token }}">
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label d-block">処理対象の種類:</label>
+            <div class="btn-group" role="group" aria-label="処理対象の種類切替">
+              <input type="radio" class="btn-check" name="target_mode" id="targetModeRun" value="run" checked>
+              <label class="btn btn-outline-primary btn-sm" for="targetModeRun">Run単体</label>
+              <input type="radio" class="btn-check" name="target_mode" id="targetModeFolder" value="folder">
+              <label class="btn btn-outline-primary btn-sm" for="targetModeFolder">フォルダ一括</label>
+              <input type="radio" class="btn-check" name="target_mode" id="targetModeCondition" value="condition">
+              <label class="btn btn-outline-primary btn-sm" for="targetModeCondition">条件指定</label>
+            </div>
+          </div>
+          <div class="mb-3" id="runSelectionGroup">
+            <label for="actionRunSelect" class="form-label">処理対象のRun:</label>
+            <select id="actionRunSelect" name="run_id" class="form-select" required>
+              <option value="" disabled selected>-- Runを選択 --</option>
+              {% for log in logs %}
+              <option value="{{ log.run_id }}" {% if selected_run_id is defined and log.run_id==selected_run_id
+                %}selected{% endif %}>
+                Run #{{ log.run_id }} (Profile: {{ log.calibration_profile or '未設定' }})
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="border rounded-3 p-3 mb-3 bg-light" id="folderSelectionGroup" style="display: none;">
+            <h6 class="mb-2">フォルダ単位で後処理を実行</h6>
+            <div class="mb-2">
+              <label for="actionFolderSelect" class="form-label">対象フォルダ:</label>
+              <select id="actionFolderSelect" name="folder_alias" class="form-select">
+                <option value="" disabled selected>-- フォルダを選択 --</option>
+                {% for batch in folder_batches %}
+                <option value="{{ batch.folder_alias }}">
+                  {{ batch.folder_alias }} ({{ batch.run_count }}本 / 完了 {{ batch.completed_runs }} / プロファイル未設定 {{
+                  batch.missing_profiles }})
+                </option>
+                {% endfor %}
+              </select>
+              <div class="form-text">選択したフォルダに属するRunを順番に処理します。未完了のRunも自動的に対象になります。</div>
+            </div>
+            <div>
+              <label for="folderProfileSelect" class="form-label">適用する既存プロファイル (任意):</label>
+              <select id="folderProfileSelect" name="folder_profile_name" class="form-select">
+                <option value="">-- 変更しない --</option>
+                {% for profile in available_profiles %}
+                <option value="{{ profile }}">{{ profile }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">指定するとフォルダ内の全Runに同じプロファイルを設定してから後処理を実施します。</div>
+            </div>
+            <div class="mt-3">
+              <label for="folderProfileScope" class="form-label">プロファイルを適用するサブフォルダ (任意):</label>
+              <textarea id="folderProfileScope" name="folder_profile_scope" class="form-control" rows="3"
+                placeholder="例: new_x/2_250727 や new_x/2_250727/区間A"></textarea>
+              <div class="form-text">空欄の場合はフォルダ全体が対象です。サブフォルダを複数指定する場合は改行で区切ってください (\ を含むパスも自動的に / へ変換されます)。</div>
+            </div>
+            <div class="mt-3">
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="openFolderProfileManager"
+                disabled>サブフォルダ別プロファイル設定</button>
+              <div class="form-text">フォルダ内のサブフォルダごとに適用するプロファイルを一覧から選択できます。</div>
+            </div>
+          </div>
+
+          <div class="border rounded-3 p-3 mb-3 bg-light" id="conditionSelectionGroup" style="display: none;">
+            <h6 class="mb-2">条件を指定して後処理を実行</h6>
+            <p class="small text-muted mb-3">指定した条件に一致するすべてのRunを一括処理します。</p>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label for="conditionRoadType" class="form-label">道路タイプ</label>
+                <select id="conditionRoadType" name="condition_road_type" class="form-select">
+                  <option value="all">すべて</option>
+                  <option value="non_widened" selected>未拡幅道路 (non_widened)</option>
+                  <option value="widened">拡幅道路 (widened)</option>
+                  <option value="undefined">未定義 (空欄)</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="conditionYear" class="form-label">収集年度</label>
+                <select id="conditionYear" name="condition_year" class="form-select">
+                  <option value="all">すべて</option>
+                  <option value="2024">2024年</option>
+                  <option value="2025">2025年</option>
+                </select>
+              </div>
+            </div>
+            <div class="alert alert-warning mt-3 mb-0 small">
+              <i class="bi bi-exclamation-triangle-fill me-1"></i>
+              対象Run数が多くなる可能性があります。実行前に確認してください。
+            </div>
+          </div>
+          <div class="border rounded-3 p-3 mb-3 bg-light">
+            <h6 class="mb-2">Run ID範囲で後処理を実行</h6>
+            <p class="small text-muted mb-3">開始と終了のRun IDを入力すると、指定範囲内のRunを順番に後処理キューへ登録します。</p>
+            <div class="row g-2 align-items-end">
+              <div class="col-sm-4 col-md-3">
+                <label for="runRangeStart" class="form-label small">開始Run ID</label>
+                <input type="number" class="form-control form-control-sm" id="runRangeStart" name="run_range_start"
+                  min="1" placeholder="例: 101">
+              </div>
+              <div class="col-sm-4 col-md-3">
+                <label for="runRangeEnd" class="form-label small">終了Run ID</label>
+                <input type="number" class="form-control form-control-sm" id="runRangeEnd" name="run_range_end" min="1"
+                  placeholder="例: 120">
+              </div>
+              <div class="col-sm-4 col-md-3 col-lg-2">
+                <label class="form-label small d-none d-sm-block">&nbsp;</label>
+                <button type="submit" class="btn btn-outline-primary btn-sm w-100" name="action"
+                  value="run_range_postprocess" formnovalidate>範囲を後処理</button>
+              </div>
+            </div>
+            <div class="form-text">Run IDの昇順で処理します。エラーが発生したRunは記録して次のRunへ進みます。</div>
+          </div>
+          <!-- 動画出力オプション (アコーディオン化) -->
+          <div class="accordion mb-3" id="videoOptionsAccordion">
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="headingVideoOptions">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                  data-bs-target="#collapseVideoOptions" aria-expanded="false" aria-controls="collapseVideoOptions">
+                  <span class="me-2"><i class="bi bi-film"></i></span> 動画出力オプション・詳細設定
+                </button>
+              </h2>
+              <div id="collapseVideoOptions" class="accordion-collapse collapse" aria-labelledby="headingVideoOptions"
+                data-bs-parent="#videoOptionsAccordion">
+                <div class="accordion-body bg-light">
+                  <small class="text-muted d-block mb-3">ラベルと線の表示内容を必要に応じて切り替えできます。</small>
+                  <input type="hidden" name="video_options_submitted" value="1">
+                  <div class="row g-3">
+                    <div class="col-md-6">
+                      <p class="fw-bold small mb-2">描画する要素</p>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowVehicleBox"
+                          name="video_show_vehicle_box" {% if video_option_defaults['show_vehicle_box'] %}checked{%
+                          endif %}>
+                        <label class="form-check-label small" for="videoShowVehicleBox">車両バウンディングボックス</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowTireBoxes"
+                          name="video_show_tire_boxes" {% if video_option_defaults['show_tire_boxes'] %}checked{% endif
+                          %}>
+                        <label class="form-check-label small" for="videoShowTireBoxes">タイヤ検出枠</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowTrace" name="video_show_trace" {%
+                          if video_option_defaults['show_trace'] %}checked{% endif %}>
+                        <label class="form-check-label small" for="videoShowTrace">速度計測点のトレース履歴</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowMeasurement"
+                          name="video_show_measurement" {% if video_option_defaults['show_measurement'] %}checked{%
+                          endif %}>
+                        <label class="form-check-label small" for="videoShowMeasurement">計測点マーカーと白線距離補助線</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowApproach"
+                          name="video_show_approach_lines" {% if video_option_defaults['show_approach_lines']
+                          %}checked{% endif %}>
+                        <label class="form-check-label small" for="videoShowApproach">接近・離隔距離ライン</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowLaneLeft"
+                          name="video_show_lane_left" {% if video_option_defaults['show_lane_left'] %}checked{% endif
+                          %}>
+                        <label class="form-check-label small" for="videoShowLaneLeft">白線（左）</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowLaneRight"
+                          name="video_show_lane_right" {% if video_option_defaults['show_lane_right'] %}checked{% endif
+                          %}>
+                        <label class="form-check-label small" for="videoShowLaneRight">白線（右）</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowLaneCenter"
+                          name="video_show_lane_center" {% if video_option_defaults['show_lane_center'] %}checked{%
+                          endif %}>
+                        <label class="form-check-label small" for="videoShowLaneCenter">白線（中央/基準線）</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowHomographyOverlay"
+                          name="video_show_homography_overlay" {% if video_option_defaults['show_homography_overlay']
+                          %}checked{% endif %}>
+                        <label class="form-check-label small"
+                          for="videoShowHomographyOverlay">ホモグラフィ範囲とスケール線を薄く表示</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoShowHomographyOnly"
+                          name="video_show_homography_only" {% if video_option_defaults['show_homography_only']
+                          %}checked{% endif %}>
+                        <label class="form-check-label small" for="videoShowHomographyOnly">ホモグラフィのみを表示</label>
+                      </div>
+                    </div>
+                    <div class="col-md-6">
+                      <p class="fw-bold small mb-2">ラベルに含める項目</p>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoLabelGroup" name="video_label_group" {%
+                          if video_option_defaults['label_group_id'] %}checked{% endif %}>
+                        <label class="form-check-label small" for="videoLabelGroup">グループID</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoLabelSpeed" name="video_label_speed" {%
+                          if video_option_defaults['label_speed'] %}checked{% endif %}>
+                        <label class="form-check-label small" for="videoLabelSpeed">速度</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoLabelLane" name="video_label_lane" {%
+                          if video_option_defaults['label_lane_distance'] %}checked{% endif %}>
+                        <label class="form-check-label small" for="videoLabelLane">白線距離</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoLabelApproach"
+                          name="video_label_approach" {% if video_option_defaults['label_approach'] %}checked{% endif
+                          %}>
+                        <label class="form-check-label small" for="videoLabelApproach">接近距離</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoLabelClearance"
+                          name="video_label_clearance" {% if video_option_defaults['label_clearance'] %}checked{% endif
+                          %}>
+                        <label class="form-check-label small" for="videoLabelClearance">離隔距離</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoLabelDirection"
+                          name="video_label_direction" {% if video_option_defaults['label_direction'] %}checked{% endif
+                          %}>
+                        <label class="form-check-label small" for="videoLabelDirection">進行方向</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoLabelOvertake"
+                          name="video_label_overtake" {% if video_option_defaults['label_overtake'] %}checked{% endif
+                          %}>
+                        <label class="form-check-label small" for="videoLabelOvertake">追い越し判定</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="videoLabelAcceleration"
+                          name="video_label_acceleration" {% if video_option_defaults['label_acceleration'] %}checked{%
+                          endif %}>
+                        <label class="form-check-label small" for="videoLabelAcceleration">加減速</label>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row g-3 mt-2">
+                    <div class="col-md-6">
+                      <label for="videoFontPath" class="form-label small">ラベル表示フォント</label>
+                      <select id="videoFontPath" name="video_font_path" class="form-select form-select-sm">
+                        <option value="" {% if not video_option_defaults['font_path'] %}selected{% endif %}>
+                          自動選択（最初に見つかったフォント）
+                        </option>
+                        {% if video_fonts %}
+                        {% for font in video_fonts %}
+                        <option value="{{ font.path }}" {% if video_option_defaults['font_path']==font.path %}selected{%
+                          endif %}>{{ font.display_name }}{% if font.directory %} - {{ font.directory }}{% endif %}
+                        </option>
+                        {% endfor %}
+                        {% else %}
+                        <option value="" disabled>フォントフォルダに TrueType/OTF ファイルが見つかりません</option>
+                        {% endif %}
+                      </select>
+                      <div class="form-text">PIL が有効な場合のみ日本語フォントが利用されます。</div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                      <label for="videoFontSize" class="form-label small">フォントサイズ (px)</label>
+                      <input type="number" min="8" max="96" step="1" id="videoFontSize" name="video_font_size"
+                        class="form-control form-control-sm" value="{{ video_option_defaults['font_size'] }}">
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                      <label for="videoOutputFormat" class="form-label small">出力形式</label>
+                      <select id="videoOutputFormat" name="video_output_format" class="form-select form-select-sm">
+                        <option value="mp4" {% if video_option_defaults['output_format']=='mp4' %}selected{% endif %}>
+                          MP4
+                          (H.264/MP4V)</option>
+                        <option value="avi" {% if video_option_defaults['output_format']=='avi' %}selected{% endif %}>
+                          AVI
+                          (Xvid)</option>
+                        <option value="mov" {% if video_option_defaults['output_format']=='mov' %}selected{% endif %}>
+                          MOV
+                          (MP4V)</option>
+                        <option value="mkv" {% if video_option_defaults['output_format']=='mkv' %}selected{% endif %}>
+                          MKV
+                          (H.264)</option>
+                      </select>
+                      <label for="videoOutputNameMode" class="form-label small mt-3">出力ファイル名</label>
+                      <select id="videoOutputNameMode" name="video_output_name_mode" class="form-select form-select-sm">
+                        <option value="full" {% if video_option_defaults['output_name_mode']=='full' %}selected{% endif
+                          %}>
+                          元の動画名をすべて使用</option>
+                        <option value="first_segment" {% if video_option_defaults['output_name_mode']=='first_segment'
+                          %}selected{% endif %}>元の動画名の最初の区切りのみ
+                        </option>
+                      </select>
+                      <div class="form-text small">例: <span class="text-muted">1_20250720_xxx.mp4 →</span> 「最初のみ」なら
+                        <code>1</code>、「すべて」なら <code>1_20250720_xxx</code> を基に生成します。
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- インラインプレビューセクション -->
+          <div class="card mb-3" id="inlinePreviewSection" style="display: none;">
+            <div class="card-header bg-info text-white py-2">
+              <i class="bi bi-eye me-2"></i>処理内容の確認
+            </div>
+            <div class="card-body">
+              <div class="row g-3">
+                <!-- プレビュー画像 -->
+                <div class="col-md-7">
+                  <label class="form-label small fw-bold mb-1">キャリブレーション適用イメージ</label>
+                  <div
+                    class="border rounded bg-dark d-flex align-items-center justify-content-center position-relative overflow-hidden"
+                    style="height: 200px;">
+                    <img id="inlinePreviewImage" src="" class="img-fluid"
+                      style="display: none; max-height: 100%; max-width: 100%; object-fit: contain;">
+                    <div id="inlinePreviewNoImage" class="text-white-50 small text-center p-3" style="display: none;">
+                      <i class="bi bi-camera-video-off fs-1 d-block mb-2"></i>
+                      プレビュー画像を取得できませんでした
+                    </div>
+                    <div id="inlinePreviewLoading" class="text-white small text-center p-3">
+                      <div class="spinner-border spinner-border-sm text-light mb-2" role="status"></div>
+                      <div>読み込み中...</div>
+                    </div>
+                  </div>
+                  <!-- Run ナビゲーション -->
+                  <div class="d-flex justify-content-between align-items-center mt-2 bg-light p-1 rounded border">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="inlinePrevBtn" disabled>
+                      <i class="bi bi-chevron-left"></i> 前へ
+                    </button>
+                    <span class="small fw-bold text-muted" id="inlinePreviewCounter">- / -</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="inlineNextBtn" disabled>
+                      次へ <i class="bi bi-chevron-right"></i>
+                    </button>
+                  </div>
+                </div>
+                <!-- 情報テーブル -->
+                <div class="col-md-5">
+                  <table class="table table-sm table-bordered mb-2">
+                    <tbody>
+                      <tr>
+                        <th class="table-light" style="width: 40%;">適用プロファイル</th>
+                        <td id="inlinePreviewProfile" class="fw-bold text-primary">-</td>
+                      </tr>
+                      <tr>
+                        <th class="table-light">登録年度</th>
+                        <td id="inlinePreviewYear">-</td>
+                      </tr>
+                      <tr>
+                        <th class="table-light">道路種別</th>
+                        <td id="inlinePreviewRoadType">-</td>
+                      </tr>
+                      <tr>
+                        <th class="table-light">処理対象数</th>
+                        <td id="inlinePreviewCount" class="fw-bold">-</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div>
+                    <label class="small text-muted fw-bold">対象Run ID (抜粋)</label>
+                    <div id="inlinePreviewRunIds" class="small text-muted border rounded p-2 bg-light font-monospace"
+                      style="max-height: 80px; overflow-y: auto;">-</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="fw-bold mb-2">実行するアクション:</p>
+          <div class="row g-2">
+            <div class="col-6">
+              <button type="submit" name="action" value="generate_video"
+                class="btn btn-success w-100 h-100 py-3 btn-post-process-action shadow-sm">
+                <div class="fs-5 mb-1"><i class="bi bi-film"></i></div>
+                <div>動画生成</div>
+              </button>
+            </div>
+            <div class="col-6">
+              <button type="submit" name="action" value="all_postprocess"
+                class="btn btn-danger w-100 h-100 py-3 btn-post-process-action shadow-sm">
+                <div class="fs-5 mb-1"><i class="bi bi-collection-play"></i></div>
+                <div>全て実行</div>
+              </button>
+            </div>
+            <div class="col-6">
+              <button type="submit" name="action" value="all_save" class="btn btn-dark w-100 btn-post-process-action">
+                <i class="bi bi-filetype-csv me-1"></i> CSV出力
+              </button>
+            </div>
+            <div class="col-6">
+              <button type="submit" name="action" value="export_excel"
+                class="btn btn-secondary w-100 btn-post-process-action">
+                <i class="bi bi-file-earmark-spreadsheet me-1"></i> Excel出力
+              </button>
+            </div>
+          </div>
+          <p class="form-text mt-2">Excel出力は検出結果閲覧画面と同じ日本語カラム名・クラス名で保存します。</p>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-4">
+  <div class="card-header">統計データ出力 (Excel)</div>
+  <div class="card-body">
+    <form action="{{ url_for('main.export_statistics') }}" method="POST" class="row g-3">
+      {% if csrf_token is defined %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is callable else csrf_token }}">
+      {% endif %}
+      <div class="col-lg-6">
+        <label for="statsRunSelect" class="form-label">対象Runを選択</label>
+        <select id="statsRunSelect" name="stats_run_ids" class="form-select" multiple size="8" required>
+          {% for log in logs %}
+          <option value="{{ log.run_id }}">Run #{{ log.run_id }} - {{ log.filename }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Ctrl / ⌘ + クリックで複数選択できます。</div>
+      </div>
+      <div class="col-lg-6">
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" id="statsDownwardOnly" name="stats_downward_only" value="1">
+          <label class="form-check-label" for="statsDownwardOnly">下向き移動（後退/右方向）データのみ抽出</label>
+        </div>
+        <p class="small text-muted">自転車クラスのみを対象とし、白線の内側を「A (+)」、外側を「B (-)」として比較します。</p>
+        <ul class="small text-muted">
+          <li>区間内平均速度、離隔発生時の距離・速度をグループ別に算出します。</li>
+          <li>Run別の集計表と詳細データを同一Excelファイルに含めます。</li>
+          <li>白線区分ごとの平均速度・離隔距離をグラフで可視化したシートも自動生成します。</li>
+        </ul>
+        <div class="mt-3">
+          <button type="submit" class="btn btn-outline-success">Excelをダウンロード</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<h3 class="mt-5">解析実行ログ</h3>
+<div class="table-responsive">
+  <table class="table table-striped table-hover table-sm">
+    <thead class="table-dark">
+      <tr>
+        <th>Run ID</th>
+        <th>動画ファイル</th>
+        <th>フォルダ</th>
+        <th>処理開始日時</th>
+        <th>状態</th>
+        <th>適用プロファイル</th>
+      </tr>
+    </thead>
+    <tbody id="processLogsBody">
+      {% for log in logs %}
+      <tr>
+        <td>{{ log.run_id }}</td>
+        <td>{{ log.filename }}</td>
+        <td>{{ log.folder_alias or ('フォルダ処理' if log.is_folder_batch else '---') }}</td>
+        <td>{{ log.process_start }}</td>
+        <td>
+          {% if log.status == 'completed' %}
+          <span class="badge bg-success">完了</span>
+          {% elif log.status == 'error' %}
+          <span class="badge bg-danger">エラー</span>
+          {% else %}
+          <span class="badge bg-secondary">{{ log.status }}</span>
+          {% endif %}
+        </td>
+        <td>{{ log.calibration_profile or '未設定' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card mt-3" id="postProcessLastResultCard">
+  <div class="card-header">直近のリザルト</div>
+  <div class="card-body">
+    <div class="d-flex align-items-center justify-content-between">
+      <div id="postProcessLastResult" class="text-truncate small text-muted pe-2" style="max-width: 90%;">
+        直近の実行結果はまだありません。</div>
+      <button class="btn btn-sm btn-outline-secondary text-nowrap" type="button" data-bs-toggle="collapse"
+        data-bs-target="#postProcessResultDetailBlock" aria-expanded="false"
+        aria-controls="postProcessResultDetailBlock">
+        <i class="bi bi-info-circle me-1"></i>詳細
+      </button>
+    </div>
+    <div class="collapse mt-2" id="postProcessResultDetailBlock">
+      <div class="card card-body bg-light position-relative">
+        <button type="button" class="btn-close position-absolute top-0 end-0 m-2" data-bs-toggle="collapse"
+          data-bs-target="#postProcessResultDetailBlock" aria-label="Close"></button>
+        <h6 class="card-subtitle mb-2 text-muted">実行結果詳細</h6>
+        <div id="postProcessResultDetailContent" class="small font-monospace" style="white-space: pre-wrap;"></div>
+        <div id="postProcessResultImages" class="mt-3 row g-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="folderProfileModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" data-role="modal-title">サブフォルダ別プロファイル設定</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info d-none" role="alert" data-role="status-text"></div>
+        <p class="small text-muted">フォルダ内のRunをサブフォルダ単位で選択し、既存プロファイルを割り当てます。変更後は即座にDBへ保存されます。</p>
+        <h6 class="mt-3">サブフォルダ一覧</h6>
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+          <p class="small text-muted mb-0">各行でプロファイルを選択し、「適用」または「すべてを登録」でまとめて反映できます。</p>
+          <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-outline-primary" data-role="apply-scope-all"
+              data-action="apply-scope-all" disabled>すべてを登録</button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle mb-0" style="table-layout: fixed;">
+            <thead class="table-light">
+              <tr>
+                <th style="min-width: 140px;">サブフォルダ</th>
+                <th style="min-width: 50px;">Run数</th>
+                <th style="min-width: 100px;">プロファイル</th>
+                <th style="min-width: 110px;">道路タイプ</th>
+                <th style="min-width: 85px;">収集年度</th>
+                <th style="min-width: 140px;">プロファイル変更</th>
+                <th style="min-width: 160px;">その他</th>
+              </tr>
+            </thead>
+            <tbody data-role="scope-table-body">
+              <tr data-role="empty-scopes">
+                <td colspan="7" class="text-muted small">指定されたフォルダ内にサブフォルダが見つかりませんでした。フォルダ構造を確認してください。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="form-text mt-3">「未設定にする」を選ぶと該当サブフォルダ配下の全Runのプロファイルを空にします。</p>
+        <hr class="my-3">
+        <h6 class="mt-3">動画ごとのプロファイル</h6>
+        <p class="small text-muted">サブフォルダ単位ではなく個別の動画にプロファイルを適用したい場合はこちらを使用してください。</p>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th style="width: 4%;" class="text-center">
+                  <input type="checkbox" class="form-check-input" data-role="run-select-all" aria-label="すべて選択">
+                </th>
+                <th style="width: 46%;">動画 / 相対パス</th>
+                <th style="width: 12%;">Run ID</th>
+                <th style="width: 22%;">現在のプロファイル</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody data-role="run-table-body">
+              <tr data-role="empty-runs">
+                <td colspan="5" class="text-muted small">指定されたフォルダ内に有効な動画データが登録されていません。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="row g-3 align-items-end mt-2 d-none" data-role="run-bulk-controls">
+          <div class="col-lg-6 col-md-7">
+            <label class="form-label small">選択した動画に適用するプロファイル:</label>
+            <div data-role="run-bulk-select-wrapper"></div>
+          </div>
+          <div class="col-lg-3 col-md-5">
+            <button type="button" class="btn btn-primary btn-sm w-100" data-role="apply-run-profile"
+              disabled>選択した動画に適用</button>
+          </div>
+          <div class="col-lg-3">
+            <p class="small text-muted mb-0" data-role="run-selection-summary">選択中: 0 件</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Calibration Preview Modal -->
+<div class="modal fade" id="calibrationPreviewModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">キャリブレーションプレビュー</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+      </div>
+      <div class="modal-body text-center">
+        <div id="calibPreviewLoading" class="my-5">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">読み込み中...</span>
+          </div>
+          <p class="text-muted mt-2">プレビューを生成しています...</p>
+        </div>
+        <div id="calibPreviewContent" class="d-none">
+          <img id="calibPreviewImage" class="img-fluid" alt="Calibration Preview" style="max-height: 70vh;">
+          <div id="calibPreviewInfo" class="mt-3 text-start">
+            <small class="text-muted">
+              <strong>プロファイル:</strong> <span id="calibPreviewProfileName">-</span><br>
+              <strong>キャリブレーションタイプ:</strong> <span id="calibPreviewType">-</span><br>
+              <strong>フレーム:</strong> <span id="calibPreviewFrameNum">-</span> / <span
+                id="calibPreviewTotalFrames">-</span>
+            </small>
+          </div>
+        </div>
+        <div id="calibPreviewError" class="alert alert-danger d-none" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Post Process Confirmation Modal moved to bottom of file -->
+
+
+{# progress を JSON スクリプトとして埋め込む（JS から安全に参照） #}
+<script id="initialProgressJSON"
+  type="application/json">{{ progress|tojson|safe if progress is defined else '{}' }}</script>
+<script id="availableProfilesJSON" type="application/json">{{ available_profiles|tojson|safe }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const progressArea = document.getElementById('postProcessProgressArea');
+    const statusMessage = document.getElementById('postProcessStatusMessage');
+    const statusBadge = document.getElementById('postProcessStatusBadge');
+    const statusMeta = document.getElementById('postProcessStatusMeta');
+    const progressBar = document.getElementById('postProcessProgressBar');
+    const queueCard = document.getElementById('postProcessQueueCard');
+    const queueList = document.getElementById('postProcessQueueList');
+    const queueEmpty = document.getElementById('postProcessQueueEmpty');
+    const lastResultEl = document.getElementById('postProcessLastResult');
+    const lastResultDetailContent = document.getElementById('postProcessResultDetailContent');
+    const lastResultEmptyText = '直近の実行結果はまだありません。';
+    const columnSummaryEl = document.getElementById('postProcessColumnSummary');
+    const errorSummaryEl = document.getElementById('postProcessErrorSummary');
+    const actionForm = document.getElementById('postProcessActionForm');
+    const actionButtons = actionForm ? Array.from(actionForm.querySelectorAll('button[type="submit"]')) : [];
+    let pendingAction = null;
+    const actionRunSelect = document.getElementById('actionRunSelect');
+    const runSelectionGroup = document.getElementById('runSelectionGroup');
+    const folderSelectionGroup = document.getElementById('folderSelectionGroup');
+    const folderSelect = document.getElementById('actionFolderSelect');
+    const folderProfileSelect = document.getElementById('folderProfileSelect');
+    const folderProfileManagerButton = document.getElementById('openFolderProfileManager');
+    const folderProfileModalEl = document.getElementById('folderProfileModal');
+    const folderProfileModal = folderProfileModalEl ? new bootstrap.Modal(folderProfileModalEl) : null;
+    const availableProfilesData = JSON.parse(document.getElementById('availableProfilesJSON')?.textContent || '[]');
+    const scopeTableBody = folderProfileModalEl?.querySelector('[data-role="scope-table-body"]') || null;
+    const scopeBulkButton = folderProfileModalEl?.querySelector('[data-role="apply-scope-all"]') || null;
+    const modalStatusAlert = folderProfileModalEl?.querySelector('[data-role="status-text"]') || null;
+    const modalTitle = folderProfileModalEl?.querySelector('[data-role="modal-title"]') || null;
+    const runTableBody = folderProfileModalEl?.querySelector('[data-role="run-table-body"]') || null;
+    const runSelectAllCheckbox = folderProfileModalEl?.querySelector('[data-role="run-select-all"]') || null;
+    const runBulkWrapper = folderProfileModalEl?.querySelector('[data-role="run-bulk-select-wrapper"]') || null;
+    const runBulkApplyButton = folderProfileModalEl?.querySelector('[data-role="apply-run-profile"]') || null;
+    const runSelectionSummary = folderProfileModalEl?.querySelector('[data-role="run-selection-summary"]') || null;
+    const runBulkControls = folderProfileModalEl?.querySelector('[data-role="run-bulk-controls"]') || null;
+    let currentFolderAlias = '';
+    let currentRunSelection = new Set();
+    const scopePendingChanges = new Map();
+    const runBulkSelect = buildProfileSelect('', {
+      allowNoChange: false,
+      allowClear: true,
+      className: 'form-select form-select-sm',
+      placeholderText: '-- プロファイルを選択 --',
+    });
+    if (runBulkWrapper) {
+      runBulkWrapper.innerHTML = '';
+      runBulkWrapper.appendChild(runBulkSelect);
+    }
+    updateScopeBulkButtonState();
+    const targetModeInputs = actionForm ? Array.from(actionForm.querySelectorAll('input[name="target_mode"]')) : [];
+    const runModeRadio = document.getElementById('targetModeRun');
+    const folderModeRadio = document.getElementById('targetModeFolder');
+    const folderModeLabel = document.querySelector('label[for="targetModeFolder"]');
+    const calibRunSelect = document.getElementById('calibRunSelect');
+    const applyRunSelect = document.getElementById('applyRunSelect');
+    const logsBody = document.getElementById('processLogsBody');
+
+    const initialProgress = JSON.parse(document.getElementById('initialProgressJSON')?.textContent || '{}');
+
+    // ===== Calibration Preview Modal =====
+    const calibrationPreviewModalEl = document.getElementById('calibrationPreviewModal');
+    const calibrationPreviewModal = calibrationPreviewModalEl ? new bootstrap.Modal(calibrationPreviewModalEl) : null;
+
+    const calibPreviewLoading = document.getElementById('calibPreviewLoading');
+    const calibPreviewContent = document.getElementById('calibPreviewContent');
+    const calibPreviewError = document.getElementById('calibPreviewError');
+
+    const calibPreviewImage = document.getElementById('calibPreviewImage');
+    const calibPreviewProfileName = document.getElementById('calibPreviewProfileName');
+    const calibPreviewType = document.getElementById('calibPreviewType');
+    const calibPreviewFrameNum = document.getElementById('calibPreviewFrameNum');
+    const calibPreviewTotalFrames = document.getElementById('calibPreviewTotalFrames');
+
+    const getPreviewUrl = (runId) => `/post_process/calibration_preview/${encodeURIComponent(runId)}`;
+
+    function resetCalibPreviewUI() {
+      if (calibPreviewError) {
+        calibPreviewError.classList.add('d-none');
+        calibPreviewError.textContent = '';
+      }
+      if (calibPreviewContent) calibPreviewContent.classList.add('d-none');
+      if (calibPreviewLoading) calibPreviewLoading.classList.remove('d-none');
+
+      if (calibPreviewImage) calibPreviewImage.src = '';
+      if (calibPreviewProfileName) calibPreviewProfileName.textContent = '-';
+      if (calibPreviewType) calibPreviewType.textContent = '-';
+      if (calibPreviewFrameNum) calibPreviewFrameNum.textContent = '-';
+      if (calibPreviewTotalFrames) calibPreviewTotalFrames.textContent = '-';
+    }
+
+    async function openCalibrationPreview(runId) {
+      if (!calibrationPreviewModal) {
+        window.open(`/calibration?run_id=${encodeURIComponent(runId)}`, '_blank', 'noopener');
+        return;
+      }
+
+      resetCalibPreviewUI();
+      calibrationPreviewModal.show();
+
+      try {
+        const res = await fetch(getPreviewUrl(runId), { headers: { 'Accept': 'application/json' } });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || data.status === 'error') {
+          throw new Error(data.message || `プレビュー取得に失敗しました (HTTP ${res.status})`);
+        }
+
+        const imageUrl = data.image_url || data.url || data.image || '';
+        if (!imageUrl) {
+          throw new Error('プレビュー画像のURLが返ってきませんでした。');
+        }
+
+        // Image load wait
+        await new Promise((resolve, reject) => {
+          calibPreviewImage.onload = () => resolve();
+          calibPreviewImage.onerror = () => reject(new Error('プレビュー画像の読み込みに失敗しました。'));
+          calibPreviewImage.src = imageUrl;
+        });
+
+        if (calibPreviewProfileName) calibPreviewProfileName.textContent = data.profile || data.profile_name || '-';
+        if (calibPreviewType) calibPreviewType.textContent = data.type || data.calibration_type || '-';
+        if (calibPreviewFrameNum) calibPreviewFrameNum.textContent = String(data.frame ?? data.frame_num ?? '-');
+        if (calibPreviewTotalFrames) calibPreviewTotalFrames.textContent = String(data.total_frames ?? '-');
+
+        if (calibPreviewLoading) calibPreviewLoading.classList.add('d-none');
+        if (calibPreviewContent) calibPreviewContent.classList.remove('d-none');
+      } catch (err) {
+        if (calibPreviewLoading) calibPreviewLoading.classList.add('d-none');
+        if (calibPreviewContent) calibPreviewContent.classList.add('d-none');
+        if (calibPreviewError) {
+          calibPreviewError.classList.remove('d-none');
+          calibPreviewError.textContent = err.message || 'プレビュー表示に失敗しました。';
+        }
+      }
+    }
+
+    // ===== Inline Preview Section =====
+    const inlinePreviewSection = document.getElementById('inlinePreviewSection');
+    const inlinePreviewImage = document.getElementById('inlinePreviewImage');
+    const inlinePreviewNoImage = document.getElementById('inlinePreviewNoImage');
+    const inlinePreviewLoading = document.getElementById('inlinePreviewLoading');
+    const inlinePreviewProfile = document.getElementById('inlinePreviewProfile');
+    const inlinePreviewYear = document.getElementById('inlinePreviewYear');
+    const inlinePreviewRoadType = document.getElementById('inlinePreviewRoadType');
+    const inlinePreviewCount = document.getElementById('inlinePreviewCount');
+    const inlinePreviewRunIds = document.getElementById('inlinePreviewRunIds');
+    const inlinePreviewCounter = document.getElementById('inlinePreviewCounter');
+    const inlinePrevBtn = document.getElementById('inlinePrevBtn');
+    const inlineNextBtn = document.getElementById('inlineNextBtn');
+
+    let inlinePreviewState = {
+      currentIndex: 0,
+      totalRuns: 0,
+      targetMode: 'run',
+      runId: null,
+      folderAlias: null,
+      folderProfileName: null
+    };
+
+    function resetInlinePreviewUI() {
+      if (inlinePreviewImage) inlinePreviewImage.style.display = 'none';
+      if (inlinePreviewNoImage) inlinePreviewNoImage.style.display = 'none';
+      if (inlinePreviewLoading) inlinePreviewLoading.style.display = 'block';
+      if (inlinePreviewProfile) inlinePreviewProfile.textContent = '-';
+      if (inlinePreviewYear) inlinePreviewYear.textContent = '-';
+      if (inlinePreviewRoadType) inlinePreviewRoadType.textContent = '-';
+      if (inlinePreviewCount) inlinePreviewCount.textContent = '-';
+      if (inlinePreviewRunIds) inlinePreviewRunIds.textContent = '-';
+      if (inlinePreviewCounter) inlinePreviewCounter.textContent = '- / -';
+      if (inlinePrevBtn) inlinePrevBtn.disabled = true;
+      if (inlineNextBtn) inlineNextBtn.disabled = true;
+    }
+
+    async function loadInlinePreview(index = 0) {
+      if (!inlinePreviewSection) return;
+
+      resetInlinePreviewUI();
+
+      const payload = {
+        target_mode: inlinePreviewState.targetMode,
+        run_id: inlinePreviewState.runId,
+        folder_alias: inlinePreviewState.folderAlias,
+        folder_profile_name: inlinePreviewState.folderProfileName,
+        preview_index: index
+      };
+
+      try {
+        const res = await fetch('/api/post_process/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'プレビュー取得エラー');
+
+        // Update state
+        inlinePreviewState.currentIndex = data.preview_index ?? index;
+        inlinePreviewState.totalRuns = data.total_runs_count || data.count || 0;
+
+        // Render data
+        if (inlinePreviewProfile) inlinePreviewProfile.textContent = data.profile || '未設定';
+        if (inlinePreviewYear) inlinePreviewYear.textContent = data.year || '未設定';
+        if (inlinePreviewRoadType) {
+          const roadTypeMap = { 'widened': '拡幅', 'non_widened': '未拡幅' };
+          inlinePreviewRoadType.textContent = roadTypeMap[data.road_type] || data.road_type || '未設定';
+        }
+        if (inlinePreviewCount) inlinePreviewCount.textContent = (data.count || 0) + ' 件';
+
+        if (inlinePreviewRunIds) {
+          let text = '-';
+          if (Array.isArray(data.total_runs) && data.total_runs.length > 0) {
+            text = data.total_runs.slice(0, 10).join(', ');
+            if (data.count > 10) text += `... (他${data.count - 10}件)`;
+          } else if (inlinePreviewState.runId) {
+            text = inlinePreviewState.runId;
+          }
+          inlinePreviewRunIds.textContent = text;
+        }
+
+        // Render image
+        if (inlinePreviewLoading) inlinePreviewLoading.style.display = 'none';
+        if (data.image && inlinePreviewImage) {
+          inlinePreviewImage.src = `data:image/jpeg;base64,${data.image}`;
+          inlinePreviewImage.style.display = 'block';
+        } else if (inlinePreviewNoImage) {
+          inlinePreviewNoImage.style.display = 'block';
+          if (data.image_error) {
+            inlinePreviewNoImage.innerHTML = `<i class="bi bi-exclamation-triangle fs-1 d-block mb-2 text-warning"></i>${data.image_error}`;
+          }
+        }
+
+        // Update navigation controls
+        if (inlinePreviewCounter) {
+          const current = inlinePreviewState.currentIndex + 1;
+          const total = inlinePreviewState.totalRuns || '-';
+          let label = `Run: ${current} / ${total}`;
+          if (data.current_run_id) label += ` (#${data.current_run_id})`;
+          inlinePreviewCounter.textContent = label;
+        }
+
+        if (inlinePrevBtn) inlinePrevBtn.disabled = inlinePreviewState.currentIndex <= 0;
+        if (inlineNextBtn) inlineNextBtn.disabled = inlinePreviewState.currentIndex >= inlinePreviewState.totalRuns - 1;
+
+      } catch (err) {
+        console.error('Inline preview error:', err);
+        if (inlinePreviewLoading) inlinePreviewLoading.style.display = 'none';
+        if (inlinePreviewNoImage) {
+          inlinePreviewNoImage.style.display = 'block';
+          inlinePreviewNoImage.textContent = 'エラー: ' + err.message;
+        }
+      }
+    }
+
+    function updateInlinePreviewVisibility() {
+      if (!inlinePreviewSection) return;
+
+      const currentTargetModeRadio = document.querySelector('input[name="target_mode"]:checked');
+      const mode = currentTargetModeRadio?.value || 'run';
+      inlinePreviewState.targetMode = mode;
+
+      if (mode === 'run') {
+        const runId = actionRunSelect?.value;
+        if (runId) {
+          inlinePreviewSection.style.display = 'block';
+          inlinePreviewState.runId = runId;
+          inlinePreviewState.folderAlias = null;
+          loadInlinePreview(0);
+        } else {
+          inlinePreviewSection.style.display = 'none';
+        }
+      } else if (mode === 'folder') {
+        const folderAlias = folderSelect?.value;
+        if (folderAlias) {
+          inlinePreviewSection.style.display = 'block';
+          inlinePreviewState.runId = null;
+          inlinePreviewState.folderAlias = folderAlias;
+          inlinePreviewState.folderProfileName = folderProfileSelect?.value || null;
+          loadInlinePreview(0);
+        } else {
+          inlinePreviewSection.style.display = 'none';
+        }
+      }
+    }
+
+    // Event listeners for inline preview navigation
+    if (inlinePrevBtn) {
+      inlinePrevBtn.addEventListener('click', () => {
+        if (inlinePreviewState.currentIndex > 0) {
+          loadInlinePreview(inlinePreviewState.currentIndex - 1);
+        }
+      });
+    }
+    if (inlineNextBtn) {
+      inlineNextBtn.addEventListener('click', () => {
+        if (inlinePreviewState.currentIndex < inlinePreviewState.totalRuns - 1) {
+          loadInlinePreview(inlinePreviewState.currentIndex + 1);
+        }
+      });
+    }
+
+    // Add listeners to Run and Folder selects
+    if (actionRunSelect) {
+      actionRunSelect.addEventListener('change', updateInlinePreviewVisibility);
+    }
+    if (folderSelect) {
+      folderSelect.addEventListener('change', updateInlinePreviewVisibility);
+    }
+    if (folderProfileSelect) {
+      folderProfileSelect.addEventListener('change', () => {
+        inlinePreviewState.folderProfileName = folderProfileSelect.value || null;
+        if (inlinePreviewState.targetMode === 'folder' && inlinePreviewState.folderAlias) {
+          loadInlinePreview(inlinePreviewState.currentIndex);
+        }
+      });
+    }
+
+    // Update on target mode change
+    targetModeInputs.forEach((input) => {
+      input.addEventListener('change', updateInlinePreviewVisibility);
+    });
+
+    function getCsrfToken() {
+      const tokenInput = actionForm ? actionForm.querySelector('input[name="csrf_token"]') : null;
+      return tokenInput?.value || '';
+    }
+
+    function setModalStatus(kind, message) {
+      if (!modalStatusAlert) {
+        return;
+      }
+      if (!message) {
+        modalStatusAlert.className = 'alert alert-info d-none';
+        modalStatusAlert.textContent = '';
+        return;
+      }
+      let className = 'alert-info';
+      if (kind === 'success') {
+        className = 'alert-success';
+      } else if (kind === 'error') {
+        className = 'alert-danger';
+      } else if (kind === 'warning') {
+        className = 'alert-warning';
+      }
+      modalStatusAlert.className = `alert ${className}`;
+      modalStatusAlert.textContent = message;
+    }
+
+    function updateScopeBulkButtonState() {
+      if (!scopeBulkButton) {
+        return;
+      }
+      scopeBulkButton.disabled = scopePendingChanges.size === 0;
+    }
+
+    function updateRunSelectionSummary() {
+      if (runSelectionSummary) {
+        runSelectionSummary.textContent = `選択中: ${currentRunSelection.size} 件`;
+      }
+    }
+
+    function updateRunApplyButtonState() {
+      if (!runBulkApplyButton) {
+        return;
+      }
+      const hasSelection = currentRunSelection.size > 0;
+      const profileValue = runBulkSelect?.value || '';
+      runBulkApplyButton.disabled = !hasSelection || !profileValue;
+    }
+
+    function resetRunSelection() {
+      currentRunSelection = new Set();
+      if (runSelectAllCheckbox) {
+        runSelectAllCheckbox.checked = false;
+        runSelectAllCheckbox.indeterminate = false;
+      }
+      updateRunSelectionSummary();
+      updateRunApplyButtonState();
+    }
+
+    function handleRunCheckboxChange(event) {
+      const checkbox = event.target;
+      if (!checkbox || !checkbox.dataset?.runId) {
+        return;
+      }
+      const runId = Number.parseInt(checkbox.dataset.runId, 10);
+      if (Number.isNaN(runId)) {
+        return;
+      }
+      if (checkbox.checked) {
+        currentRunSelection.add(runId);
+      } else {
+        currentRunSelection.delete(runId);
+      }
+      if (runSelectAllCheckbox) {
+        const totalCheckboxes = runTableBody ? runTableBody.querySelectorAll('input[type="checkbox"][data-run-id]').length : 0;
+        if (totalCheckboxes > 0) {
+          const selectedCount = currentRunSelection.size;
+          runSelectAllCheckbox.checked = selectedCount === totalCheckboxes;
+          runSelectAllCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalCheckboxes;
+        } else {
+          runSelectAllCheckbox.checked = false;
+          runSelectAllCheckbox.indeterminate = false;
+        }
+      }
+      updateRunSelectionSummary();
+      updateRunApplyButtonState();
+    }
+
+    function renderRunTable(runEntries) {
+      if (!runTableBody) {
+        return;
+      }
+      runTableBody.innerHTML = '';
+      resetRunSelection();
+      if (runBulkSelect) {
+        runBulkSelect.value = '';
+      }
+
+      if (!Array.isArray(runEntries) || runEntries.length === 0) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 5;
+        cell.className = 'text-muted small';
+        cell.textContent = '指定されたフォルダ内に有効な動画データが登録されていません。';
+        row.appendChild(cell);
+        runTableBody.appendChild(row);
+        if (runBulkControls) {
+          runBulkControls.classList.add('d-none');
+        }
+        return;
+      }
+
+      runEntries.forEach((entry) => {
+        const runId = Number.parseInt(entry.run_id, 10);
+        const row = document.createElement('tr');
+        row.dataset.runId = Number.isNaN(runId) ? '' : String(runId);
+
+        const selectCell = document.createElement('td');
+        selectCell.className = 'text-center';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'form-check-input';
+        checkbox.dataset.runId = Number.isNaN(runId) ? '' : String(runId);
+        checkbox.addEventListener('change', handleRunCheckboxChange);
+        selectCell.appendChild(checkbox);
+        row.appendChild(selectCell);
+
+        const pathCell = document.createElement('td');
+        const label = document.createElement('div');
+        label.className = 'fw-semibold';
+        label.textContent = entry.relative_path || entry.filename || '(不明な動画)';
+        pathCell.appendChild(label);
+        if (entry.folder_alias) {
+          const hint = document.createElement('div');
+          hint.className = 'text-muted small';
+          hint.textContent = `フォルダ: ${entry.folder_alias}`;
+          pathCell.appendChild(hint);
+        }
+        row.appendChild(pathCell);
+
+        const runIdCell = document.createElement('td');
+        runIdCell.textContent = Number.isNaN(runId) ? '-' : `#${runId}`;
+        row.appendChild(runIdCell);
+
+        const profileCell = document.createElement('td');
+        const profileValue = (entry.profile || '').trim();
+        profileCell.textContent = profileValue || '未設定';
+        row.appendChild(profileCell);
+
+        const actionCell = document.createElement('td');
+        const inputGroup = document.createElement('div');
+        inputGroup.className = 'input-group input-group-sm';
+        const select = buildProfileSelect('', {
+          allowNoChange: false,
+          className: 'form-select form-select-sm',
+          placeholderText: '-- プロファイルを選択 --',
+        });
+        select.dataset.runId = Number.isNaN(runId) ? '' : String(runId);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-outline-primary btn-sm';
+        button.dataset.action = 'apply-run-single';
+        button.dataset.runId = Number.isNaN(runId) ? '' : String(runId);
+        button.textContent = '適用';
+        inputGroup.appendChild(select);
+        inputGroup.appendChild(button);
+        actionCell.appendChild(inputGroup);
+        row.appendChild(actionCell);
+
+        runTableBody.appendChild(row);
+      });
+
+      if (runBulkControls) {
+        runBulkControls.classList.remove('d-none');
+      }
+      updateRunSelectionSummary();
+      updateRunApplyButtonState();
+    }
+
+    function updateFolderProfileManagerState() {
+      if (!folderProfileManagerButton) {
+        return;
+      }
+      const enabled = currentTargetMode === 'folder' && !controlsLocked && folderSelect && folderSelect.value;
+      folderProfileManagerButton.disabled = !enabled;
+    }
+
+    function buildProfileSelect(initialValue = '', options = {}) {
+      const {
+        className = 'form-select form-select-sm',
+        allowNoChange = true,
+        allowClear = true,
+        placeholderText = allowNoChange ? '変更しない' : '-- プロファイルを選択 --',
+      } = options;
+      const select = document.createElement('select');
+      select.className = className;
+      if (allowNoChange) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = placeholderText;
+        select.appendChild(placeholder);
+      } else {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = placeholderText;
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        select.appendChild(placeholder);
+      }
+      if (allowClear) {
+        const clearOption = document.createElement('option');
+        clearOption.value = '__CLEAR__';
+        clearOption.textContent = '未設定にする';
+        select.appendChild(clearOption);
+      }
+      availableProfilesData.forEach((profile) => {
+        const option = document.createElement('option');
+        option.value = profile;
+        option.textContent = profile;
+        select.appendChild(option);
+      });
+      if (initialValue) {
+        select.value = initialValue;
+      }
+      return select;
+    }
+
+    function renderFolderDetails(payload) {
+      if (!folderProfileModalEl) {
+        return;
+      }
+      const alias = payload?.folder_alias || currentFolderAlias || '';
+      currentFolderAlias = alias;
+      if (modalTitle) {
+        modalTitle.textContent = alias ? `サブフォルダ別プロファイル設定 - ${alias}` : 'サブフォルダ別プロファイル設定';
+      }
+
+      if (scopePendingChanges) {
+        scopePendingChanges.clear();
+        updateScopeBulkButtonState();
+      }
+
+      const scopeEntries = Array.isArray(payload?.subfolders) ? payload.subfolders : [];
+      if (scopeTableBody) {
+        scopeTableBody.innerHTML = '';
+        if (!scopeEntries.length) {
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = 4;
+          cell.className = 'text-muted small';
+          cell.textContent = '指定されたフォルダ内にサブフォルダが見つかりませんでした。フォルダ構造を確認してください。';
+          row.appendChild(cell);
+          scopeTableBody.appendChild(row);
+        } else {
+          scopeEntries.forEach((entry) => {
+            const tr = document.createElement('tr');
+            tr.dataset.scope = entry.scope || '';
+            tr.dataset.displayName = entry.display_label || entry.display_name || '';
+            if (entry.has_profile) {
+              tr.dataset.hasProfile = '1';
+            }
+            const nameCell = document.createElement('td');
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'fw-semibold';
+            labelDiv.textContent = entry.display_label || entry.display_name || '（ルート直下）';
+            nameCell.appendChild(labelDiv);
+            if (entry.path_label) {
+              const pathHint = document.createElement('div');
+              pathHint.className = 'text-muted small';
+              pathHint.textContent = `相対パス: ${entry.path_label}`;
+              nameCell.appendChild(pathHint);
+            }
+            if (entry.scope) {
+              const scopeHint = document.createElement('div');
+              scopeHint.className = 'text-muted small';
+              scopeHint.style.wordBreak = 'break-all';
+              const scopeCode = document.createElement('code');
+              scopeCode.textContent = entry.scope;
+              scopeCode.style.wordBreak = 'break-all';
+              scopeHint.appendChild(scopeCode);
+              nameCell.appendChild(scopeHint);
+            }
+            nameCell.style.wordBreak = 'break-word';
+            nameCell.style.maxWidth = '140px';
+            tr.appendChild(nameCell);
+            const countCell = document.createElement('td');
+            countCell.textContent = `${entry.run_count || 0}`;
+            tr.appendChild(countCell);
+            const profileCell = document.createElement('td');
+            const profiles = Array.isArray(entry.profiles) ? entry.profiles.filter(Boolean) : [];
+            if (!profiles.length) {
+              profileCell.textContent = '未設定';
+            } else if (profiles.length === 1) {
+              profileCell.textContent = profiles[0];
+            } else {
+              profileCell.textContent = `混在: ${profiles.join(', ')}`;
+            }
+            tr.appendChild(profileCell);
+
+            // 道路タイプセル（ボタングループ）
+            const roadTypeCell = document.createElement('td');
+            const existingRoadType = entry.road_type || '';
+            const roadTypeMixed = entry.road_types_mixed || false;
+            // スコープIDを生成（ユニークなラジオボタン名用）
+            const scopeId = (entry.scope || 'root').replace(/[^a-zA-Z0-9-_]/g, '_') + '_' + Math.random().toString(36).substr(2, 5);
+
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group btn-group-sm road-type-group';
+            btnGroup.setAttribute('role', 'group');
+            btnGroup.dataset.scope = entry.scope || '';
+
+            // Helper to create radio button
+            const createRadio = (val, labelText, cls = 'btn-outline-primary') => {
+              const input = document.createElement('input');
+              input.type = 'radio';
+              input.className = 'btn-check';
+              input.name = `roadType_${scopeId}`;
+              input.id = `rt_${val || 'unset'}_${scopeId}`;
+              input.value = val;
+              input.autocomplete = 'off';
+              if ((!val && !existingRoadType) || val === existingRoadType) {
+                input.checked = true;
+              }
+              const label = document.createElement('label');
+              label.className = `btn ${cls}`;
+              label.htmlFor = input.id;
+              label.textContent = labelText;
+              return [input, label];
+            };
+
+            btnGroup.append(...createRadio('', '未', 'btn-outline-secondary'));
+            btnGroup.append(...createRadio('widened', '拡幅'));
+            btnGroup.append(...createRadio('non_widened', '未拡幅'));
+
+            roadTypeCell.appendChild(btnGroup);
+
+            if (existingRoadType && !roadTypeMixed) {
+              const checkIcon = document.createElement('i');
+              checkIcon.className = 'bi bi-check-circle-fill text-success ms-2';
+              checkIcon.title = 'DBに登録済み';
+              roadTypeCell.appendChild(checkIcon);
+            } else if (roadTypeMixed) {
+              const warnIcon = document.createElement('i');
+              warnIcon.className = 'bi bi-exclamation-triangle-fill text-warning ms-2';
+              warnIcon.title = 'データ混在';
+              roadTypeCell.appendChild(warnIcon);
+            }
+
+            tr.appendChild(roadTypeCell);
+
+            // 収集年度セル
+            const yearCell = document.createElement('td');
+
+            const existingYear = entry.collection_year;
+            const yearMixed = entry.collection_years_mixed || false;
+            const hasYear = existingYear !== null && existingYear !== undefined;
+            const currentYear = new Date().getFullYear();
+
+            const yearInput = document.createElement('input');
+            yearInput.type = 'number';
+            yearInput.className = 'form-control form-control-sm collection-year-input';
+            yearInput.placeholder = `デフォルト: ${currentYear}`;
+            yearInput.min = '1900';
+            yearInput.max = '2100';
+            yearInput.dataset.scope = entry.scope || '';
+
+            if (hasYear) {
+              yearInput.value = existingYear;
+            } else {
+              yearInput.value = currentYear;
+            }
+
+            yearCell.appendChild(yearInput);
+
+            if (hasYear && !yearMixed) {
+              const checkIcon = document.createElement('i');
+              checkIcon.className = 'bi bi-check-circle-fill text-success ms-1';
+              checkIcon.style.fontSize = '0.875rem';
+              checkIcon.title = 'DBに登録済み';
+              yearCell.appendChild(checkIcon);
+            } else if (yearMixed) {
+              const warnIcon = document.createElement('i');
+              warnIcon.className = 'bi bi-exclamation-triangle-fill text-warning ms-1';
+              warnIcon.style.fontSize = '0.875rem';
+              warnIcon.title = 'データ混在';
+              yearCell.appendChild(warnIcon);
+            }
+
+            tr.appendChild(yearCell);
+
+            // 変更セル（プロファイル適用）
+            const actionCell = document.createElement('td');
+            const inputGroup = document.createElement('div');
+            inputGroup.className = 'input-group input-group-sm';
+            const select = buildProfileSelect();
+            select.dataset.scope = entry.scope || '';
+            select.setAttribute('aria-label', '適用するプロファイルを選択');
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-primary btn-sm';
+            button.dataset.action = 'apply-scope';
+            button.dataset.scope = entry.scope || '';
+            button.dataset.display = entry.label_segment || entry.display_name || 'サブフォルダ';
+            button.textContent = '適用';
+            inputGroup.appendChild(select);
+            inputGroup.appendChild(button);
+            actionCell.appendChild(inputGroup);
+
+            if (entry.example_video) {
+              const hint = document.createElement('div');
+              hint.className = 'form-text small';
+              hint.textContent = entry.example_video;
+              actionCell.appendChild(hint);
+            }
+            tr.appendChild(actionCell);
+
+            // 新しいアクションセル（プレビュー・キャリブレーション作成）
+            const actionsCell = document.createElement('td');
+            const actionBtnGroup = document.createElement('div');
+            actionBtnGroup.className = 'd-flex flex-wrap gap-1';
+
+            // メタデータ保存ボタン（移動）
+            const saveMetadataBtn = document.createElement('button');
+            saveMetadataBtn.type = 'button';
+            saveMetadataBtn.className = 'btn btn-outline-success btn-sm';
+            saveMetadataBtn.dataset.action = 'save-metadata';
+            saveMetadataBtn.dataset.scope = entry.scope || '';
+            saveMetadataBtn.innerHTML = '<i class="fa fa-save"></i>';
+            saveMetadataBtn.title = '道路タイプと収集年度を保存';
+            actionBtnGroup.appendChild(saveMetadataBtn);
+
+            // プレビューボタン
+            if (entry.example_run_id) {
+              const previewBtn = document.createElement('button');
+              previewBtn.type = 'button';
+              previewBtn.className = 'btn btn-outline-info btn-sm';
+              previewBtn.dataset.action = 'preview-calibration';
+              previewBtn.dataset.runId = entry.example_run_id;
+              previewBtn.innerHTML = '<i class="fa fa-eye"></i>';
+              previewBtn.title = 'キャリブレーションプレビューを表示';
+              actionBtnGroup.appendChild(previewBtn);
+
+              // キャリブレーション作成ボタン
+              const createButton = document.createElement('a');
+              createButton.href = `/calibration?run_id=${entry.example_run_id}`;
+              createButton.className = 'btn btn-outline-secondary btn-sm';
+              createButton.innerHTML = '<i class="fa fa-ruler"></i>';
+              createButton.title = 'キャリブレーションツールを開きます';
+              createButton.target = '_blank';
+              actionBtnGroup.appendChild(createButton);
+            }
+
+            actionsCell.appendChild(actionBtnGroup);
+            tr.appendChild(actionsCell);
+            scopeTableBody.appendChild(tr);
+          });
+        }
+      }
+
+      const runEntries = Array.isArray(payload?.runs) ? payload.runs : [];
+      renderRunTable(runEntries);
+    }
+
+    if (scopeTableBody) {
+      scopeTableBody.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) {
+          return;
+        }
+        const scope = target.dataset.scope || '';
+        if (!scope) {
+          return;
+        }
+        const row = target.closest('tr');
+        const displayName = row?.dataset?.displayName || scope;
+        const selectedValue = target.value;
+        if (!selectedValue) {
+          scopePendingChanges.delete(scope);
+        } else {
+          scopePendingChanges.set(scope, {
+            rawValue: selectedValue,
+            displayName,
+          });
+        }
+        updateScopeBulkButtonState();
+      });
+    }
+
+    async function loadFolderDetails(alias, options = {}) {
+      if (!folderProfileModalEl || !alias) {
+        return;
+      }
+      const preserveStatus = Boolean(options.preserveStatus);
+      if (!preserveStatus) {
+        setModalStatus('info', 'データを読み込み中です...');
+      }
+      try {
+        const response = await fetch(`/post_process/folder_runs/${encodeURIComponent(alias)}`);
+        const payload = await response.json();
+        if (!response.ok || payload.status === 'error') {
+          throw new Error(payload.message || 'データの取得に失敗しました。');
+        }
+        renderFolderDetails(payload);
+        if (!preserveStatus) {
+          setModalStatus('', '');
+        }
+      } catch (error) {
+        renderFolderDetails({ folder_alias: alias, subfolders: [], runs: [] });
+        setModalStatus('error', error.message || 'データの取得に失敗しました。');
+      }
+    }
+
+    async function applyProfileChange({ folderAlias, scope, profileValue, displayName }) {
+      if (!folderAlias) {
+        setModalStatus('error', 'フォルダが選択されていません。');
+        return;
+      }
+      const payload = {
+        folder_alias: folderAlias,
+        profile: profileValue,
+      };
+      if (scope) {
+        payload.scope = scope;
+      }
+      const csrfToken = getCsrfToken();
+      setModalStatus('info', 'プロファイルを更新しています...');
+      try {
+        const response = await fetch('/post_process/apply_scope_profile', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}),
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok || data.status !== 'ok') {
+          throw new Error(data.message || '更新に失敗しました。');
+        }
+        const name = displayName || scope || '対象';
+        const label = data.applied_profile ? data.applied_profile : '未設定';
+        setModalStatus('success', `${name} にプロファイル ${label} を適用しました。`);
+        if (scope) {
+          scopePendingChanges.delete(scope);
+          updateScopeBulkButtonState();
+        }
+        await loadFolderDetails(folderAlias, { preserveStatus: true });
+      } catch (error) {
+        setModalStatus('error', error.message || '更新に失敗しました。');
+      }
+    }
+
+    async function applyBulkScopeChanges({ folderAlias, changes }) {
+      if (!folderAlias) {
+        setModalStatus('error', 'フォルダが選択されていません。');
+        return;
+      }
+      if (!Array.isArray(changes) || !changes.length) {
+        setModalStatus('warning', '変更対象のサブフォルダを選択してください。');
+        return;
+      }
+      const csrfToken = getCsrfToken();
+      setModalStatus('info', 'まとめて更新しています...');
+      try {
+        const response = await fetch('/post_process/apply_scope_profile', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}),
+          },
+          body: JSON.stringify({
+            folder_alias: folderAlias,
+            scope_profiles: changes.map((item) => ({
+              scope: item.scope,
+              profile: item.rawValue,
+              display: item.displayName || '',
+            })),
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || data.status !== 'ok') {
+          throw new Error(data.message || '更新に失敗しました。');
+        }
+        const updated = Array.isArray(data.updated_scopes) ? data.updated_scopes : [];
+        const unmatched = Array.isArray(data.unmatched_scopes)
+          ? data.unmatched_scopes.filter((value) => Boolean(value))
+          : [];
+        if (!updated.length) {
+          if (unmatched.length) {
+            setModalStatus('warning', `一致しなかったサブフォルダ: ${unmatched.join(', ')}`);
+          } else {
+            setModalStatus('warning', '適用対象が見つかりませんでした。');
+          }
+        } else {
+          const parts = updated.map((entry) => {
+            const matched = changes.find((item) => item.scope === entry.scope);
+            const display = matched?.displayName || entry.display || entry.scope || '対象';
+            const profileLabel = entry.applied_profile ? entry.applied_profile : '未設定';
+            const count = Number.isFinite(entry.run_count)
+              ? Number(entry.run_count)
+              : Array.isArray(entry.updated_run_ids)
+                ? entry.updated_run_ids.length
+                : 0;
+            return `${display}: ${profileLabel}（${count}件）`;
+          });
+          let message = `以下のサブフォルダに適用しました: ${parts.join(' / ')}`;
+          if (unmatched.length) {
+            message += `。一致しなかったサブフォルダ: ${unmatched.join(', ')}`;
+          }
+          setModalStatus('success', message);
+        }
+        scopePendingChanges.clear();
+        updateScopeBulkButtonState();
+        await loadFolderDetails(folderAlias, { preserveStatus: true });
+      } catch (error) {
+        setModalStatus('error', error.message || '更新に失敗しました。');
+      }
+    }
+
+    async function applyProfileToRuns({ folderAlias, runIds, profileValue }) {
+      if (!folderAlias) {
+        setModalStatus('error', 'フォルダが選択されていません。');
+        return;
+      }
+      if (!Array.isArray(runIds) || runIds.length === 0) {
+        setModalStatus('warning', '動画が選択されていません。');
+        return;
+      }
+      const csrfToken = getCsrfToken();
+      setModalStatus('info', '動画へプロファイルを適用しています...');
+      try {
+        const response = await fetch('/post_process/apply_run_profiles', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}),
+          },
+          body: JSON.stringify({
+            folder_alias: folderAlias,
+            run_ids: runIds,
+            profile: profileValue,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || data.status !== 'ok') {
+          throw new Error(data.message || '更新に失敗しました。');
+        }
+        const label = data.applied_profile ? data.applied_profile : '未設定';
+        setModalStatus(
+          'success',
+          `${data.updated_run_ids.length} 件の動画にプロファイル ${label} を適用しました。`,
+        );
+        await loadFolderDetails(folderAlias, { preserveStatus: true });
+      } catch (error) {
+        setModalStatus('error', error.message || '更新に失敗しました。');
+      }
+    }
+
+    let pollTimer = null;
+    let currentStatus = initialProgress?.status || 'idle';
+    let lastStatus = currentStatus;
+    let currentTargetMode = 'run';
+    if (folderModeRadio && folderModeRadio.checked) {
+      currentTargetMode = 'folder';
+    } else if (runModeRadio && runModeRadio.checked) {
+      currentTargetMode = 'run';
+    }
+    let controlsLocked = false;
+    let lastKnownResult = initialProgress?.last_result || null;
+
+    setTargetMode(currentTargetMode);
+    updateFolderAvailability();
+    updateFolderProfileManagerState();
+
+    function updateActionButtonStates() {
+      actionButtons.forEach((btn) => {
+        const disallowed = currentTargetMode === 'folder' && btn.value === 'generate_video';
+        const shouldDisable = controlsLocked || disallowed;
+        btn.disabled = shouldDisable;
+        btn.classList.toggle('disabled', shouldDisable);
+      });
+    }
+
+    function updateTargetInputs() {
+      if (runSelectionGroup) {
+        runSelectionGroup.style.display = currentTargetMode === 'run' ? '' : 'none';
+      }
+      if (folderSelectionGroup) {
+        folderSelectionGroup.style.display = currentTargetMode === 'folder' ? '' : 'none';
+      }
+      if (actionRunSelect) {
+        actionRunSelect.required = currentTargetMode === 'run';
+        actionRunSelect.disabled = controlsLocked || currentTargetMode !== 'run';
+        if (currentTargetMode !== 'run') {
+          actionRunSelect.value = '';
+        }
+      }
+      if (folderSelect) {
+        folderSelect.required = currentTargetMode === 'folder';
+        folderSelect.disabled = controlsLocked || currentTargetMode !== 'folder';
+        if (currentTargetMode !== 'folder') {
+          folderSelect.value = '';
+        }
+      }
+      if (folderProfileSelect) {
+        folderProfileSelect.disabled = controlsLocked || currentTargetMode !== 'folder';
+        if (currentTargetMode !== 'folder') {
+          folderProfileSelect.value = '';
+        }
+      }
+      updateFolderProfileManagerState();
+    }
+
+    function setTargetMode(mode) {
+      currentTargetMode = mode === 'folder' ? 'folder' : 'run';
+      updateActionButtonStates();
+      updateTargetInputs();
+      updateFolderProfileManagerState();
+    }
+
+    function setButtonsDisabled(disabled) {
+      controlsLocked = disabled;
+      updateActionButtonStates();
+      updateTargetInputs();
+      updateFolderProfileManagerState();
+    }
+
+    function describeTask(task) {
+      switch (task) {
+        case 'pipeline':
+          return 'タスク: 後処理全体';
+        case 'video':
+          return 'タスク: 動画生成';
+        case 'export':
+          return 'タスク: CSV出力';
+        case 'excel':
+          return 'タスク: Excel出力';
+        default:
+          return '';
+      }
+    }
+
+    function updateLastResultDisplay(result) {
+      if (!lastResultEl) {
+        return;
+      }
+      const detailBlock = document.getElementById('postProcessResultDetailBlock');
+
+      if (result && (result.status || result.message)) {
+        // Summary: Show Batch Stats if available, plus status message
+        if (result.payload && result.payload.batch_summary) {
+          const s = result.payload.batch_summary;
+          const summaryHTML = `
+                <div class="row g-2 mb-2 w-100">
+                   <div class="col-6 col-md-3"><div class="p-2 border rounded bg-white text-center"><div class="text-muted small" style="font-size:0.75rem;">Avg Events/File</div><div class="fw-bold">${(s.avg_overtakes_per_file || 0).toFixed(2)}</div></div></div>
+                   <div class="col-6 col-md-3"><div class="p-2 border rounded bg-white text-center"><div class="text-muted small" style="font-size:0.75rem;">Avg Speed</div><div class="fw-bold">${(s.avg_speed || 0).toFixed(1)} <span class="small fw-normal">km/h</span></div></div></div>
+                   <div class="col-6 col-md-3"><div class="p-2 border rounded bg-white text-center"><div class="text-muted small" style="font-size:0.75rem;">Overtake Speed</div><div class="fw-bold">${(s.avg_overtake_speed || 0).toFixed(1)} <span class="small fw-normal">km/h</span></div></div></div>
+                   <div class="col-6 col-md-3"><div class="p-2 border rounded bg-white text-center"><div class="text-muted small" style="font-size:0.75rem;">Inner / Outer</div><div class="fw-bold"><span class="text-danger">${(s.inner_ratio || 0).toFixed(1)}%</span> / <span class="text-success">${(s.outer_ratio || 0).toFixed(1)}%</span></div></div></div>
+                </div>
+                <div class="small text-muted">${describeLastResult(result, true)}</div>
+            `;
+          lastResultEl.innerHTML = summaryHTML;
+          lastResultEl.classList.remove('text-truncate');
+          lastResultEl.style.whiteSpace = 'normal';
+        } else {
+          const summaryText = describeLastResult(result, true);
+          lastResultEl.textContent = summaryText;
+          lastResultEl.classList.add('text-truncate');
+          lastResultEl.style.whiteSpace = 'nowrap';
+        }
+        lastResultEl.classList.remove('text-muted');
+
+        // Detail: Show full info formatted
+        if (lastResultDetailContent) {
+          lastResultDetailContent.textContent = describeLastResult(result, false);
+        }
+      } else {
+        lastResultEl.textContent = lastResultEmptyText;
+        lastResultEl.classList.add('text-muted');
+        if (lastResultDetailContent) {
+          lastResultDetailContent.textContent = '';
+        }
+        // Close details if empty
+        if (detailBlock && detailBlock.classList.contains('show')) {
+          const bsCollapse = bootstrap.Collapse.getInstance(detailBlock);
+          if (bsCollapse) {
+            bsCollapse.hide();
+          } else {
+            detailBlock.classList.remove('show');
+          }
+        }
+      }
+
+      const imagesContainer = document.getElementById('postProcessResultImages');
+      if (imagesContainer) {
+        imagesContainer.innerHTML = '';
+
+        let ov = null;
+        if (result && result.payload) {
+          if (result.payload.overtakes) {
+            ov = result.payload.overtakes;
+          } else if (result.payload.entries && Array.isArray(result.payload.entries)) {
+            ov = { total: 0, inner: 0, outer: 0, images: [] };
+            result.payload.entries.forEach(entry => {
+              if (entry.overtake_stats) {
+                ov.total += (entry.overtake_stats.total || 0);
+                ov.inner += (entry.overtake_stats.inner || 0);
+                ov.outer += (entry.overtake_stats.outer || 0);
+                if (Array.isArray(entry.overtake_stats.images)) {
+                  ov.images.push(...entry.overtake_stats.images);
+                }
+              }
+            });
+          }
+        }
+
+        if (ov && ov.images && Array.isArray(ov.images) && ov.images.length > 0) {
+          const label = document.createElement('h6');
+          label.className = 'w-100 mt-2 mb-2 text-muted small border-bottom pb-1';
+          label.textContent = '追い越しスナップショット (' + ov.images.length + '枚)';
+          imagesContainer.appendChild(label);
+
+          ov.images.forEach(path => {
+            const col = document.createElement('div');
+            col.className = 'col-6 col-md-4 col-lg-3';
+            const img = document.createElement('img');
+            img.src = '/results/' + path;
+            img.className = 'img-thumbnail';
+            img.style.cursor = 'pointer';
+            img.onclick = () => window.open(img.src, '_blank');
+            col.appendChild(img);
+            imagesContainer.appendChild(col);
+          });
+        }
+      }
+    }
+
+    function describeLastResult(result, isSummary = false) {
+      if (!result) {
+        return '';
+      }
+      const parts = [];
+      if (result.status) {
+        parts.push(`[${result.status}]`);
+      }
+
+      if (isSummary) {
+        // Short summary
+        if (result.run_id) parts.push(`Run #${result.run_id}`);
+        if (result.message) parts.push(result.message);
+        return parts.join(' ');
+      }
+
+      // Full detail
+      if (result.run_id) {
+        parts.push(`Run ID: ${result.run_id}`);
+      }
+      if (result.payload && result.payload.folder_alias) {
+        parts.push(`Folder: ${result.payload.folder_alias}`);
+      }
+      if (result.payload && typeof result.payload.total_runs === 'number') {
+        const completed = result.payload.completed_runs || 0;
+        const total = result.payload.total_runs;
+        parts.push(`Progress: ${completed}/${total}`);
+      }
+      if (result.payload && result.payload.failed_runs > 0) {
+        parts.push(`Errors: ${result.payload.failed_runs}`);
+      }
+      const taskDesc = describeTask(result.task);
+      if (taskDesc) {
+        parts.push(taskDesc);
+      }
+      if (result.message) {
+        parts.push(`Message: ${result.message}`);
+      }
+      // Also add raw errors if any
+      if (result.payload && Array.isArray(result.payload.errors) && result.payload.errors.length > 0) {
+        parts.push('\n--- Errors ---');
+        result.payload.errors.forEach(e => {
+          parts.push(`Run #${e.run_id}: ${e.message}`);
+        });
+      }
+
+      let ovSummary = null;
+      if (result.payload) {
+        if (result.payload.overtakes) {
+          ovSummary = result.payload.overtakes;
+        } else if (result.payload.entries && Array.isArray(result.payload.entries)) {
+          ovSummary = { total: 0, inner: 0, outer: 0 };
+          result.payload.entries.forEach(entry => {
+            if (entry.overtake_stats) {
+              ovSummary.total += (entry.overtake_stats.total || 0);
+              ovSummary.inner += (entry.overtake_stats.inner || 0);
+              ovSummary.outer += (entry.overtake_stats.outer || 0);
+            }
+          });
+        }
+      }
+
+      if (ovSummary && ovSummary.total > 0) {
+        parts.push('\n--- Overtake Summary ---');
+        parts.push(`Total: ${ovSummary.total} (Inner: ${ovSummary.inner} / Outer: ${ovSummary.outer})`);
+      }
+
+      return parts.join('\n');
+    }
+
+    function renderColumnSummary(summary) {
+      if (!columnSummaryEl) {
+        return;
+      }
+
+      columnSummaryEl.innerHTML = '';
+      if (!summary) {
+        columnSummaryEl.style.display = 'none';
+        return;
+      }
+
+      columnSummaryEl.style.display = 'block';
+
+      const fragment = document.createDocumentFragment();
+      const heading = document.createElement('h6');
+      heading.className = 'fw-bold mb-2';
+      heading.textContent = '後処理カラムの値件数';
+      fragment.appendChild(heading);
+
+      const note = document.createElement('p');
+      note.className = 'small text-muted mb-2';
+      note.textContent = 'Run完了時点で値が入っている件数を表示します。';
+      fragment.appendChild(note);
+
+      const buildTable = (entry, titleText) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mb-3';
+
+        if (titleText) {
+          const title = document.createElement('div');
+          title.className = 'fw-bold small mb-1';
+          title.textContent = titleText;
+          wrapper.appendChild(title);
+        }
+
+        if (typeof entry?.total_rows === 'number') {
+          const total = document.createElement('div');
+          total.className = 'small text-muted mb-1';
+          total.textContent = `対象検出件数: ${entry.total_rows.toLocaleString('ja-JP')}`;
+          wrapper.appendChild(total);
+        }
+
+        const table = document.createElement('table');
+        table.className = 'table table-sm table-bordered align-middle mb-0';
+
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        const headerLabel = document.createElement('th');
+        headerLabel.scope = 'col';
+        headerLabel.textContent = 'カラム';
+        const headerCount = document.createElement('th');
+        headerCount.scope = 'col';
+        headerCount.className = 'text-end';
+        headerCount.textContent = '値件数';
+        headerRow.appendChild(headerLabel);
+        headerRow.appendChild(headerCount);
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        const columns = Array.isArray(entry?.columns) ? entry.columns : [];
+        if (!columns.length) {
+          const emptyRow = document.createElement('tr');
+          const emptyCell = document.createElement('td');
+          emptyCell.colSpan = 2;
+          emptyCell.className = 'text-center text-muted';
+          emptyCell.textContent = '集計対象のカラムがありません。';
+          emptyRow.appendChild(emptyCell);
+          tbody.appendChild(emptyRow);
+        } else {
+          columns.forEach((column) => {
+            const row = document.createElement('tr');
+            const labelCell = document.createElement('th');
+            labelCell.scope = 'row';
+            const labelText = column?.label || column?.key || '';
+            labelCell.textContent = labelText;
+            if (column?.key && column.label && column.key !== column.label) {
+              const keyHint = document.createElement('div');
+              keyHint.className = 'text-muted small';
+              keyHint.textContent = column.key;
+              labelCell.appendChild(keyHint);
+            }
+
+            const countCell = document.createElement('td');
+            countCell.className = 'text-end';
+            const countValue = typeof column?.count === 'number' ? column.count : 0;
+            countCell.textContent = countValue.toLocaleString('ja-JP');
+
+            row.appendChild(labelCell);
+            row.appendChild(countCell);
+            tbody.appendChild(row);
+          });
+        }
+
+        table.appendChild(tbody);
+        wrapper.appendChild(table);
+        return wrapper;
+      };
+
+      if (summary?.totals) {
+        fragment.appendChild(buildTable(summary.totals, '合計 (完了したRun)'));
+      }
+
+      if (Array.isArray(summary?.per_run) && summary.per_run.length) {
+        summary.per_run.forEach((entry) => {
+          const titleText = typeof entry?.run_id === 'number' ? `Run #${entry.run_id}` : 'Run集計';
+          fragment.appendChild(buildTable(entry, titleText));
+        });
+      }
+
+      columnSummaryEl.appendChild(fragment);
+    }
+
+    function renderErrorSummary(errors) {
+      if (!errorSummaryEl) {
+        return;
+      }
+
+      errorSummaryEl.innerHTML = '';
+      const hasErrors = Array.isArray(errors) && errors.length > 0;
+      if (!hasErrors) {
+        errorSummaryEl.style.display = 'none';
+        return;
+      }
+
+      errorSummaryEl.style.display = 'block';
+
+      const wrapper = document.createElement('div');
+      const heading = document.createElement('h6');
+      heading.className = 'fw-bold mb-2 text-danger';
+      heading.textContent = 'エラーが発生したRun';
+      wrapper.appendChild(heading);
+
+      const note = document.createElement('p');
+      note.className = 'small text-muted mb-2';
+      note.textContent = '後処理中にエラーが発生したRunの概要です。詳細は直近のリザルトメッセージをご確認ください。';
+      wrapper.appendChild(note);
+
+      const list = document.createElement('ul');
+      list.className = 'small mb-0';
+
+      errors.forEach((entry) => {
+        const li = document.createElement('li');
+        const runId = entry?.run_id;
+        const step = entry?.step;
+        const message = entry?.message || '';
+        const labelParts = [];
+        if (typeof runId === 'number') {
+          labelParts.push(`Run #${runId}`);
+        } else if (runId) {
+          labelParts.push(`Run ${runId}`);
+        }
+        if (step) {
+          labelParts.push(`ステップ: ${step}`);
+        }
+        let label = labelParts.join(' / ');
+        if (message) {
+          label = label ? `${label} - ${message}` : message;
+        }
+        li.textContent = label || 'エラー内容を取得できませんでした。';
+        list.appendChild(li);
+      });
+
+      wrapper.appendChild(list);
+      errorSummaryEl.appendChild(wrapper);
+    }
+
+    function extractErrorsFromState(state) {
+      if (!state) {
+        return [];
+      }
+      if (Array.isArray(state?.payload?.errors) && state.payload.errors.length > 0) {
+        return state.payload.errors;
+      }
+      if (Array.isArray(state?.last_result?.payload?.errors) && state.last_result.payload.errors.length > 0) {
+        return state.last_result.payload.errors;
+      }
+      return [];
+    }
+
+    function renderQueue(queue) {
+      if (!queueCard || !queueList || !queueEmpty) {
+        return;
+      }
+      queueList.innerHTML = '';
+      const items = Array.isArray(queue) ? queue.filter(Boolean) : [];
+      if (!items.length) {
+        queueCard.style.display = 'none';
+        queueEmpty.style.display = 'block';
+        return;
+      }
+
+      queueCard.style.display = 'block';
+      queueEmpty.style.display = 'none';
+      items.forEach((entry, index) => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-center small';
+        const labelParts = [];
+        if (entry.run_id) {
+          labelParts.push(`Run #${entry.run_id}`);
+        }
+        if (entry.folder_alias) {
+          labelParts.push(`フォルダ: ${entry.folder_alias}`);
+        }
+        if (Array.isArray(entry.run_ids) && entry.run_ids.length > 1) {
+          labelParts.push(`${entry.run_ids.length}件`);
+        }
+        const taskDesc = describeTask(entry.task);
+        if (taskDesc) {
+          labelParts.push(taskDesc.replace('タスク: ', ''));
+        }
+        li.textContent = labelParts.join(' / ') || `待機タスク ${index + 1}`;
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-secondary';
+        badge.textContent = `待ち順 ${index + 1}`;
+        li.appendChild(badge);
+        queueList.appendChild(li);
+      });
+    }
+
+    function buildMeta(data) {
+      if (!data) {
+        return '';
+      }
+      const parts = [];
+
+      // Add granular detail if available
+      if (data.current_detail) {
+        parts.push(data.current_detail);
+      }
+
+      if (data.run_id) {
+        parts.push(`対象Run: #${data.run_id}`);
+      }
+      const taskDesc = describeTask(data.task);
+      if (taskDesc) {
+        parts.push(taskDesc);
+      }
+      if (data.payload && data.payload.folder_alias) {
+        parts.push(`フォルダ: ${data.payload.folder_alias}`);
+      }
+      if (data.payload && typeof data.payload.total_runs === 'number' && data.payload.total_runs > 1) {
+        const completedRuns = typeof data.payload.completed_runs === 'number' ? data.payload.completed_runs : 0;
+        parts.push(`完了 ${completedRuns}/${data.payload.total_runs}`);
+      }
+      if (data.payload && typeof data.payload.failed_runs === 'number' && data.payload.failed_runs > 0) {
+        parts.push(`エラー ${data.payload.failed_runs}件`);
+      }
+      const queueLength = Array.isArray(data.queue) ? data.queue.length : 0;
+      if (queueLength > 0) {
+        parts.push(`待機中: ${queueLength}件`);
+      }
+      return parts.join(' / ');
+    }
+
+    function updateStatusBadge(status) {
+      if (!statusBadge) {
+        return;
+      }
+      if (status === 'processing') {
+        statusBadge.className = 'badge bg-warning text-dark';
+        statusBadge.textContent = '処理中';
+      } else if (status === 'complete') {
+        statusBadge.className = 'badge bg-success';
+        statusBadge.textContent = '完了';
+      } else if (status === 'error') {
+        statusBadge.className = 'badge bg-danger';
+        statusBadge.textContent = 'エラー';
+      } else {
+        statusBadge.className = 'badge bg-secondary';
+        statusBadge.textContent = '待機中';
+      }
+    }
+
+    function renderState(data) {
+      if (!data) return;
+
+      currentStatus = data?.status || 'idle';
+      const isProcessing = currentStatus === 'processing' || currentStatus === 'queued';
+      // ロック状態を反映
+      setButtonsDisabled(isProcessing);
+
+      renderQueue(data?.queue);
+      const summaryPayload = data?.payload?.column_counts || data?.last_result?.payload?.column_counts || null;
+      renderColumnSummary(summaryPayload);
+      renderErrorSummary(extractErrorsFromState(data));
+
+      // Handle new aggregated results from batch processing
+      if (data && data.results) {
+        const mockResult = {
+          status: 'Batch Complete',
+          message: '一括処理が完了しました。',
+          payload: {
+            overtakes: {
+              total: data.results.total_overtakes,
+              images: data.results.images,
+              inner: 0,
+              outer: 0
+            }
+          }
+        };
+        updateLastResultDisplay(mockResult);
+      } else {
+        if (data && data.last_result) {
+          lastKnownResult = data.last_result;
+        }
+        updateLastResultDisplay(lastKnownResult);
+      }
+
+      if (!data || data.status === 'idle') {
+        progressArea.style.display = 'none';
+        updateStatusBadge('idle');
+        statusMeta.textContent = '';
+        setButtonsDisabled(false);
+        lastStatus = currentStatus;
+        return;
+      }
+
+      progressArea.style.display = 'block';
+      statusMessage.textContent = data.message || '';
+      statusMeta.textContent = buildMeta(data);
+      updateStatusBadge(data.status);
+
+      progressBar.classList.remove('bg-success', 'bg-danger', 'bg-info');
+      if (data.status === 'processing') {
+        progressBar.classList.add('bg-info');
+      } else if (data.status === 'complete') {
+        progressBar.classList.add('bg-success');
+      } else if (data.status === 'error') {
+        progressBar.classList.add('bg-danger');
+      }
+
+      // Determine display percent:
+      // - If complete, always show 100%
+      // - If processing, prefer batch_percent, then percent
+      // - Otherwise use percent or 0
+      let displayPercent = 0;
+      if (data.status === 'complete') {
+        displayPercent = 100;
+      } else if (data.status === 'processing') {
+        displayPercent = typeof data.batch_percent === 'number' ? data.batch_percent : (typeof data.percent === 'number' ? data.percent : 0);
+      } else if (typeof data.percent === 'number') {
+        displayPercent = data.percent;
+      }
+      displayPercent = Math.max(0, Math.min(100, displayPercent));
+
+      progressBar.style.width = `${displayPercent}%`;
+      progressBar.setAttribute('aria-valuenow', String(displayPercent));
+      progressBar.textContent = `${displayPercent}%`;
+
+      if (data.status === 'processing') {
+        progressBar.classList.add('progress-bar-striped', 'progress-bar-animated');
+
+        // Secondary Progress Bar Update
+        const batchContainer = document.getElementById('batchProgressContainer');
+        const batchBar = document.getElementById('batchProgressBar');
+        const batchLabel = document.getElementById('batchPercentLabel');
+        const batchText = document.getElementById('batchDetailText');
+
+        if (batchContainer && typeof data.batch_percent === 'number') {
+          batchContainer.style.display = 'block';
+          let bp = Math.max(0, Math.min(100, data.batch_percent));
+          batchBar.style.width = bp + '%';
+          batchBar.setAttribute('aria-valuenow', bp);
+          batchLabel.textContent = bp + '%';
+
+          if (data.current_detail) {
+            batchText.textContent = data.current_detail;
+          } else {
+            batchText.textContent = '';
+          }
+        } else if (batchContainer) {
+          batchContainer.style.display = 'none';
+        }
+
+        if (!pollTimer) {
+          pollTimer = setTimeout(pollProgress, 2000);
+        }
+      } else {
+        progressBar.classList.remove('progress-bar-animated');
+        progressBar.classList.remove('progress-bar-striped');
+
+        // Update batch progress to 100% on completion
+        const batchContainer = document.getElementById('batchProgressContainer');
+        const batchBar = document.getElementById('batchProgressBar');
+        const batchLabel = document.getElementById('batchPercentLabel');
+        const batchText = document.getElementById('batchDetailText');
+
+        if (batchContainer) {
+          if (data.status === 'complete') {
+            // Show 100% briefly before hiding
+            batchBar.style.width = '100%';
+            batchBar.setAttribute('aria-valuenow', 100);
+            batchLabel.textContent = '100%';
+            batchText.textContent = '完了';
+            batchBar.classList.remove('progress-bar-animated');
+            batchBar.classList.add('bg-success');
+          }
+          // Hide after a short delay on completion, or immediately on error
+          setTimeout(() => {
+            batchContainer.style.display = 'none';
+            batchBar.classList.remove('bg-success');
+          }, data.status === 'complete' ? 2000 : 0);
+        }
+
+        if (pollTimer) {
+          clearTimeout(pollTimer);
+          pollTimer = null;
+        }
+        setButtonsDisabled(false);
+        if (lastStatus === 'processing') {
+          refreshLogs();
+        }
+      }
+
+      lastStatus = currentStatus;
+    }
+
+    function handleFetchError(message) {
+      if (message) {
+        window.alert(message);
+      } else {
+        window.alert('リクエスト中に問題が発生しました。');
+      }
+    }
+
+    // Global Helper: Poll Progress
+    window.pollProgress = function () {
+      fetch("{{ url_for('main.post_process_status') }}", { headers: { 'Accept': 'application/json' } })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data) {
+            renderState(data);
+            if (data.status === 'processing') {
+              pollTimer = setTimeout(window.pollProgress, 2000);
+            }
+          }
+        })
+        .catch(() => {
+          pollTimer = setTimeout(window.pollProgress, 3000);
+        });
+    };
+
+    function createStatusBadge(status) {
+      const span = document.createElement('span');
+      if (status === 'completed') {
+        span.className = 'badge bg-success';
+        span.textContent = '完了';
+      } else if (status === 'error') {
+        span.className = 'badge bg-danger';
+        span.textContent = 'エラー';
+      } else {
+        span.className = 'badge bg-secondary';
+        span.textContent = status || '';
+      }
+      return span;
+    }
+
+    function renderLogsTable(logs) {
+      if (!logsBody) {
+        return;
+      }
+      logsBody.innerHTML = '';
+      logs.forEach((log) => {
+        const tr = document.createElement('tr');
+        const cells = [
+          String(log.run_id ?? ''),
+          log.filename ?? '',
+          log.folder_alias || (log.is_folder_batch ? 'フォルダ処理' : '---'),
+          log.process_start ?? '',
+          log.status ?? '',
+          log.calibration_profile || '未設定',
+        ];
+
+        cells.forEach((value, index) => {
+          const td = document.createElement('td');
+          if (index === 4) {
+            td.appendChild(createStatusBadge(value));
+          } else {
+            td.textContent = value;
+          }
+          tr.appendChild(td);
+        });
+
+        logsBody.appendChild(tr);
+      });
+    }
+
+    function updateSelectOptions(select, logs, placeholderText, labelBuilder) {
+      if (!select) {
+        return;
+      }
+      const currentValue = select.value;
+      select.innerHTML = '';
+
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = placeholderText;
+      placeholder.disabled = true;
+      if (!currentValue) {
+        placeholder.selected = true;
+      }
+      select.appendChild(placeholder);
+
+      logs.forEach((log) => {
+        const option = document.createElement('option');
+        option.value = String(log.run_id);
+        option.textContent = labelBuilder(log);
+        if (String(log.run_id) === currentValue) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+
+      if (select.selectedIndex === -1) {
+        placeholder.selected = true;
+      }
+    }
+
+    function updateFolderOptions(select, folders) {
+      if (!select) {
+        return;
+      }
+      const currentValue = select.value;
+      select.innerHTML = '';
+
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '-- フォルダを選択 --';
+      placeholder.disabled = true;
+      select.appendChild(placeholder);
+
+      if (Array.isArray(folders)) {
+        folders.forEach((folder) => {
+          const option = document.createElement('option');
+          option.value = folder.folder_alias;
+          const runCount = folder.run_count ?? 0;
+          const completedCount = folder.completed_runs ?? 0;
+          const missingProfiles = folder.missing_profiles ?? 0;
+          option.textContent = `${folder.folder_alias} (${runCount}本 / 完了 ${completedCount} / プロファイル未設定 ${missingProfiles})`;
+          if (folder.folder_alias === currentValue) {
+            option.selected = true;
+          }
+          select.appendChild(option);
+        });
+      }
+
+      if (!select.value) {
+        placeholder.selected = true;
+      }
+      updateFolderAvailability(folders);
+      updateFolderProfileManagerState();
+    }
+
+    function updateFolderAvailability(folders) {
+      const hasFolders = Array.isArray(folders) ? folders.length > 0 : (folderSelect && folderSelect.options.length > 1);
+      if (folderModeRadio) {
+        folderModeRadio.disabled = !hasFolders;
+        if (!hasFolders && folderModeRadio.checked && runModeRadio) {
+          runModeRadio.checked = true;
+          setTargetMode('run');
+        }
+      }
+      if (folderModeLabel) {
+        folderModeLabel.classList.toggle('disabled', !hasFolders);
+      }
+    }
+
+    function refreshLogs() {
+      fetch("{{ url_for('main.api_process_logs') }}", { headers: { 'Accept': 'application/json' } })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!data || !Array.isArray(data.logs)) {
+            return;
+          }
+          const logs = data.logs;
+          renderLogsTable(logs);
+          const folderLabel = (log) => log.folder_alias || (log.is_folder_batch ? 'フォルダ処理' : '---');
+          const buildCalibLabel = (log) => {
+            const folderText = folderLabel(log);
+            return `Run #${log.run_id} - ${log.filename} / フォルダ: ${folderText}`;
+          };
+          const buildApplyLabel = (log) => {
+            const folderText = folderLabel(log);
+            const profile = log.calibration_profile || '未設定';
+            return `Run #${log.run_id} (現在: ${profile} / フォルダ: ${folderText})`;
+          };
+          const buildActionLabel = (log) => {
+            const folderText = folderLabel(log);
+            const profile = log.calibration_profile || '未設定';
+            return `Run #${log.run_id} (Profile: ${profile} / フォルダ: ${folderText})`;
+          };
+          updateSelectOptions(calibRunSelect, logs, '-- Runを選択 --', buildCalibLabel);
+          updateSelectOptions(applyRunSelect, logs, '-- Runを選択 --', buildApplyLabel);
+          updateSelectOptions(actionRunSelect, logs, '-- Runを選択 --', buildActionLabel);
+          const folders = Array.isArray(data.folders) ? data.folders : [];
+          updateFolderOptions(folderSelect, folders);
+        })
+        .catch(() => { });
+    }
+
+    if (folderSelect) {
+      folderSelect.addEventListener('change', () => {
+        updateFolderProfileManagerState();
+        if (currentTargetMode === 'folder') {
+          currentFolderAlias = folderSelect.value || '';
+        }
+      });
+    }
+
+    if (runBulkSelect) {
+      runBulkSelect.addEventListener('change', () => {
+        updateRunApplyButtonState();
+      });
+    }
+
+    if (runSelectAllCheckbox) {
+      runSelectAllCheckbox.addEventListener('change', (event) => {
+        const checked = Boolean(event.target?.checked);
+        if (!runTableBody) {
+          return;
+        }
+        const checkboxes = runTableBody.querySelectorAll('input[type="checkbox"][data-run-id]');
+        currentRunSelection = new Set();
+        checkboxes.forEach((cb) => {
+          cb.checked = checked;
+          if (checked && cb.dataset?.runId) {
+            const runId = Number.parseInt(cb.dataset.runId, 10);
+            if (!Number.isNaN(runId)) {
+              currentRunSelection.add(runId);
+            }
+          }
+        });
+        if (runSelectAllCheckbox) {
+          runSelectAllCheckbox.checked = checked;
+          runSelectAllCheckbox.indeterminate = false;
+        }
+        updateRunSelectionSummary();
+        updateRunApplyButtonState();
+      });
+    }
+
+    if (runBulkApplyButton) {
+      runBulkApplyButton.addEventListener('click', () => {
+        const runIds = Array.from(currentRunSelection);
+        let profileValue = runBulkSelect?.value || '';
+        if (!profileValue) {
+          setModalStatus('warning', '適用するプロファイルを選択してください。');
+          return;
+        }
+        if (profileValue === '__CLEAR__') {
+          profileValue = '';
+        }
+        applyProfileToRuns({
+          folderAlias: currentFolderAlias,
+          runIds,
+          profileValue,
+        });
+      });
+    }
+
+    if (folderProfileModalEl) {
+      folderProfileModalEl.addEventListener('hidden.bs.modal', () => {
+        setModalStatus('', '');
+        scopePendingChanges.clear();
+        updateScopeBulkButtonState();
+      });
+
+      folderProfileModalEl.addEventListener('click', async (event) => {
+        const rawTarget = event.target;
+        if (!(rawTarget instanceof HTMLElement)) {
+          return;
+        }
+
+        // Try to find an element with data-action (either the target or a parent)
+        const actionEl = rawTarget.closest('[data-action]');
+        if (!actionEl) {
+          return;
+        }
+
+        const action = actionEl.dataset.action;
+        if (!action) {
+          return;
+        }
+
+        // --- SCOPE ACTIONS ---
+        if (action === 'apply-scope-all') {
+          if (!currentFolderAlias) {
+            setModalStatus('error', 'フォルダが選択されていません。');
+            return;
+          }
+          if (!scopePendingChanges.size) {
+            setModalStatus('warning', '変更対象のサブフォルダを選択してください。');
+            return;
+          }
+          const changes = Array.from(scopePendingChanges.entries())
+            .map(([scope, meta]) => ({
+              scope,
+              rawValue: meta?.rawValue || '',
+              displayName: meta?.displayName || scope,
+            }))
+            .filter((item) => Boolean(item.rawValue));
+          if (!changes.length) {
+            setModalStatus('warning', '変更対象のサブフォルダを選択してください。');
+            return;
+          }
+          await applyBulkScopeChanges({
+            folderAlias: currentFolderAlias,
+            changes,
+          });
+          return;
+        }
+
+        if (action === 'preview-calibration') {
+          const runIdRaw = actionEl.dataset.runId;
+          const runId = Number.parseInt(runIdRaw || '', 10);
+          if (Number.isNaN(runId)) {
+            setModalStatus('error', 'Run ID を取得できませんでした。');
+            return;
+          }
+          await openCalibrationPreview(runId);
+          return;
+        }
+
+        if (action === 'open-calibration') {
+          const runIdRaw = actionEl.dataset.runId || '';
+          const runId = Number.parseInt(runIdRaw, 10);
+          if (Number.isNaN(runId)) {
+            setModalStatus('error', 'Run ID を取得できませんでした。');
+            return;
+          }
+          const url = new URL(`${window.location.origin}/calibration`);
+          url.searchParams.set('run_id', String(runId));
+          const scopeHint = actionEl.dataset.scope || '';
+          if (scopeHint) {
+            url.searchParams.append('path_hint', scopeHint);
+          }
+          window.open(url.toString(), '_blank', 'noopener');
+          setModalStatus('info', 'キャリブレーションツールを新しいタブで開きました。');
+          return;
+        }
+
+        const wrapper = actionEl.closest('.input-group');
+        const select = wrapper ? wrapper.querySelector('select') : null;
+        // Some buttons like save-metadata don't have a select in an input-group nearby in the same way, or work differently.
+
+        // ... (Existing logic adapted to use actionEl) ...
+
+        if (action === 'apply-scope') {
+          if (!select) return;
+          const selectedValue = select.value;
+          if (!selectedValue) {
+            setModalStatus('warning', '適用するプロファイルを選択してください。');
+            return;
+          }
+          let profileValue = selectedValue;
+          if (selectedValue === '__CLEAR__') {
+            profileValue = '';
+          }
+          const scope = actionEl.dataset.scope || select.dataset.scope || '';
+          if (!scope) {
+            setModalStatus('error', 'サブフォルダ情報を取得できませんでした。');
+            return;
+          }
+          applyProfileChange({
+            folderAlias: currentFolderAlias,
+            scope,
+            profileValue,
+            displayName: actionEl.dataset.display || scope,
+          });
+          select.value = '';
+          return;
+        }
+
+        if (action === 'apply-run-single') {
+          if (!select) return;
+          const selectedValue = select.value;
+          const runIdRaw = actionEl.dataset.runId || select.dataset.runId || '';
+          const runId = Number.parseInt(runIdRaw, 10);
+          if (Number.isNaN(runId)) {
+            setModalStatus('error', 'Run ID を取得できませんでした。');
+            return;
+          }
+          applyProfileToRuns({
+            folderAlias: currentFolderAlias,
+            runIds: [runId],
+            profileValue: selectedValue === '__CLEAR__' ? '' : selectedValue,
+          });
+          select.value = '';
+          return;
+        }
+
+        // Save Metadata Handler (Merged from separate listener if needed, or kept separate but fixed there too)
+        if (action === 'save-metadata') {
+          // ... existing save metadata logic is in a separate block below ...
+          // We can let it be handled there if we fix the event delegation there too.
+          // But for this block, we are done with recognized actions.
+        }
+      });
+    }
+
+    if (folderProfileManagerButton && folderProfileModal) {
+      folderProfileManagerButton.addEventListener('click', () => {
+        if (!folderSelect || !folderSelect.value) {
+          setModalStatus('warning', 'フォルダを選択してください。');
+          return;
+        }
+        currentFolderAlias = folderSelect.value;
+        setModalStatus('', '');
+        folderProfileModal.show();
+        loadFolderDetails(currentFolderAlias);
+      });
+    }
+
+    targetModeInputs.forEach((input) => {
+      input.addEventListener('change', () => {
+        if (input.checked) {
+          setTargetMode(input.value);
+        }
+      });
+    });
+
+    // 確認モーダルから呼び出される実行関数（JSON版）
+    window.executeConfirmedAction = async function (formDataObj) {
+      if (!formDataObj) {
+        alert('フォームデータがありません');
+        return;
+      }
+
+      // 進捗エリアを表示
+      if (progressArea) {
+        progressArea.style.display = 'block';
+        if (statusMessage) statusMessage.textContent = '後処理を実行しました。進捗状況を確認してください...';
+        if (statusBadge) {
+          statusBadge.className = 'badge bg-warning text-dark';
+          statusBadge.textContent = '処理中';
+        }
+        if (progressBar) {
+          progressBar.style.width = '0%';
+          progressBar.classList.add('progress-bar-striped', 'progress-bar-animated');
+        }
+        // ユーザーが進捗に気づくようにスクロール
+        progressArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      // ボタンを無効化
+      setButtonsDisabled(true);
+
+      try {
+        const csrfToken = getCsrfToken();
+        const response = await fetch("{{ url_for('main.post_process_action') }}", {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}),
+          },
+          body: JSON.stringify(formDataObj),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || data.message || '処理の開始に失敗しました');
+        }
+
+        // 成功した場合、ポーリングを開始
+        if (data.status === 'processing' || data.status === 'queued') {
+          // ロック直後にポーリング開始
+          setButtonsDisabled(true);
+          pollProgress();
+        } else if (data.status === 'complete') {
+          renderState(data);
+          if (data.last_result) {
+            updateLastResultDisplay(data.last_result);
+          }
+          refreshLogs();
+        }
+
+      } catch (error) {
+        console.error('Post process action failed:', error);
+        alert('エラー: ' + (error.message || '処理の開始に失敗しました'));
+        setButtonsDisabled(false);
+        if (progressArea) progressArea.style.display = 'none';
+      }
+    };
+
+    function setButtonsDisabled(disabled) {
+      if (actionButtons && actionButtons.length) {
+        actionButtons.forEach(btn => {
+          btn.disabled = disabled;
+        });
+      }
+    }
+
+    // 古いsubmitハンドラは無効化（ボタンクリックを直接ブロック）
+    // 確認モーダルのIIFE（行2900以降）がボタンクリックを横取りして処理するため
+    if (actionForm) {
+      actionButtons.forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          // ボタンのデフォルト動作をブロック（確認モーダルIIFEが処理する）
+          // この行は到達しない（IIFEが先にキャプチャするため）
+        });
+      });
+    }
+
+    // メタデータ保存イベントハンドラー
+    if (folderProfileModalEl) {
+      folderProfileModalEl.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (!target) return;
+
+        // メタデータ保存ボタン
+        if (target.dataset.action === 'save-metadata' || target.closest('[data-action="save-metadata"]')) {
+          const btn = target.dataset.action === 'save-metadata' ? target : target.closest('[data-action="save-metadata"]');
+          const scope = btn.dataset.scope;
+          if (!scope) return;
+
+          // 同じ行の入力値を取得
+          // 同じ行の入力値を取得
+          const row = btn.closest('tr');
+          if (!row) return;
+
+          // Road Type: ラジオボタンから選択された値を取得
+          const roadTypeGroup = row.querySelector('.road-type-group');
+          let roadType = null;
+          if (roadTypeGroup) {
+            const checked = roadTypeGroup.querySelector('input[type="radio"]:checked');
+            if (checked) {
+              roadType = checked.value || null;
+            }
+          } else {
+            // Fallback for select if exists (though we replaced it)
+            const select = row.querySelector('.road-type-select');
+            if (select) roadType = select.value || null;
+          }
+
+          const yearInput = row.querySelector('.collection-year-input');
+          const collectionYear = yearInput && yearInput.value ? parseInt(yearInput.value) : null;
+
+          // Get run_ids for this scope (from the loaded data)
+          const runIds = [];
+          const payload = await fetch(`/post_process/folder_runs/${encodeURIComponent(currentFolderAlias)}`).then(r => r.json());
+          if (payload && Array.isArray(payload.runs)) {
+            payload.runs.forEach(run => {
+              // run.scopeは動画ファイルを含むパス（例: save_1/subfolder/video.mp4）
+              // scopeはサブフォルダパス（例: save_1/subfolder）
+              // run.scopeがscopeで始まるか、scopeと完全一致する場合にマッチ
+              if (run.scope === scope || run.scope.startsWith(scope + '/')) {
+                runIds.push(run.run_id);
+              }
+            });
+          }
+
+          if (runIds.length === 0) {
+            setModalStatus('warning', 'このサブフォルダに属する動画が見つかりません。動画データが登録されているか確認してください。');
+            return;
+          }
+
+          setModalStatus('info', 'メタデータを保存しています...');
+          btn.disabled = true;
+
+          try {
+            const response = await fetch('/api/video/set_metadata', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                run_ids: runIds,
+                road_type: roadType,
+                collection_year: collectionYear,
+                folder_alias: scope
+              })
+            });
+
+            const data = await response.json();
+            if (data.success) {
+              const msg = data.updated_videos > 0
+                ? `保存完了 (${data.updated_videos}件の動画情報を更新しました)`
+                : `保存完了 (更新対象なし)`;
+              setModalStatus('success', msg);
+              // モーダルを再ロードしてアイコンを更新
+              await loadFolderDetails(currentFolderAlias, { preserveStatus: true });
+            } else {
+              throw new Error(data.error || '保存に失敗しました');
+            }
+          } catch (error) {
+            setModalStatus('error', `エラー: ${error.message}`);
+          } finally {
+            btn.disabled = false;
+          }
+        }
+
+        // プレビューボタン
+        if (target.dataset.action === 'preview-calibration' || target.closest('[data-action="preview-calibration"]')) {
+          const btn = target.dataset.action === 'preview-calibration' ? target : target.closest('[data-action="preview-calibration"]');
+          const runId = btn.dataset.runId;
+          if (!runId) return;
+
+          // Show modal
+          const previewModal = new bootstrap.Modal(document.getElementById('calibrationPreviewModal'));
+          const loadingEl = document.getElementById('calibPreviewLoading');
+          const contentEl = document.getElementById('calibPreviewContent');
+          const errorEl = document.getElementById('calibPreviewError');
+          const imageEl = document.getElementById('calibPreviewImage');
+          const profileNameEl = document.getElementById('calibPreviewProfileName');
+          const typeEl = document.getElementById('calibPreviewType');
+          const frameNumEl = document.getElementById('calibPreviewFrameNum');
+          const totalFramesEl = document.getElementById('calibPreviewTotalFrames');
+
+          // Reset state
+          loadingEl.classList.remove('d-none');
+          contentEl.classList.add('d-none');
+          errorEl.classList.add('d-none');
+          errorEl.textContent = '';
+
+          previewModal.show();
+
+          try {
+            const response = await fetch(`/api/video/${runId}/calibration_preview`);
+            const data = await response.json();
+
+            if (data.success) {
+              imageEl.src = data.preview_image;
+              profileNameEl.textContent = data.profile_name || '-';
+              typeEl.textContent = data.calibration_type || '-';
+              frameNumEl.textContent = data.frame_number || '-';
+              totalFramesEl.textContent = data.total_frames || '-';
+
+              loadingEl.classList.add('d-none');
+              contentEl.classList.remove('d-none');
+            } else {
+              throw new Error(data.error || 'プレビューの生成に失敗しました');
+            }
+          } catch (error) {
+            loadingEl.classList.add('d-none');
+            errorEl.textContent = `エラー: ${error.message}`;
+            errorEl.classList.remove('d-none');
+          }
+        }
+      });
+    }
+
+    renderState(initialProgress);
+    updateLastResultDisplay(lastKnownResult);
+    if (currentStatus === 'processing') {
+      pollProgress();
+    }
+
+    refreshLogs();
+  });
+</script>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="postProcessConfirmModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-play-circle me-2"></i>後処理実行の確認</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info small mb-3">
+          以下の設定で後処理を開始します。内容を確認してください。
+        </div>
+        <div class="row g-3">
+          <div class="col-md-4" style="overflow: hidden;">
+            <table class="table table-sm table-bordered mb-0" style="table-layout: fixed; width: 100%;">
+              <tbody>
+                <tr>
+                  <th class="table-light text-nowrap" style="width: 45%;">適用プロファイル</th>
+                  <td id="confirmProfile" class="fw-bold text-primary"
+                    style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 1px;"></td>
+                </tr>
+                <tr>
+                  <th class="table-light">登録年度</th>
+                  <td id="confirmYear"></td>
+                </tr>
+                <tr>
+                  <th class="table-light">道路種別</th>
+                  <td id="confirmRoadType"></td>
+                </tr>
+                <tr>
+                  <th class="table-light">処理対象数</th>
+                  <td id="confirmCount" class="fw-bold"></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="mt-2">
+              <label class="small text-muted fw-bold">対象Run ID (抜粋)</label>
+              <div id="confirmRunIds" class="small text-muted border rounded p-2 bg-light font-monospace text-wrap"
+                style="max-height: 100px; overflow-y: auto;"></div>
+            </div>
+          </div>
+
+          <div class="col-md-8">
+            <label class="form-label small fw-bold mb-1">キャリブレーション適用イメージ (代表Run)</label>
+            <div
+              class="border rounded bg-dark d-flex align-items-center justify-content-center position-relative overflow-hidden"
+              style="height: 240px;">
+              <img id="confirmImage" src="" class="img-fluid"
+                style="display: none; max-height: 100%; max-width: 100%; object-fit: contain;">
+              <div id="confirmNoImage" class="text-white-50 small text-center p-3" style="display: none;">
+                <i class="bi bi-camera-video-off fs-1 d-block mb-2"></i>
+                プレビュー画像を取得できませんでした
+              </div>
+              <div id="confirmLoading" class="text-white small text-center p-3" style="display: none;">
+                <div class="spinner-border text-light mb-2" role="status"></div>
+                <div>生成中...</div>
+              </div>
+            </div>
+          </div>
+          <!-- Navigation Controls -->
+          <div class="d-flex justify-content-between align-items-center mt-2 bg-light p-1 rounded border">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="prevPreviewBtn" disabled>
+              <i class="bi bi-chevron-left"></i> 前へ
+            </button>
+            <span class="small fw-bold text-muted" id="previewCounter">- / -</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="nextPreviewBtn" disabled>
+              次へ <i class="bi bi-chevron-right"></i>
+            </button>
+          </div>
+          <div class="form-text text-end mt-1">※自動選択された代表フレームにラインを描画しています</div>
+        </div>
+      </div>
+    </div>
+    <div class="mt-4 pt-3 border-top">
+      <button type="button" class="btn btn-primary w-100 py-2 fs-5 fw-bold shadow-sm mb-2" id="confirmExecuteBtn">
+        <i class="bi bi-check-circle-fill me-2"></i>上記の内容で実行する
+      </button>
+      <button type="button" class="btn btn-outline-secondary w-100" data-bs-dismiss="modal">
+        キャンセル
+      </button>
+    </div>
+  </div>
+</div>
+</div>
+
+
+<!-- Modal handlers handled by IIFE below -->
+<script>
+  // Post Process Confirmation Modal Logic (Revamped)
+  // Note: pollProgress and refreshLogs are defined in the main DOMContentLoaded block above
+
+  // --- IIFE for Post Process Confirmation Modal Logic ---
+  document.addEventListener("DOMContentLoaded", () => {
+    console.log('Initializing Confirmation Modal Logic...');
+    const form = document.getElementById('postProcessActionForm');
+
+    // CRITICAL: Block form submission to prevent page navigation
+    if (form) {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[DEBUG] Form submit event blocked.');
+        return false;
+      });
+    }
+
+    const buttons = form ? Array.from(form.querySelectorAll('.btn-post-process-action')) : [];
+    const confModalEl = document.getElementById('postProcessConfirmModal');
+    // Using simple new Modal(el) might ignore existing instance if any
+    const getModalInst = () => bootstrap.Modal.getInstance(confModalEl) || new bootstrap.Modal(confModalEl);
+
+    if (!form || !confModalEl) {
+      console.warn('Required elements for modal logic not found.');
+      return;
+    }
+
+    const confModalInst = new bootstrap.Modal(confModalEl);
+
+    // AI suggestion: Centralized state for the modal
+    const state = {
+      formData: null, // Holds the FormData object pending execution
+      currentPreviewIndex: 0,
+      totalRuns: 0
+    };
+
+    // UI Elements
+    const ui = {
+      executeBtn: document.getElementById('confirmExecuteBtn'),
+      loading: document.getElementById('confirmLoading'),
+      previewImage: document.getElementById('confirmImage'),
+      noImage: document.getElementById('confirmNoImage'),
+      prevBtn: document.getElementById('prevPreviewBtn'),
+      nextBtn: document.getElementById('nextPreviewBtn'),
+      counter: document.getElementById('previewCounter'),
+
+      // Info fields
+      profile: document.getElementById('confirmProfile'),
+      year: document.getElementById('confirmYear'),
+      roadType: document.getElementById('confirmRoadType'),
+      count: document.getElementById('confirmCount'),
+      runIds: document.getElementById('confirmRunIds')
+    };
+
+    // --- Event Listeners ---
+
+    // 1. Action Buttons - Direct execution (skip modal, use inline preview for confirmation)
+    const actionButtons = document.querySelectorAll('button[name="action"]');
+    console.log(`[DEBUG] Found ${actionButtons.length} action buttons via button[name="action"].`);
+
+    actionButtons.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault(); // Stop form submission
+        e.stopPropagation();
+        console.log(`[DEBUG] Button clicked: ${btn.value}`);
+        const actionValue = btn.value;
+        if (!actionValue) return alert('アクションが指定されていません');
+
+        // Capture Form Data
+        const targetForm = document.getElementById('postProcessActionForm');
+        if (!targetForm) {
+          console.error('[DEBUG] Form not found!');
+          return alert('フォームが見つかりません');
+        }
+
+        const formData = new FormData(targetForm);
+        console.log('[DEBUG] Form data captured.');
+
+        // Determine Target Mode
+        let targetMode = 'run';
+        const modeInputs = targetForm.querySelectorAll('input[name="target_mode"]');
+        modeInputs.forEach(inp => { if (inp.checked) targetMode = inp.value; });
+
+        formData.set('action', actionValue);
+        formData.set('target_mode', targetMode);
+
+        // Validation based on mode
+        if (targetMode === 'run') {
+          if (!formData.get('run_id')) return alert('処理対象のRunを選択してください');
+          formData.delete('folder_alias');
+        } else {
+          if (!formData.get('folder_alias')) return alert('処理対象のフォルダを選択してください');
+          if (actionValue === 'generate_video') return alert('フォルダ処理では動画生成を利用できません');
+          formData.delete('run_id');
+        }
+
+        // === DIRECT EXECUTION (Skip Modal) ===
+        // Build payload from FormData
+        const payload = {};
+        formData.forEach((value, key) => payload[key] = value);
+
+        // Disable button during execution
+        btn.disabled = true;
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>送信中...';
+
+        try {
+          // Get CSRF Token
+          const csrfInput = targetForm.querySelector('input[name="csrf_token"]');
+          const csrfToken = csrfInput ? csrfInput.value : '';
+
+          const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          };
+          if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+
+          // Send request
+          const response = await fetch("{{ url_for('main.post_process_action') }}", {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(payload)
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || data.message || 'サーバーエラーが発生しました');
+          }
+
+          console.log('[DEBUG] Execution started:', data);
+
+          // Show progress area and scroll to it
+          const progressArea = document.getElementById('postProcessProgressArea');
+          const statusMessage = document.getElementById('postProcessStatusMessage');
+          const statusBadge = document.getElementById('postProcessStatusBadge');
+          const progressBar = document.getElementById('postProcessProgressBar');
+
+          if (progressArea) {
+            progressArea.style.display = 'block';
+            if (statusMessage) statusMessage.textContent = '後処理を開始しました...';
+            if (statusBadge) {
+              statusBadge.className = 'badge bg-warning text-dark';
+              statusBadge.textContent = '処理中';
+            }
+            if (progressBar) {
+              progressBar.style.width = '0%';
+              progressBar.classList.add('progress-bar-striped', 'progress-bar-animated', 'bg-info');
+              progressBar.textContent = '初期化中...';
+            }
+            // Scroll to progress area
+            progressArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+
+          // Start polling for progress
+          if (typeof window.pollProgress === 'function') {
+            setTimeout(window.pollProgress, 500);
+          } else if (typeof pollProgress === 'function') {
+            setTimeout(pollProgress, 500);
+          }
+
+        } catch (error) {
+          console.error('[DEBUG] Execution failed:', error);
+          alert('エラー: ' + error.message);
+        } finally {
+          // Restore button
+          btn.disabled = false;
+          btn.innerHTML = originalHTML;
+        }
+      });
+    });
+
+    // 2. Execute Button Click
+    if (ui.executeBtn) {
+      ui.executeBtn.onclick = async () => {
+        if (!state.formData) {
+          console.error('No pending form data found.');
+          return;
+        }
+
+        console.log('Execute button clicked. Processing...');
+
+        // Helper: Get CSRF Token safely
+        const getCsrf = () => {
+          const el = document.querySelector('input[name="csrf_token"]');
+          return el ? el.value : '';
+        };
+
+        // Prepare Payload
+        const payload = {};
+        state.formData.forEach((value, key) => payload[key] = value);
+
+        // Disable UI immediately
+        ui.executeBtn.disabled = true;
+        ui.executeBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>送信中...';
+
+        try {
+          const csrfToken = getCsrf();
+          const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          };
+          if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+
+          // Direct Fetch Call
+          const response = await fetch("{{ url_for('main.post_process_action') }}", {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(payload)
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || data.message || 'サーバーエラーが発生しました');
+          }
+
+          // Success Handling
+          console.log('Execution started successfully:', data);
+
+          // Hide Modal
+          getModalInst().hide(); // Use getModalInst()
+
+          // === NEW: Show Progress Area Immediately ===
+          const progressArea = document.getElementById('progressArea');
+          const statusMessage = document.getElementById('statusMessage');
+          const statusBadge = document.getElementById('statusBadge');
+          const progressBar = document.getElementById('progressBar');
+          const lastResultEl = document.getElementById('postProcessLastResult');
+
+          if (progressArea) {
+            progressArea.style.display = 'block';
+            if (statusMessage) statusMessage.textContent = '後処理を開始しました...';
+
+            if (statusBadge) {
+              statusBadge.className = 'badge bg-warning text-dark';
+              statusBadge.textContent = '処理中';
+            }
+
+            if (progressBar) {
+              progressBar.style.width = '0%';
+              progressBar.classList.remove('bg-success', 'bg-danger', 'bg-info'); // Clear previous states
+              progressBar.classList.add('progress-bar-striped', 'progress-bar-animated', 'bg-info'); // Set to info for pending
+              progressBar.textContent = '初期化中...';
+              progressBar.setAttribute('aria-valuenow', '0');
+            }
+
+            // Explicitly Reset Last Result Display to prevent stale data
+            if (lastResultEl) {
+              lastResultEl.textContent = '処理を開始しました...';
+              lastResultEl.classList.remove('text-danger', 'text-success');
+              lastResultEl.classList.add('text-muted');
+            }
+
+            // Scroll to top
+            progressArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+
+          // Trigger polling
+          if (typeof window.pollProgress === 'function') {
+            setTimeout(window.pollProgress, 500);
+          } else {
+            console.log('Poll function not found, reloading logs manually...');
+            if (typeof window.refreshLogs === 'function') window.refreshLogs();
+          }
+
+        } catch (error) {
+          console.error('Execution Failed:', error);
+          alert('エラー: ' + error.message);
+        } finally {
+          // Restore Button State (if modal still open due to error)
+          if (confModalEl.classList.contains('show')) {
+            ui.executeBtn.disabled = false;
+            ui.executeBtn.innerHTML = '<i class="bi bi-check-circle-fill me-2"></i>上記の内容で実行する';
+          }
+          state.formData = null;
+        }
+      };
+    }
+
+    // 3. Modal Hidden Event (Cleanup)
+    confModalEl.addEventListener('hidden.bs.modal', () => {
+      // Small delay to ensure execute click handler finishes first if it triggered the hide
+      setTimeout(() => {
+        if (!confModalEl.classList.contains('show')) {
+          state.formData = null;
+        }
+      }, 200);
+    });
+
+    // 4. Navigation Buttons
+    if (ui.prevBtn) {
+      ui.prevBtn.onclick = () => {
+        if (state.currentPreviewIndex > 0) loadPreview(state.currentPreviewIndex - 1);
+      };
+    }
+    if (ui.nextBtn) {
+      ui.nextBtn.onclick = () => {
+        if (state.currentPreviewIndex < state.totalRuns - 1) loadPreview(state.currentPreviewIndex + 1);
+      };
+    }
+
+    // --- Helper Functions ---
+
+    async function loadPreview(index) {
+      if (!state.formData) return;
+
+      // Update UI to Loading State
+      if (ui.loading) ui.loading.style.display = 'block';
+      if (ui.previewImage) ui.previewImage.style.display = 'none';
+      if (ui.noImage) ui.noImage.style.display = 'none';
+      if (ui.prevBtn) ui.prevBtn.disabled = true;
+      if (ui.nextBtn) ui.nextBtn.disabled = true;
+
+      const payload = {
+        target_mode: state.formData.get('target_mode'),
+        run_id: state.formData.get('run_id'),
+        folder_alias: state.formData.get('folder_alias'),
+        folder_profile_name: state.formData.get('folder_profile_name'),
+        preview_index: index
+      };
+
+      try {
+        const res = await fetch('/api/post_process/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'プレビュー取得エラー');
+
+        // Update State
+        state.currentPreviewIndex = data.preview_index ?? index;
+        state.totalRuns = data.total_runs_count || data.count || 0;
+
+        // Render Data
+        if (ui.profile) ui.profile.textContent = data.profile || '未設定';
+        if (ui.year) ui.year.textContent = data.year || '未設定';
+        if (ui.roadType) ui.roadType.textContent = data.road_type || '未設定';
+        if (ui.count) ui.count.textContent = (data.count || 0) + ' 件';
+
+        if (ui.runIds) {
+          let text = '-';
+          if (Array.isArray(data.run_ids_sample) && data.run_ids_sample.length > 0) {
+            text = data.run_ids_sample.slice(0, 5).join(', ');
+            if (data.count > 5) text += `... (他${data.count - 5}件)`;
+          } else if (payload.run_id) {
+            text = payload.run_id;
+          }
+          ui.runIds.textContent = text;
+        }
+
+        // Render Image
+        if (ui.loading) ui.loading.style.display = 'none';
+        if (data.image && ui.previewImage) {
+          ui.previewImage.src = `data:image/jpeg;base64,${data.image}`;
+          ui.previewImage.style.display = 'block';
+        } else if (ui.noImage) {
+          ui.noImage.style.display = 'block';
+          if (data.image_error) {
+            ui.noImage.innerHTML = `<i class="bi bi-exclamation-triangle fs-1 d-block mb-2 text-warning"></i>${data.image_error}`;
+          }
+        }
+
+        // Update Navigation Controls
+        if (ui.counter) {
+          const current = state.currentPreviewIndex + 1;
+          const total = state.totalRuns || '-';
+          let label = `Run: ${current} / ${total}`;
+          if (data.current_run_id) label += ` (${data.current_run_id})`;
+          ui.counter.textContent = label;
+        }
+
+        if (ui.prevBtn) ui.prevBtn.disabled = state.currentPreviewIndex <= 0;
+        if (ui.nextBtn) ui.nextBtn.disabled = state.currentPreviewIndex >= state.totalRuns - 1;
+        if (ui.executeBtn) ui.executeBtn.disabled = false; // Enable execute only after preview loads
+
+      } catch (err) {
+        console.error('Preview error:', err);
+        if (ui.loading) ui.loading.style.display = 'none';
+        if (ui.noImage) {
+          ui.noImage.style.display = 'block';
+          ui.noImage.textContent = 'エラー: ' + err.message;
+        }
+      }
+    }
+
+  });
+</script>
+{% endblock %}

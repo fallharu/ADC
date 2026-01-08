@@ -1,0 +1,444 @@
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1516 境井雅章_bike_clips_20260103_010500
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1507 境井雅章_bike_clips_20260103_010338
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1516 境井雅章_bike_clips_20260103_010500%
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1507 境井雅章_bike_clips_20260103_010338%
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1506 境井雅章_bike_clips_20260103_010256
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1499 境井雅章_bike_clips_20260103_010153
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1507 境井雅章_bike_clips_20260103_010338%
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1497 境井雅章_bike_clips_20260103_010122
+DEBUG: Retry Basename %2_20250713_000G1507 境井雅章_bike_clips_20260103_010338%
+DEBUG: Retry Basename %2_20250713_000G1516 境井雅章_bike_clips_20260103_010500%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1507 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1516 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1506 境井雅章_bike_clips_20260103_010256%
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1499 境井雅章_bike_clips_20260103_010153%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1506 境井雅章_bike_clips_20260103_010256%
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1497 境井雅章_bike_clips_20260103_010122%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1499 境井雅章_bike_clips_20260103_010153%
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1496 境井雅章_bike_clips_20260103_010010
+DEBUG: Retry Basename %2_20250713_000G1506 境井雅章_bike_clips_20260103_010256%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1497 境井雅章_bike_clips_20260103_010122%
+DEBUG: Retry Basename %2_20250713_000G1499 境井雅章_bike_clips_20260103_010153%
+DEBUG: Retry Basename %2_20250713_000G1497 境井雅章_bike_clips_20260103_010122%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1506 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1496 境井雅章_bike_clips_20260103_010010%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1499 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1497 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1496 境井雅章_bike_clips_20260103_010010%
+DEBUG: Retry Basename %2_20250713_000G1496 境井雅章_bike_clips_20260103_010010%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1496 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1494 境井雅章_bike_clips_20260103_005920
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1494 境井雅章_bike_clips_20260103_005920%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1494 境井雅章_bike_clips_20260103_005920%
+DEBUG: Retry Basename %2_20250713_000G1494 境井雅章_bike_clips_20260103_005920%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1494 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1491 境井雅章_bike_clips_20260103_005834
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1491 境井雅章_bike_clips_20260103_005834%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1491 境井雅章_bike_clips_20260103_005834%
+DEBUG: Retry Basename %2_20250713_000G1491 境井雅章_bike_clips_20260103_005834%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1491 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1481 境井雅章_bike_clips_20260103_005756
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1481 境井雅章_bike_clips_20260103_005756%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1481 境井雅章_bike_clips_20260103_005756%
+DEBUG: Retry Basename %2_20250713_000G1481 境井雅章_bike_clips_20260103_005756%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1481 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1474 境井雅章_bike_clips_20260103_005644
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1474 境井雅章_bike_clips_20260103_005644%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1474 境井雅章_bike_clips_20260103_005644%
+DEBUG: Retry Basename %2_20250713_000G1474 境井雅章_bike_clips_20260103_005644%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1474 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1467 境井雅章_bike_clips_20260103_005607
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1467 境井雅章_bike_clips_20260103_005607%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1467 境井雅章_bike_clips_20260103_005607%
+DEBUG: Retry Basename %2_20250713_000G1467 境井雅章_bike_clips_20260103_005607%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1467 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1463 境井雅章_bike_clips_20260103_005527
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1463 境井雅章_bike_clips_20260103_005527%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1463 境井雅章_bike_clips_20260103_005527%
+DEBUG: Retry Basename %2_20250713_000G1463 境井雅章_bike_clips_20260103_005527%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1463 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250713/2_20250713_000G1461 境井雅章_bike_clips_20260103_005444
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1461 境井雅章_bike_clips_20260103_005444%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250713\2_20250713_000G1461 境井雅章_bike_clips_20260103_005444%
+DEBUG: Retry Basename %2_20250713_000G1461 境井雅章_bike_clips_20260103_005444%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250713\2_20250713_000G1461 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1455 境井雅章_bike_clips_20260103_005408
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1455 境井雅章_bike_clips_20260103_005408%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1455 境井雅章_bike_clips_20260103_005408%
+DEBUG: Retry Basename %2_20250712_000G1455 境井雅章_bike_clips_20260103_005408%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1455 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1447 境井雅章_bike_clips_20260103_005336
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1447 境井雅章_bike_clips_20260103_005336%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1447 境井雅章_bike_clips_20260103_005336%
+DEBUG: Retry Basename %2_20250712_000G1447 境井雅章_bike_clips_20260103_005336%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1447 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1433 境井雅章_bike_clips_20260103_005238
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1433 境井雅章_bike_clips_20260103_005238%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1433 境井雅章_bike_clips_20260103_005238%
+DEBUG: Retry Basename %2_20250712_000G1433 境井雅章_bike_clips_20260103_005238%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1433 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1430 境井雅章_bike_clips_20260103_005153
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1430 境井雅章_bike_clips_20260103_005153%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1430 境井雅章_bike_clips_20260103_005153%
+DEBUG: Retry Basename %2_20250712_000G1430 境井雅章_bike_clips_20260103_005153%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1430 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1412 境井雅章_bike_clips_20260103_004956
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1412 境井雅章_bike_clips_20260103_004956%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1412 境井雅章_bike_clips_20260103_004956%
+DEBUG: Retry Basename %2_20250712_000G1412 境井雅章_bike_clips_20260103_004956%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1412 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1410 境井雅章_bike_clips_20260103_004901
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1410 境井雅章_bike_clips_20260103_004901%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1410 境井雅章_bike_clips_20260103_004901%
+DEBUG: Retry Basename %2_20250712_000G1410 境井雅章_bike_clips_20260103_004901%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1410 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1399 境井雅章_bike_clips_20260103_004829
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1399 境井雅章_bike_clips_20260103_004829%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1399 境井雅章_bike_clips_20260103_004829%
+DEBUG: Retry Basename %2_20250712_000G1399 境井雅章_bike_clips_20260103_004829%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1399 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1397 境井雅章_bike_clips_20260103_004720
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1397 境井雅章_bike_clips_20260103_004720%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1397 境井雅章_bike_clips_20260103_004720%
+DEBUG: Retry Basename %2_20250712_000G1397 境井雅章_bike_clips_20260103_004720%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1397 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250712/2_20250712_000G1389 境井雅章_bike_clips_20260103_004620
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1389 境井雅章_bike_clips_20260103_004620%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250712\2_20250712_000G1389 境井雅章_bike_clips_20260103_004620%
+DEBUG: Retry Basename %2_20250712_000G1389 境井雅章_bike_clips_20260103_004620%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250712\2_20250712_000G1389 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250706/2_20250706_000G1380 Masaaki Sakai_bike_clips_20260103_004515
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1380 Masaaki Sakai_bike_clips_20260103_004515%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1380 Masaaki Sakai_bike_clips_20260103_004515%
+DEBUG: Retry Basename %2_20250706_000G1380 Masaaki Sakai_bike_clips_20260103_004515%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250706\2_20250706_000G1380 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250706/2_20250706_000G1373 Masaaki Sakai_bike_clips_20260103_004421
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1373 Masaaki Sakai_bike_clips_20260103_004421%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1373 Masaaki Sakai_bike_clips_20260103_004421%
+DEBUG: Retry Basename %2_20250706_000G1373 Masaaki Sakai_bike_clips_20260103_004421%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250706\2_20250706_000G1373 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250706/2_20250706_000G1365 Masaaki Sakai_bike_clips_20260103_004311
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1365 Masaaki Sakai_bike_clips_20260103_004311%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1365 Masaaki Sakai_bike_clips_20260103_004311%
+DEBUG: Retry Basename %2_20250706_000G1365 Masaaki Sakai_bike_clips_20260103_004311%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250706\2_20250706_000G1365 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250706/2_20250706_000G1364 Masaaki Sakai_bike_clips_20260103_004137
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1364 Masaaki Sakai_bike_clips_20260103_004137%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1364 Masaaki Sakai_bike_clips_20260103_004137%
+DEBUG: Retry Basename %2_20250706_000G1364 Masaaki Sakai_bike_clips_20260103_004137%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250706\2_20250706_000G1364 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250706/2_20250706_000G1346 Masaaki Sakai_bike_clips_20260103_004059
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1346 Masaaki Sakai_bike_clips_20260103_004059%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1346 Masaaki Sakai_bike_clips_20260103_004059%
+DEBUG: Retry Basename %2_20250706_000G1346 Masaaki Sakai_bike_clips_20260103_004059%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250706\2_20250706_000G1346 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250706/2_20250706_000G1339 Masaaki Sakai_bike_clips_20260103_004012
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1339 Masaaki Sakai_bike_clips_20260103_004012%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1339 Masaaki Sakai_bike_clips_20260103_004012%
+DEBUG: Retry Basename %2_20250706_000G1339 Masaaki Sakai_bike_clips_20260103_004012%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250706\2_20250706_000G1339 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250706/2_20250706_000G1338 Masaaki Sakai_bike_clips_20260103_003953
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1338 Masaaki Sakai_bike_clips_20260103_003953%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1338 Masaaki Sakai_bike_clips_20260103_003953%
+DEBUG: Retry Basename %2_20250706_000G1338 Masaaki Sakai_bike_clips_20260103_003953%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250706\2_20250706_000G1338 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250706/2_20250706_000G1326 Masaaki Sakai_bike_clips_20260103_003911
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1326 Masaaki Sakai_bike_clips_20260103_003911%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250706\2_20250706_000G1326 Masaaki Sakai_bike_clips_20260103_003911%
+DEBUG: Retry Basename %2_20250706_000G1326 Masaaki Sakai_bike_clips_20260103_003911%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250706\2_20250706_000G1326 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250705/2_20250705_000G1305 Masaaki Sakai_bike_clips_20260103_003835
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1305 Masaaki Sakai_bike_clips_20260103_003835%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1305 Masaaki Sakai_bike_clips_20260103_003835%
+DEBUG: Retry Basename %2_20250705_000G1305 Masaaki Sakai_bike_clips_20260103_003835%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250705\2_20250705_000G1305 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250705/2_20250705_000G1303 Masaaki Sakai_bike_clips_20260103_003755
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1303 Masaaki Sakai_bike_clips_20260103_003755%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1303 Masaaki Sakai_bike_clips_20260103_003755%
+DEBUG: Retry Basename %2_20250705_000G1303 Masaaki Sakai_bike_clips_20260103_003755%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250705\2_20250705_000G1303 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250705/2_20250705_000G1259 Masaaki Sakai_bike_clips_20260103_003635
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1259 Masaaki Sakai_bike_clips_20260103_003635%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1259 Masaaki Sakai_bike_clips_20260103_003635%
+DEBUG: Retry Basename %2_20250705_000G1259 Masaaki Sakai_bike_clips_20260103_003635%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250705\2_20250705_000G1259 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250705/2_20250705_000G1254 Masaaki Sakai_bike_clips_20260103_003525
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1254 Masaaki Sakai_bike_clips_20260103_003525%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1254 Masaaki Sakai_bike_clips_20260103_003525%
+DEBUG: Retry Basename %2_20250705_000G1254 Masaaki Sakai_bike_clips_20260103_003525%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250705\2_20250705_000G1254 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250705/2_20250705_000G1250 Masaaki Sakai_bike_clips_20260103_003430
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1250 Masaaki Sakai_bike_clips_20260103_003430%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1250 Masaaki Sakai_bike_clips_20260103_003430%
+DEBUG: Retry Basename %2_20250705_000G1250 Masaaki Sakai_bike_clips_20260103_003430%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250705\2_20250705_000G1250 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/2_/20250705/2_20250705_000G1249 Masaaki Sakai_bike_clips_20260103_003300
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1249 Masaaki Sakai_bike_clips_20260103_003300%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\2_\20250705\2_20250705_000G1249 Masaaki Sakai_bike_clips_20260103_003300%
+DEBUG: Retry Basename %2_20250705_000G1249 Masaaki Sakai_bike_clips_20260103_003300%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\2_\20250705\2_20250705_000G1249 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2450 境井雅章_bike_clips_20260103_001615
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2450 境井雅章_bike_clips_20260103_001615%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2450 境井雅章_bike_clips_20260103_001615%
+DEBUG: Retry Basename %1_20250713_000G2450 境井雅章_bike_clips_20260103_001615%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2450 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2446 境井雅章_bike_clips_20260103_001543
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2446 境井雅章_bike_clips_20260103_001543%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2446 境井雅章_bike_clips_20260103_001543%
+DEBUG: Retry Basename %1_20250713_000G2446 境井雅章_bike_clips_20260103_001543%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2446 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2440 境井雅章_bike_clips_20260103_001402
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2440 境井雅章_bike_clips_20260103_001402%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2440 境井雅章_bike_clips_20260103_001402%
+DEBUG: Retry Basename %1_20250713_000G2440 境井雅章_bike_clips_20260103_001402%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2440 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2439 境井雅章_bike_clips_20260103_001337
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2439 境井雅章_bike_clips_20260103_001337%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2439 境井雅章_bike_clips_20260103_001337%
+DEBUG: Retry Basename %1_20250713_000G2439 境井雅章_bike_clips_20260103_001337%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2439 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2435 境井雅章_bike_clips_20260103_001308
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2435 境井雅章_bike_clips_20260103_001308%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2435 境井雅章_bike_clips_20260103_001308%
+DEBUG: Retry Basename %1_20250713_000G2435 境井雅章_bike_clips_20260103_001308%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2435 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2432 境井雅章_bike_clips_20260103_001236
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2432 境井雅章_bike_clips_20260103_001236%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2432 境井雅章_bike_clips_20260103_001236%
+DEBUG: Retry Basename %1_20250713_000G2432 境井雅章_bike_clips_20260103_001236%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2432 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2431 境井雅章_bike_clips_20260103_001155
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2431 境井雅章_bike_clips_20260103_001155%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2431 境井雅章_bike_clips_20260103_001155%
+DEBUG: Retry Basename %1_20250713_000G2431 境井雅章_bike_clips_20260103_001155%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2431 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2428 境井雅章_bike_clips_20260103_001049
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2428 境井雅章_bike_clips_20260103_001049%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2428 境井雅章_bike_clips_20260103_001049%
+DEBUG: Retry Basename %1_20250713_000G2428 境井雅章_bike_clips_20260103_001049%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2428 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2426 境井雅章_bike_clips_20260103_001016
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2426 境井雅章_bike_clips_20260103_001016%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2426 境井雅章_bike_clips_20260103_001016%
+DEBUG: Retry Basename %1_20250713_000G2426 境井雅章_bike_clips_20260103_001016%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2426 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2423 境井雅章_bike_clips_20260103_000933
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2423 境井雅章_bike_clips_20260103_000933%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2423 境井雅章_bike_clips_20260103_000933%
+DEBUG: Retry Basename %1_20250713_000G2423 境井雅章_bike_clips_20260103_000933%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2423 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2420 境井雅章_bike_clips_20260103_000852
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2420 境井雅章_bike_clips_20260103_000852%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2420 境井雅章_bike_clips_20260103_000852%
+DEBUG: Retry Basename %1_20250713_000G2420 境井雅章_bike_clips_20260103_000852%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2420 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2415 境井雅章_bike_clips_20260103_000813
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2415 境井雅章_bike_clips_20260103_000813%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2415 境井雅章_bike_clips_20260103_000813%
+DEBUG: Retry Basename %1_20250713_000G2415 境井雅章_bike_clips_20260103_000813%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2415 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2410 境井雅章_bike_clips_20260103_000729
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2410 境井雅章_bike_clips_20260103_000729%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2410 境井雅章_bike_clips_20260103_000729%
+DEBUG: Retry Basename %1_20250713_000G2410 境井雅章_bike_clips_20260103_000729%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2410 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2403 境井雅章_bike_clips_20260103_000645
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2403 境井雅章_bike_clips_20260103_000645%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2403 境井雅章_bike_clips_20260103_000645%
+DEBUG: Retry Basename %1_20250713_000G2403 境井雅章_bike_clips_20260103_000645%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2403 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2401 境井雅章_bike_clips_20260103_000555
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2401 境井雅章_bike_clips_20260103_000555%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2401 境井雅章_bike_clips_20260103_000555%
+DEBUG: Retry Basename %1_20250713_000G2401 境井雅章_bike_clips_20260103_000555%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2401 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2397 境井雅章_bike_clips_20260103_000512
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2397 境井雅章_bike_clips_20260103_000512%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2397 境井雅章_bike_clips_20260103_000512%
+DEBUG: Retry Basename %1_20250713_000G2397 境井雅章_bike_clips_20260103_000512%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2397 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2396 境井雅章_bike_clips_20260103_000440
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2396 境井雅章_bike_clips_20260103_000440%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2396 境井雅章_bike_clips_20260103_000440%
+DEBUG: Retry Basename %1_20250713_000G2396 境井雅章_bike_clips_20260103_000440%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2396 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2394 境井雅章_bike_clips_20260103_000410
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2394 境井雅章_bike_clips_20260103_000410%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2394 境井雅章_bike_clips_20260103_000410%
+DEBUG: Retry Basename %1_20250713_000G2394 境井雅章_bike_clips_20260103_000410%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2394 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250713/1_20250713_000G2391 境井雅章_bike_clips_20260103_000232
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2391 境井雅章_bike_clips_20260103_000232%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250713\1_20250713_000G2391 境井雅章_bike_clips_20260103_000232%
+DEBUG: Retry Basename %1_20250713_000G2391 境井雅章_bike_clips_20260103_000232%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250713\1_20250713_000G2391 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2389 境井雅章_bike_clips_20260103_000138
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2389 境井雅章_bike_clips_20260103_000138%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2389 境井雅章_bike_clips_20260103_000138%
+DEBUG: Retry Basename %1_20250712_000G2389 境井雅章_bike_clips_20260103_000138%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2389 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2381 境井雅章_bike_clips_20260103_000029
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2381 境井雅章_bike_clips_20260103_000029%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2381 境井雅章_bike_clips_20260103_000029%
+DEBUG: Retry Basename %1_20250712_000G2381 境井雅章_bike_clips_20260103_000029%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2381 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2368 境井雅章_bike_clips_20260102_235948
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2368 境井雅章_bike_clips_20260102_235948%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2368 境井雅章_bike_clips_20260102_235948%
+DEBUG: Retry Basename %1_20250712_000G2368 境井雅章_bike_clips_20260102_235948%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2368 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2363 境井雅章_bike_clips_20260102_235855
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2363 境井雅章_bike_clips_20260102_235855%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2363 境井雅章_bike_clips_20260102_235855%
+DEBUG: Retry Basename %1_20250712_000G2363 境井雅章_bike_clips_20260102_235855%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2363 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2354 境井雅章_bike_clips_20260102_235822
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2354 境井雅章_bike_clips_20260102_235822%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2354 境井雅章_bike_clips_20260102_235822%
+DEBUG: Retry Basename %1_20250712_000G2354 境井雅章_bike_clips_20260102_235822%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2354 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2353 境井雅章_bike_clips_20260102_235759
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2353 境井雅章_bike_clips_20260102_235759%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2353 境井雅章_bike_clips_20260102_235759%
+DEBUG: Retry Basename %1_20250712_000G2353 境井雅章_bike_clips_20260102_235759%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2353 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2347 境井雅章_bike_clips_20260102_235700
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2347 境井雅章_bike_clips_20260102_235700%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2347 境井雅章_bike_clips_20260102_235700%
+DEBUG: Retry Basename %1_20250712_000G2347 境井雅章_bike_clips_20260102_235700%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2347 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2345 境井雅章_bike_clips_20260102_235623
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2345 境井雅章_bike_clips_20260102_235623%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2345 境井雅章_bike_clips_20260102_235623%
+DEBUG: Retry Basename %1_20250712_000G2345 境井雅章_bike_clips_20260102_235623%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2345 境井雅章_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2332 境_bike_clips_20260102_235543
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2332 境_bike_clips_20260102_235543%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2332 境_bike_clips_20260102_235543%
+DEBUG: Retry Basename %1_20250712_000G2332 境_bike_clips_20260102_235543%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2332 境_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2324 境_bike_clips_20260102_235455
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2324 境_bike_clips_20260102_235455%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2324 境_bike_clips_20260102_235455%
+DEBUG: Retry Basename %1_20250712_000G2324 境_bike_clips_20260102_235455%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2324 境_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2320 境_bike_clips_20260102_235416
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2320 境_bike_clips_20260102_235416%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2320 境_bike_clips_20260102_235416%
+DEBUG: Retry Basename %1_20250712_000G2320 境_bike_clips_20260102_235416%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2320 境_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250712/1_20250712_000G2317 境_bike_clips_20260102_235248
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2317 境_bike_clips_20260102_235248%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250712\1_20250712_000G2317 境_bike_clips_20260102_235248%
+DEBUG: Retry Basename %1_20250712_000G2317 境_bike_clips_20260102_235248%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250712\1_20250712_000G2317 境_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2311 Masaaki Sakai_bike_clips_20260102_235115
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2311 Masaaki Sakai_bike_clips_20260102_235115%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2311 Masaaki Sakai_bike_clips_20260102_235115%
+DEBUG: Retry Basename %1_20250706_000G2311 Masaaki Sakai_bike_clips_20260102_235115%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2311 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2299 Masaaki Sakai_bike_clips_20260102_235044
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2299 Masaaki Sakai_bike_clips_20260102_235044%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2299 Masaaki Sakai_bike_clips_20260102_235044%
+DEBUG: Retry Basename %1_20250706_000G2299 Masaaki Sakai_bike_clips_20260102_235044%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2299 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2298 Masaaki Sakai_bike_clips_20260102_234959
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2298 Masaaki Sakai_bike_clips_20260102_234959%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2298 Masaaki Sakai_bike_clips_20260102_234959%
+DEBUG: Retry Basename %1_20250706_000G2298 Masaaki Sakai_bike_clips_20260102_234959%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2298 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2293 Masaaki Sakai_bike_clips_20260102_234910
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2293 Masaaki Sakai_bike_clips_20260102_234910%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2293 Masaaki Sakai_bike_clips_20260102_234910%
+DEBUG: Retry Basename %1_20250706_000G2293 Masaaki Sakai_bike_clips_20260102_234910%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2293 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2278 Masaaki Sakai_bike_clips_20260102_234756
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2278 Masaaki Sakai_bike_clips_20260102_234756%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2278 Masaaki Sakai_bike_clips_20260102_234756%
+DEBUG: Retry Basename %1_20250706_000G2278 Masaaki Sakai_bike_clips_20260102_234756%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2278 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2272 Masaaki Sakai_bike_clips_20260102_234720
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2272 Masaaki Sakai_bike_clips_20260102_234720%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2272 Masaaki Sakai_bike_clips_20260102_234720%
+DEBUG: Retry Basename %1_20250706_000G2272 Masaaki Sakai_bike_clips_20260102_234720%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2272 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2259 Masaaki Sakai_bike_clips_20260102_234546
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2259 Masaaki Sakai_bike_clips_20260102_234546%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2259 Masaaki Sakai_bike_clips_20260102_234546%
+DEBUG: Retry Basename %1_20250706_000G2259 Masaaki Sakai_bike_clips_20260102_234546%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2259 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2258 Masaaki Sakai_bike_clips_20260102_234448
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2258 Masaaki Sakai_bike_clips_20260102_234448%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2258 Masaaki Sakai_bike_clips_20260102_234448%
+DEBUG: Retry Basename %1_20250706_000G2258 Masaaki Sakai_bike_clips_20260102_234448%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2258 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250706/1_20250706_000G2243 Masaaki Sakai_bike_clips_20260102_234432
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2243 Masaaki Sakai_bike_clips_20260102_234432%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250706\1_20250706_000G2243 Masaaki Sakai_bike_clips_20260102_234432%
+DEBUG: Retry Basename %1_20250706_000G2243 Masaaki Sakai_bike_clips_20260102_234432%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250706\1_20250706_000G2243 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2236 Masaaki Sakai_bike_clips_20260102_234410
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2236 Masaaki Sakai_bike_clips_20260102_234410%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2236 Masaaki Sakai_bike_clips_20260102_234410%
+DEBUG: Retry Basename %1_20250705_000G2236 Masaaki Sakai_bike_clips_20260102_234410%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2236 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2235 Masaaki Sakai_bike_clips_20260102_234352
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2235 Masaaki Sakai_bike_clips_20260102_234352%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2235 Masaaki Sakai_bike_clips_20260102_234352%
+DEBUG: Retry Basename %1_20250705_000G2235 Masaaki Sakai_bike_clips_20260102_234352%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2235 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2229 Masaaki Sakai_bike_clips_20260102_234244
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2229 Masaaki Sakai_bike_clips_20260102_234244%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2229 Masaaki Sakai_bike_clips_20260102_234244%
+DEBUG: Retry Basename %1_20250705_000G2229 Masaaki Sakai_bike_clips_20260102_234244%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2229 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2227 Masaaki Sakai_bike_clips_20260102_234201
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2227 Masaaki Sakai_bike_clips_20260102_234201%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2227 Masaaki Sakai_bike_clips_20260102_234201%
+DEBUG: Retry Basename %1_20250705_000G2227 Masaaki Sakai_bike_clips_20260102_234201%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2227 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2218 Masaaki Sakai_bike_clips_20260102_234050
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2218 Masaaki Sakai_bike_clips_20260102_234050%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2218 Masaaki Sakai_bike_clips_20260102_234050%
+DEBUG: Retry Basename %1_20250705_000G2218 Masaaki Sakai_bike_clips_20260102_234050%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2218 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2214 Masaaki Sakai_bike_clips_20260102_234010
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2214 Masaaki Sakai_bike_clips_20260102_234010%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2214 Masaaki Sakai_bike_clips_20260102_234010%
+DEBUG: Retry Basename %1_20250705_000G2214 Masaaki Sakai_bike_clips_20260102_234010%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2214 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2187 Masaaki Sakai_bike_clips_20260102_233940
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2187 Masaaki Sakai_bike_clips_20260102_233940%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2187 Masaaki Sakai_bike_clips_20260102_233940%
+DEBUG: Retry Basename %1_20250705_000G2187 Masaaki Sakai_bike_clips_20260102_233940%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2187 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2185 Masaaki Sakai_bike_clips_20260102_233847
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2185 Masaaki Sakai_bike_clips_20260102_233847%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2185 Masaaki Sakai_bike_clips_20260102_233847%
+DEBUG: Retry Basename %1_20250705_000G2185 Masaaki Sakai_bike_clips_20260102_233847%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2185 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2184 Masaaki Sakai_bike_clips_20260102_233808
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2184 Masaaki Sakai_bike_clips_20260102_233808%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2184 Masaaki Sakai_bike_clips_20260102_233808%
+DEBUG: Retry Basename %1_20250705_000G2184 Masaaki Sakai_bike_clips_20260102_233808%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2184 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2181 Masaaki Sakai_bike_clips_20260102_233704
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2181 Masaaki Sakai_bike_clips_20260102_233704%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2181 Masaaki Sakai_bike_clips_20260102_233704%
+DEBUG: Retry Basename %1_20250705_000G2181 Masaaki Sakai_bike_clips_20260102_233704%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2181 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2179 Masaaki Sakai_bike_clips_20260102_233609
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2179 Masaaki Sakai_bike_clips_20260102_233609%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2179 Masaaki Sakai_bike_clips_20260102_233609%
+DEBUG: Retry Basename %1_20250705_000G2179 Masaaki Sakai_bike_clips_20260102_233609%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2179 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2178 Masaaki Sakai_bike_clips_20260102_233529
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2178 Masaaki Sakai_bike_clips_20260102_233529%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2178 Masaaki Sakai_bike_clips_20260102_233529%
+DEBUG: Retry Basename %1_20250705_000G2178 Masaaki Sakai_bike_clips_20260102_233529%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2178 Masaaki Sakai_bike_clips.mp4 Exists: True
+DEBUG: Searching DB for C:/Users/kurok/Downloads/G_ADC/ADC_08/output/1_/20250705/1_20250705_000G2175 Masaaki Sakai_bike_clips_20260102_233353
+DEBUG: Retry LIKE %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2175 Masaaki Sakai_bike_clips_20260102_233353%
+DEBUG: Retry Abs %C:\Users\kurok\Downloads\G_ADC\ADC_08\output\1_\20250705\1_20250705_000G2175 Masaaki Sakai_bike_clips_20260102_233353%
+DEBUG: Retry Basename %1_20250705_000G2175 Masaaki Sakai_bike_clips_20260102_233353%
+DEBUG: Hit 4: C:\Users\kurok\Downloads\G_ADC\ADC_08\uploads\1_\20250705\1_20250705_000G2175 Masaaki Sakai_bike_clips.mp4 Exists: True

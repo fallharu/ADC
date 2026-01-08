@@ -1,0 +1,20 @@
+--- Travel Direction Distribution ---
+Travel_Direction
+B    28
+F    12
+Name: count, dtype: int64
+
+--- Sample Rows with Direction ---
+   Event_ID  ...                                        Video_Name
+0       285  ...                1_20250727_000G2664_bike_clips.mp4
+1       391  ...                1_20250803_000G2796_bike_clips.mp4
+2       356  ...  1_20250705_000G2187 Masaaki Sakai_bike_clips.mp4
+3       361  ...  1_20250705_000G2218 Masaaki Sakai_bike_clips.mp4
+4       362  ...  1_20250705_000G2218 Masaaki Sakai_bike_clips.mp4
+5       363  ...  1_20250705_000G2218 Masaaki Sakai_bike_clips.mp4
+6       364  ...  1_20250705_000G2218 Masaaki Sakai_bike_clips.mp4
+7       374  ...  1_20250705_000G2227 Masaaki Sakai_bike_clips.mp4
+8       375  ...  1_20250705_000G2227 Masaaki Sakai_bike_clips.mp4
+9       376  ...  1_20250705_000G2227 Masaaki Sakai_bike_clips.mp4
+
+[10 rows x 3 columns]

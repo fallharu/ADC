@@ -1,0 +1,683 @@
+{% extends "base.html" %}
+
+{% block title %}比較分析レポート{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-bar-chart-fill me-2"></i>年度別・道路タイプ別 比較分析レポート</h2>
+<p class="text-muted">拡幅道路と未拡幅道路の追い越し挙動を年度ごとに比較し、統計的に分析します。</p>
+
+{% if error %}
+<div class="alert alert-danger" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    エラーが発生しました: {{ error }}
+</div>
+{% endif %}
+
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-funnel me-2"></i>分析条件の選択
+    </div>
+    <div class="card-body">
+        <form id="analysisForm">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">収集年度</label>
+                    <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;">
+                        {% for year in years %}
+                        <div class="form-check">
+                            <input class="form-check-input year-checkbox" type="checkbox" value="{{ year }}"
+                                id="year_{{ year }}" checked>
+                            <label class="form-check-label" for="year_{{ year }}">
+                                {{ year }}年度
+                                {% if counts.get(('widened', year)) or counts.get(('non_widened', year)) %}
+                                <small class="text-muted">
+                                    (拡幅: {{ counts.get(('widened', year), {}).get('events', 0) }}件 /
+                                    未拡幅: {{ counts.get(('non_widened', year), {}).get('events', 0) }}件)
+                                </small>
+                                {% endif %}
+                            </label>
+                        </div>
+                        {% endfor %}
+                        {% if not years %}
+                        <p class="text-muted mb-0">利用可能なデータがありません</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">道路タイプ</label>
+                    <div class="border rounded p-3">
+                        {% for road_type in road_types %}
+                        <div class="form-check">
+                            <input class="form-check-input road-type-checkbox" type="checkbox" value="{{ road_type }}"
+                                id="road_type_{{ road_type }}" checked>
+                            <label class="form-check-label" for="road_type_{{ road_type }}">
+                                {% if road_type == 'widened' %}
+                                拡幅道路
+                                {% elif road_type == 'non_widened' %}
+                                未拡幅道路
+                                {% else %}
+                                {{ road_type }}
+                                {% endif %}
+                            </label>
+                        </div>
+                        {% endfor %}
+                        {% if not road_types %}
+                        <p class="text-muted mb-0">利用可能なデータがありません</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">進行方向</label>
+                    <div class="border rounded p-3">
+                        <div class="form-check">
+                            <input class="form-check-input direction-checkbox" type="checkbox" value="B"
+                                id="direction_B" checked>
+                            <label class="form-check-label" for="direction_B">
+                                <i class="bi bi-arrow-down me-1"></i>上から下 ({{ counts.get('B_count', '28') }}件)
+                                <small class="text-muted ms-1">(推奨)</small>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input direction-checkbox" type="checkbox" value="F"
+                                id="direction_F">
+                            <label class="form-check-label" for="direction_F">
+                                <i class="bi bi-arrow-up me-1"></i>下から上 ({{ counts.get('F_count', '12') }}件)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label fw-bold">分析指標</label>
+                    <div class="border rounded p-3">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input metric-checkbox" type="checkbox"
+                                        value="line_distances" id="metric_line" checked>
+                                    <label class="form-check-label" for="metric_line">
+                                        <i class="bi bi-rulers me-1"></i>白線距離
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input metric-checkbox" type="checkbox"
+                                        value="clearance_distances" id="metric_clearance" checked>
+                                    <label class="form-check-label" for="metric_clearance">
+                                        <i class="bi bi-arrow-left-right me-1"></i>離隔距離
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input metric-checkbox" type="checkbox"
+                                        value="overtake_speeds" id="metric_speed" checked>
+                                    <label class="form-check-label" for="metric_speed">
+                                        <i class="bi bi-speedometer me-1"></i>追い越し速度
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mt-2">
+                                <div class="form-check">
+                                    <input class="form-check-input metric-checkbox" type="checkbox"
+                                        value="accelerations_before" id="metric_acc_before">
+                                    <label class="form-check-label" for="metric_acc_before">
+                                        <i class="bi bi-graph-up me-1"></i>加速度（追い越し前）
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mt-2">
+                                <div class="form-check">
+                                    <input class="form-check-input metric-checkbox" type="checkbox"
+                                        value="accelerations_after" id="metric_acc_after">
+                                    <label class="form-check-label" for="metric_acc_after">
+                                        <i class="bi bi-graph-down me-1"></i>加速度（追い越し後）
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-3 mt-2">
+                <div class="col-12">
+                    <label class="form-label fw-bold">オプション</label>
+                    <div class="border rounded p-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="excludeOutliers" value="1">
+                            <label class="form-check-label" for="excludeOutliers">
+                                <i class="bi bi-filter-circle me-1"></i>外れ値を除去する (IQR法)
+                                <small class="text-muted d-block">四分位範囲(IQR)を用いて、極端な値を除外して分析・検定を行います。</small>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <i class="bi bi-play-circle me-2"></i>分析を実行
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-lg ms-2" id="resetBtn">
+                    <i class="bi bi-arrow-counterclockwise me-2"></i>リセット
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="resultsArea" class="d-none">
+
+    <!-- AI Analysis Section -->
+    <div id="aiAnalysisSection" class="card mb-4 d-none">
+        <div class="card-header bg-primary text-white">
+            <i class="bi bi-robot me-2"></i>AI分析レポート (Gemini)
+        </div>
+        <div class="card-body">
+            <div id="aiAnalysisContent" class="markdown-body">
+                <!-- AI content will be injected here -->
+            </div>
+            <div id="aiLoadingSpinner" class="d-none text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2 text-muted">AIがデータを分析中... (これには数秒かかる場合があります)</p>
+            </div>
+        </div>
+        <div class="text-center mt-3">
+            <button type="button" class="btn btn-outline-primary" id="generateAiBtn">
+                <i class="bi bi-stars me-2"></i>AI解説を生成/再生成
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="d-flex justify-content-end mb-3">
+    <button type="button" class="btn btn-success" id="downloadExcelBtn">
+        <i class="bi bi-file-earmark-excel me-2"></i>Excelレポートをダウンロード
+    </button>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-success text-white">
+        <i class="bi bi-check-circle me-2"></i>分析結果
+    </div>
+    <div class="card-body">
+        <div id="summarySection"></div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-table me-2"></i>基本統計量
+    </div>
+    <div class="card-body">
+        <div id="statisticsSection"></div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-calculator me-2"></i>統計検定結果
+    </div>
+    <div class="card-body">
+        <div id="testsSection"></div>
+    </div>
+</div>
+</div>
+
+<div id="loadingSpinner" class="text-center d-none my-5">
+    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-3 text-muted">分析を実行中...</p>
+</div>
+
+<div id="errorAlert" class="alert alert-danger d-none" role="alert"></div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('analysisForm');
+        const resultsArea = document.getElementById('resultsArea');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const errorAlert = document.getElementById('errorAlert');
+        const resetBtn = document.getElementById('resetBtn');
+
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            // 選択された条件を取得
+            const years = Array.from(document.querySelectorAll('.year-checkbox:checked'))
+                .map(cb => parseInt(cb.value));
+            const roadTypes = Array.from(document.querySelectorAll('.road-type-checkbox:checked'))
+                .map(cb => cb.value);
+            const directions = Array.from(document.querySelectorAll('.direction-checkbox:checked'))
+                .map(cb => cb.value);
+            const metrics = Array.from(document.querySelectorAll('.metric-checkbox:checked'))
+                .map(cb => cb.value);
+
+            if (years.length === 0 || roadTypes.length === 0 || metrics.length === 0) {
+                showError('年度、道路タイプ、分析指標を少なくとも1つずつ選択してください。');
+                return;
+            }
+
+            // UI更新
+            resultsArea.classList.add('d-none');
+            errorAlert.classList.add('d-none');
+            loadingSpinner.classList.remove('d-none');
+
+            try {
+                const response = await fetch('/api/comparative_report/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        collection_years: years,
+                        road_types: roadTypes,
+                        directions: directions,
+                        metrics: metrics,
+                        exclude_outliers: document.getElementById('excludeOutliers').checked
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error(data.error || '分析に失敗しました');
+                }
+
+                // 結果を表示
+                displayResults(data);
+                resultsArea.classList.remove('d-none');
+
+                // 結果エリアまでスクロール
+                resultsArea.scrollIntoView({ behavior: 'smooth' });
+
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                loadingSpinner.classList.add('d-none');
+            }
+        });
+
+        resetBtn.addEventListener('click', function () {
+            form.reset();
+            // すべてのチェックボックスをチェック
+            document.querySelectorAll('.year-checkbox, .road-type-checkbox').forEach(cb => {
+                cb.checked = true;
+            });
+            // デフォルトの指標のみチェック
+            document.querySelectorAll('.metric-checkbox').forEach(cb => {
+                cb.checked = ['line_distances', 'clearance_distances', 'overtake_speeds'].includes(cb.value);
+            });
+            resultsArea.classList.add('d-none');
+            errorAlert.classList.add('d-none');
+        });
+
+        function showError(message) {
+            errorAlert.textContent = message;
+            errorAlert.classList.remove('d-none');
+            errorAlert.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function displayResults(data) {
+            // 現在のデータを保持（AI分析用）
+            currentReportData = data;
+
+            // サマリー表示
+            displaySummary(data.summary);
+
+            // 統計量表示
+            displayStatistics(data.statistics);
+
+            // 統計検定結果表示
+            displayTests(data.tests);
+
+            // AIセクションを表示 (コンテンツはまだ空)
+            document.getElementById('aiAnalysisSection').classList.remove('d-none');
+            document.getElementById('aiAnalysisContent').innerHTML = '';
+            document.getElementById('generateAiBtn').classList.remove('d-none');
+        }
+
+        // AI分析ボタンのイベントリスナー
+        let currentReportData = null;
+        document.getElementById('generateAiBtn').addEventListener('click', async function () {
+            if (!currentReportData) return;
+
+            const btn = this;
+            const contentDiv = document.getElementById('aiAnalysisContent');
+            const spinner = document.getElementById('aiLoadingSpinner');
+
+            btn.disabled = true;
+            spinner.classList.remove('d-none');
+            contentDiv.innerHTML = '';
+
+            try {
+                const response = await fetch('/api/comparative_report/ai_analysis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentReportData)
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // 簡易的なMarkdownレンダリング (marked.jsなどがあればベストだが、ここでは改行と太字のみ対応)
+                    // 本番環境ではmarked.jsの導入を検討してください
+                    let html = data.insight
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/^# (.*$)/gm, '<h1>$1</h1>')
+                        .replace(/^## (.*$)/gm, '<h2>$1</h2>')
+                        .replace(/^### (.*$)/gm, '<h3>$1</h3>')
+                        .replace(/\n/g, '<br>');
+
+                    contentDiv.innerHTML = `<div class="p-3 border rounded bg-light">${html}</div>`;
+                } else {
+                    contentDiv.innerHTML = `<div class="alert alert-danger">AI分析に失敗しました: ${data.error}</div>`;
+                }
+            } catch (e) {
+                contentDiv.innerHTML = `<div class="alert alert-danger">エラーが発生しました: ${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                spinner.classList.add('d-none');
+            }
+        });
+
+        // Excelダウンロードボタンのイベントリスナー
+        document.getElementById('downloadExcelBtn').addEventListener('click', async function () {
+            if (!currentReportData) return;
+
+            const btn = this;
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>ダウンロード中...';
+
+            try {
+                // currentReportData (表示中のデータ) を使用してリクエスト作成
+                // ただし、APIは条件(collection_years, etc)を期待しているため、formから再取得するか、currentReportDataにメタデータを含めるのが理想。
+                // comparative_report.py の get_summary() で metadata を返しているが、条件そのものは返していないかも？
+                // analysis.py の generate_comparative_report で返すJSONには input args は含まれていない。
+                // したがって、フォームの状態から取得するのが確実。
+
+                const years = Array.from(document.querySelectorAll('.year-checkbox:checked')).map(cb => parseInt(cb.value));
+                const roadTypes = Array.from(document.querySelectorAll('.road-type-checkbox:checked')).map(cb => cb.value);
+                const metrics = Array.from(document.querySelectorAll('.metric-checkbox:checked')).map(cb => cb.value);
+
+                const response = await fetch('/api/comparative_report/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        collection_years: years,
+                        road_types: roadTypes,
+                        directions: Array.from(document.querySelectorAll('.direction-checkbox:checked')).map(cb => cb.value),
+                        metrics: metrics,
+                    }),
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = "comparative_report.xlsx";
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                } else {
+                    const error = await response.json();
+                    alert('ダウンロードに失敗しました: ' + (error.error || '不明なエラー'));
+                }
+            } catch (e) {
+                alert('エラーが発生しました: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        });
+
+        function displaySummary(summary) {
+            const container = document.getElementById('summarySection');
+            const metadata = summary.metadata || {};
+            const groups = summary.groups || {};
+
+            let html = `
+      <div class="row g-3 mb-4">
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <h3 class="mb-0">${metadata.total_events || 0}</h3>
+              <p class="text-muted mb-0">総追い越しイベント数</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <h3 class="mb-0">${metadata.total_videos || 0}</h3>
+              <p class="text-muted mb-0">分析対象動画数</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <h3 class="mb-0">${(metadata.years || []).length}</h3>
+              <p class="text-muted mb-0">対象年度数</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-center">
+            <div class="card-body">
+              <h3 class="mb-0">${metadata.groups || 0}</h3>
+              <p class="text-muted mb-0">グループ数</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Run IDs Collapse Section -->
+      <div class="card mb-4">
+        <div class="card-header" id="headingRunIds">
+            <h5 class="mb-0">
+                <button class="btn btn-link w-100 text-start text-decoration-none collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseRunIds" aria-expanded="false" aria-controls="collapseRunIds">
+                    <i class="bi bi-list-ol me-2"></i>分析に使用したRun ID (${(metadata.run_ids || []).length}件)
+                    <i class="bi bi-chevron-down float-end"></i>
+                </button>
+            </h5>
+        </div>
+        <div id="collapseRunIds" class="collapse" aria-labelledby="headingRunIds">
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2">
+                    ${(metadata.run_ids || []).map(id => `<span class="badge bg-light text-dark border">Run ${id}</span>`).join('')}
+                    ${!(metadata.run_ids || []).length ? '<span class="text-muted">該当なし</span>' : ''}
+                </div>
+            </div>
+        </div>
+      </div>
+      
+      <h5 class="mb-3">グループ別サマリー</h5>
+      <div class="table-responsive">
+        <table class="table table-striped table-hover">
+          <thead>
+            <tr>
+              <th>道路タイプ</th>
+              <th>年度</th>
+              <th>イベント数</th>
+              <th>動画数</th>
+              <th>内側追い越し</th>
+              <th>外側追い越し</th>
+              <th>イベント/動画</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+            for (const [key, group] of Object.entries(groups)) {
+                const roadTypeLabel = group.road_type === 'widened' ? '拡幅' : '未拡幅';
+                const innerRatio = group.total_events > 0
+                    ? ((group.inner_overtakes / group.total_events) * 100).toFixed(1)
+                    : '0.0';
+                const outerRatio = group.total_events > 0
+                    ? ((group.outer_overtakes / group.total_events) * 100).toFixed(1)
+                    : '0.0';
+
+                html += `
+        <tr>
+          <td><span class="badge bg-${group.road_type === 'widened' ? 'primary' : 'secondary'}">${roadTypeLabel}</span></td>
+          <td>${group.year}年</td>
+          <td>${group.total_events}</td>
+          <td>${group.unique_videos}</td>
+          <td>${group.inner_overtakes} <span class="text-muted">(${innerRatio}%)</span></td>
+          <td>${group.outer_overtakes} <span class="text-muted">(${outerRatio}%)</span></td>
+          <td>${group.overtake_frequency.toFixed(2)}</td>
+        </tr>
+      `;
+            }
+
+            html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+            container.innerHTML = html;
+        }
+
+        function displayStatistics(statistics) {
+            const container = document.getElementById('statisticsSection');
+            const metricLabels = {
+                'line_distances': '白線距離 (m)',
+                'clearance_distances': '離隔距離 (m)',
+                'overtake_speeds': '追い越し速度 (km/h)',
+                'accelerations_before': '加速度・追い越し前 (m/s²)',
+                'accelerations_after': '加速度・追い越し後 (m/s²)',
+            };
+
+            let html = '';
+
+            for (const [metric, groups] of Object.entries(statistics)) {
+                html += `
+        <h5 class="mt-4 mb-3"><i class="bi bi-graph-up me-2"></i>${metricLabels[metric] || metric}</h5>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered">
+            <thead class="table-light">
+              <tr>
+                <th>グループ</th>
+                <th>件数</th>
+                <th>平均</th>
+                <th>中央値</th>
+                <th>標準偏差</th>
+                <th>最小値</th>
+                <th>最大値</th>
+                <th>Q1</th>
+                <th>Q3</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+                for (const [groupKey, stats] of Object.entries(groups)) {
+                    if (!stats) continue;
+
+                    html += `
+          <tr>
+            <td><strong>${groupKey}</strong></td>
+            <td>${stats.count}</td>
+            <td>${stats.mean.toFixed(2)}</td>
+            <td>${stats.median.toFixed(2)}</td>
+            <td>${stats.std.toFixed(2)}</td>
+            <td>${stats.min.toFixed(2)}</td>
+            <td>${stats.max.toFixed(2)}</td>
+            <td>${stats.q1.toFixed(2)}</td>
+            <td>${stats.q3.toFixed(2)}</td>
+          </tr>
+        `;
+                }
+
+                html += `
+            </tbody>
+          </table>
+        </div>
+      `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function displayTests(tests) {
+            const container = document.getElementById('testsSection');
+
+            if (Object.keys(tests).length === 0) {
+                container.innerHTML = '<p class="text-muted">統計検定結果がありません。</p>';
+                return;
+            }
+
+            let html = '';
+
+            for (const [testKey, result] of Object.entries(tests)) {
+                const significanceClass = result.significant ? 'success' : 'secondary';
+                const significanceIcon = result.significant ? 'check-circle-fill' : 'x-circle';
+                const significanceText = result.significant ? '有意差あり' : '有意差なし';
+
+                html += `
+        <div class="card mb-3">
+          <div class="card-header bg-${significanceClass} text-white">
+            <i class="bi bi-${significanceIcon} me-2"></i>
+            <strong>${testKey}</strong>
+            <span class="badge bg-light text-dark ms-2">${result.test_type}</span>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="col-md-6">
+                <p class="mb-2"><strong>検定統計量:</strong> ${result.statistic.toFixed(4)}</p>
+                <p class="mb-2"><strong>p値:</strong> ${result.p_value.toFixed(6)}</p>
+                ${result.effect_size !== null ? `<p class="mb-2"><strong>効果量:</strong> ${result.effect_size.toFixed(3)}</p>` : ''}
+                <p class="mb-2">
+                  <strong>判定:</strong> 
+                  <span class="badge bg-${significanceClass}">${significanceText} (α=0.05)</span>
+                </p>
+              </div>
+              <div class="col-md-6">
+                <p class="mb-2"><strong>比較グループ:</strong></p>
+                <ul class="mb-2">
+                  ${result.groups_compared.map(g => `<li>${g} (n=${result.sample_sizes[g]})</li>`).join('')}
+                </ul>
+              </div>
+            </div>
+            <div class="alert alert-info mb-0 mt-3">
+              <i class="bi bi-info-circle me-2"></i>
+              ${result.interpretation}
+            </div>
+          </div>
+        </div>
+      `;
+            }
+
+            container.innerHTML = html;
+        }
+    });
+</script>
+
+<style>
+    .card {
+        transition: box-shadow 0.3s ease;
+    }
+
+    .card:hover {
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    }
+
+    .badge {
+        font-weight: 500;
+    }
+</style>
+{% endblock %}

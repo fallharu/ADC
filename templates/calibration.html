@@ -1,0 +1,2401 @@
+{% extends "base.html" %}
+
+{% block title %}キャリブレーションツール{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-2">
+  <div>
+    <h2 class="mb-1">キャリブレーションツール</h2>
+    {% if run_id %}
+    <p class="text-muted mb-0 small">Run #{{ run_id }}{% if video_filename %} ｜ {{ video_filename }}{% endif %}</p>
+    {% endif %}
+    {% if path_hint %}
+    <p class="text-muted mb-0 small">入力されたパスヒント: {{ path_hint }}</p>
+    {% endif %}
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.post_process') }}">← Post Process へ戻る</a>
+</div>
+
+{% if error %}
+<div class="alert alert-danger" role="alert">
+  {{ error }}
+</div>
+<p>Post Process 画面に戻り、Run とプロファイルを選択してから再度アクセスしてください。</p>
+{% if candidate_paths %}
+<div class="mt-3">
+  <p class="small text-muted mb-1">探索したファイル候補:</p>
+  <pre class="small bg-body-tertiary text-body-secondary p-2 rounded">{{ candidate_paths|join('\n') }}</pre>
+</div>
+{% endif %}
+{% else %}
+<div class="row g-4 align-items-stretch">
+  <div class="col-12 col-xl-8">
+    <div class="card h-100 shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center gap-2">
+        <span>プレビュー</span>
+        <span id="frameCounter" class="badge text-bg-secondary">0 / 0</span>
+      </div>
+      <div class="card-body">
+        <div id="canvasContainer" class="position-relative border bg-body-tertiary rounded overflow-hidden"
+          style="min-height: 420px;">
+          <div id="frameLoader"
+            class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-body-tertiary">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">読み込み中...</span>
+            </div>
+          </div>
+          <img id="frameImage" class="w-100 h-auto d-none" alt="calibration frame" draggable="false">
+          <canvas id="drawCanvas" class="position-absolute top-0 start-0"></canvas>
+        </div>
+        <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
+          <div class="input-group input-group-sm" style="max-width: 210px;">
+            <span class="input-group-text">フレーム</span>
+            <input id="frameInput" type="number" class="form-control" min="0" value="0">
+          </div>
+          <div class="btn-group btn-group-sm" role="group" aria-label="frame controls">
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="-30">-30</button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="-10">-10</button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="-1">-1</button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="1">+1</button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="10">+10</button>
+            <button type="button" class="btn btn-outline-secondary" data-frame-step="30">+30</button>
+          </div>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="reloadFrameBtn">表示更新</button>
+          <small class="text-muted ms-auto" id="sourceFrameLabel">参照フレーム: 0</small>
+        </div>
+        <div id="calibrationMessage" class="alert mt-3 d-none" role="alert"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-4">
+    <div class="card shadow-sm mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span>描画ツール</span>
+        <select id="scaleModeSelect" class="form-select form-select-sm ms-auto" style="max-width: 180px;">
+          <option value="vertical">縦方向スケール</option>
+          <option value="vertical_ex">改型Y軸スケール</option>
+          <option value="xy">XYルート</option>
+          <option value="homography">ホモグラフィ</option>
+        </select>
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">下のボタンで描画モードを選択し、プレビュー上でドラッグまたはクリックしてください。</p>
+        <div class="btn-group w-100 flex-wrap mb-3" role="group" aria-label="annotation tools">
+          <button type="button" class="btn btn-outline-primary btn-sm m-1" data-mode="left_white_line">左 白線</button>
+          <button type="button" class="btn btn-outline-primary btn-sm m-1" data-mode="right_white_line">右 白線</button>
+          <button type="button" class="btn btn-outline-primary btn-sm m-1" data-mode="center_line">中央 線</button>
+          <button type="button" class="btn btn-outline-primary btn-sm m-1" data-mode="count_line">カウント線</button>
+          <button type="button" class="btn btn-outline-info btn-sm m-1" data-mode="lane_test">白線距離テスト</button>
+          <button type="button" class="btn btn-outline-danger btn-sm m-1" data-mode="scale_lines">スケール目盛り</button>
+          <button type="button" class="btn btn-outline-warning btn-sm m-1" data-mode="scale_path">XYルート</button>
+          <button type="button" class="btn btn-outline-success btn-sm m-1" data-mode="homography">ホモグラフィ点</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm m-1" data-mode="none">モード解除</button>
+        </div>
+        <div class="d-grid gap-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="undoBtn">ひとつ戻す</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="clearModeBtn">現在の描画をクリア</button>
+          <button type="button" class="btn btn-outline-danger btn-sm" id="clearAllBtn">すべてリセット</button>
+        </div>
+        <hr class="my-3">
+        <div id="verticalControls" class="mode-panel">
+          <div class="mb-2">
+            <label for="knownDistanceInput" class="form-label small mb-1">既知距離 (m)</label>
+            <input id="knownDistanceInput" type="number" class="form-control form-control-sm" step="0.1" min="0.1"
+              value="8">
+          </div>
+          <div class="mb-2">
+            <label for="intervalInput" class="form-label small mb-1">目盛り分割数</label>
+            <input id="intervalInput" type="number" class="form-control form-control-sm" min="1" value="4">
+          </div>
+          <p class="small text-muted mb-0" id="scaleLineCount">スケール目盛り: 0 本</p>
+        </div>
+        <div id="verticalHybridControls" class="mode-panel d-none">
+          <p class="small text-muted mb-2">左右の白線と中央線を描画すると、内側の補助線を自動生成できます。遠近補正用に必要な場合は下のボタンをご利用ください。</p>
+          <div class="d-grid gap-2 mb-2">
+            <button type="button" class="btn btn-outline-info btn-sm" id="regenHybridLinesBtn">中間線を再生成</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="adjustHybridLinesBtn">中間線を調整</button>
+          </div>
+          <div class="form-text">「中間線を調整」を押すと先頭・中央・末尾のハンドルが表示され、横方向にドラッグして形状を微調整できます。</div>
+        </div>
+        <div id="xyControls" class="mode-panel d-none">
+          <div class="mb-2">
+            <label for="pathDistanceInput" class="form-label small mb-1">移動距離 (m)</label>
+            <input id="pathDistanceInput" type="number" class="form-control form-control-sm" step="0.1" min="0"
+              value="0">
+          </div>
+          <ul class="list-group list-group-flush small mb-2">
+            <li class="list-group-item d-flex justify-content-between align-items-center">パスの点数<span id="pathPointCount"
+                class="badge text-bg-secondary">0</span></li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">画素距離<span
+                id="pathPixelLength">0.0 px</span></li>
+            <li class="list-group-item d-flex justify-content-between align-items-center">1mあたり<span
+                id="pathPixelsPerMeter">0.0 px/m</span></li>
+          </ul>
+        </div>
+        <div id="homographyControls" class="mode-panel d-none">
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label for="homographyWidthInput" class="form-label small mb-1">幅 (m)</label>
+              <input id="homographyWidthInput" type="number" class="form-control form-control-sm" step="0.1" min="0.1"
+                value="3.5">
+            </div>
+            <div class="col-6">
+              <label for="homographyLengthInput" class="form-label small mb-1">奥行き (m)</label>
+              <input id="homographyLengthInput" type="number" class="form-control form-control-sm" step="0.1" min="0.1"
+                value="10">
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label for="homographyIntervalInput" class="form-label small mb-1">縦方向の間隔 (m)</label>
+              <input id="homographyIntervalInput" type="number" class="form-control form-control-sm" step="0.1"
+                min="0.1" value="5">
+              <div class="form-text">補助線のピッチを設定します。</div>
+            </div>
+            <div class="col-6 d-flex align-items-end">
+              <div class="form-text mb-0">4点指定後は長押しで頂点を微調整できます。</div>
+            </div>
+          </div>
+          <div class="mb-2">
+            <span class="form-label small d-block mb-1">調整する補助線</span>
+            <div id="homographyLineList" class="list-group list-group-flush small"></div>
+          </div>
+          <div class="mb-2">
+            <label for="homographyLineSlider" class="form-label small mb-1">位置調整 (比率)</label>
+            <input id="homographyLineSlider" type="range" class="form-range" min="0" max="10" step="0.1" disabled>
+            <div class="d-flex align-items-center gap-2 mt-1">
+              <input id="homographyLineDistance" type="number" class="form-control form-control-sm" step="0.1" min="0"
+                disabled>
+              <span class="form-text mb-0">m</span>
+            </div>
+          </div>
+          <ul id="homographyPointsList" class="list-group list-group-flush small mb-2"></ul>
+        </div>
+        <hr class="my-3">
+        <div class="mb-3">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <h6 class="mb-0 small text-secondary">白線距離テスト</h6>
+            <button type="button" class="btn btn-outline-secondary btn-sm ms-auto"
+              id="clearLaneTestsBtn">テスト結果をクリア</button>
+          </div>
+          <p class="small text-muted mb-2" id="laneTestHelp">
+            「白線距離テスト」モードを選択し、プレビュー上の測定したい位置をクリックすると左・右白線までの距離(cm)が表示されます。</p>
+          <div class="table-responsive border rounded" style="max-height: 200px; overflow-y: auto;">
+            <table class="table table-sm table-striped align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col" class="text-center">#</th>
+                  <th scope="col">Y(px)</th>
+                  <th scope="col">左距離(cm)</th>
+                  <th scope="col">右距離(cm)</th>
+                  <th scope="col">幅(cm)</th>
+                  <th scope="col" class="text-center">判定</th>
+                </tr>
+              </thead>
+              <tbody id="laneTestTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="mt-3">
+          <label for="profileNameInput" class="form-label small">保存するプロファイル名</label>
+          <input id="profileNameInput" type="text" class="form-control form-control-sm" pattern="^[A-Za-z0-9_-]+$"
+            value="{{ profile_name or '' }}">
+          <div class="form-text">英数字・ハイフン・アンダースコアのみ使用できます。</div>
+        </div>
+        <button type="button" class="btn btn-primary w-100 mt-3" id="saveCalibrationBtn">設定を保存</button>
+      </div>
+    </div>
+
+    <div class="card shadow-sm">
+      <div class="card-header">ヒント</div>
+      <div class="card-body small">
+        <ul class="mb-0 ps-3">
+          <li>縦方向スケールでは左右境界線と最低2本の目盛りを作成してください。</li>
+          <li>XYルートはドラッグで経路を描き、実際の距離を入力します。</li>
+          <li>ホモグラフィはエリアの四隅を時計回りにクリックして指定します。</li>
+          <li>保存後は Post Process でプロファイルを適用し、速度計算に利用できます。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% set has_run = run_id is not none %}
+{% if has_run and path_hint %}
+{% set metadata_url = url_for('main.calibration_metadata', run_id=run_id, path_hint=path_hint) %}
+{% set frame_url = url_for('main.calibration_frame', run_id=run_id, path_hint=path_hint) %}
+{% set data_url = url_for('main.calibration_data', run_id=run_id, path_hint=path_hint, profile=profile_name) %}
+{% set save_url = url_for('main.calibration_save', run_id=run_id, path_hint=path_hint) %}
+{% set lane_test_url = url_for('main.calibration_lane_test', run_id=run_id, path_hint=path_hint) %}
+{% else %}
+{% set metadata_url = url_for('main.calibration_metadata', run_id=run_id) if has_run else None %}
+{% set frame_url = url_for('main.calibration_frame', run_id=run_id) if has_run else None %}
+{% set data_url = url_for('main.calibration_data', run_id=run_id, profile=profile_name) if has_run else None %}
+{% set save_url = url_for('main.calibration_save', run_id=run_id) if has_run else None %}
+{% set lane_test_url = url_for('main.calibration_lane_test', run_id=run_id) if has_run else None %}
+{% endif %}
+
+<script id="calibrationConfig" type="application/json">
+{{ {
+  "runId": run_id,
+  "profileName": profile_name,
+  "metadataUrl": metadata_url,
+  "frameUrl": frame_url,
+  "dataUrl": data_url,
+  "saveUrl": save_url,
+  "laneTestUrl": lane_test_url,
+  "pathHint": path_hint
+}|tojson }}
+</script>
+
+{% if not error %}
+<script>
+  (() => {
+    const configEl = document.getElementById('calibrationConfig');
+    if (!configEl) return;
+    const config = JSON.parse(configEl.textContent || '{}');
+    if (!config || !config.runId || !config.metadataUrl) return;
+
+    // DOM
+    const canvas = document.getElementById('drawCanvas');
+    const ctx = canvas.getContext('2d');
+    const imageEl = document.getElementById('frameImage');
+    const loaderEl = document.getElementById('frameLoader');
+    const frameInput = document.getElementById('frameInput');
+    const frameCounter = document.getElementById('frameCounter');
+    const sourceFrameLabel = document.getElementById('sourceFrameLabel');
+    const messageBox = document.getElementById('calibrationMessage');
+    const knownDistanceInput = document.getElementById('knownDistanceInput');
+    const intervalInput = document.getElementById('intervalInput');
+    const profileNameInput = document.getElementById('profileNameInput');
+    const saveButton = document.getElementById('saveCalibrationBtn');
+    const reloadButton = document.getElementById('reloadFrameBtn');
+    const canvasContainer = document.getElementById('canvasContainer');
+    const scaleModeSelect = document.getElementById('scaleModeSelect');
+    const laneTestHelp = document.getElementById('laneTestHelp');
+    const laneTestTableBody = document.getElementById('laneTestTableBody');
+    const clearLaneTestsBtn = document.getElementById('clearLaneTestsBtn');
+    const laneTestDefaultText = laneTestHelp ? laneTestHelp.textContent : '';
+
+    const pathDistanceInput = document.getElementById('pathDistanceInput');
+    const pathPointCount = document.getElementById('pathPointCount');
+    const pathPixelLength = document.getElementById('pathPixelLength');
+    const pathPixelsPerMeter = document.getElementById('pathPixelsPerMeter');
+
+    const homographyWidthInput = document.getElementById('homographyWidthInput');
+    const homographyLengthInput = document.getElementById('homographyLengthInput');
+    const homographyIntervalInput = document.getElementById('homographyIntervalInput');
+    const homographyPointsList = document.getElementById('homographyPointsList');
+    const homographyLineList = document.getElementById('homographyLineList');
+    const homographyLineSlider = document.getElementById('homographyLineSlider');
+    const homographyLineDistance = document.getElementById('homographyLineDistance');
+
+    const verticalControls = document.getElementById('verticalControls');
+    const verticalHybridControls = document.getElementById('verticalHybridControls');
+    const xyControls = document.getElementById('xyControls');
+    const homographyControls = document.getElementById('homographyControls');
+    const scaleLineCount = document.getElementById('scaleLineCount');
+    const regenHybridLinesBtn = document.getElementById('regenHybridLinesBtn');
+    const adjustHybridLinesBtn = document.getElementById('adjustHybridLinesBtn');
+
+    const toolButtons = Array.from(document.querySelectorAll('[data-mode]'));
+    const frameButtons = Array.from(document.querySelectorAll('[data-frame-step]'));
+
+    // 工具定義
+    const TOOL_DEFS = {
+      left_white_line: { color: '#00ffff', type: 'freehand' },
+      right_white_line: { color: '#00ffff', type: 'freehand' },
+      center_line: { color: '#00c8ff', type: 'freehand' },
+      count_line: { color: '#ff00ff', type: 'line' },
+      lane_test: { color: '#ff2d55', type: 'probe' },
+      scale_lines: { color: '#ff3b30', type: 'line' },
+      scale_path: { color: '#ff9500', type: 'path', dash: [6, 6] },
+      homography: { color: '#34c759', type: 'homography' },
+      none: { color: '#ffffff', type: 'none' }
+    };
+
+    const MODE_AVAILABILITY = {
+      vertical: new Set(['left_white_line', 'right_white_line', 'center_line', 'count_line', 'lane_test', 'scale_lines', 'none']),
+      vertical_ex: new Set(['left_white_line', 'right_white_line', 'center_line', 'count_line', 'lane_test', 'scale_lines', 'none']),
+      xy: new Set(['left_white_line', 'right_white_line', 'center_line', 'count_line', 'lane_test', 'scale_path', 'none']),
+      homography: new Set(['left_white_line', 'right_white_line', 'center_line', 'count_line', 'lane_test', 'homography', 'none'])
+    };
+
+    // 状態
+    const state = {
+      runId: config.runId,
+      totalFrames: 0,
+      frameIndex: 0,
+      nativeWidth: 0,
+      nativeHeight: 0,
+      displayWidth: 0,
+      displayHeight: 0,
+      scaleMode: 'vertical',
+      activeTool: 'none',
+      isDrawing: false,
+      tempPoints: [],
+      frameRequestToken: 0,
+      imageUrl: null,
+      annotations: {
+        left_white_line: [],
+        right_white_line: [],
+        center_line: [],
+        left_mid_line: [],
+        right_mid_line: [],
+        scale_lines: [],
+        scale_line_connectors: [],
+        scale_path: [],
+        count_lines: [],
+        homography_points: [],
+        homography_scale_lines: [],
+        homography_connectors: []
+      },
+      laneTests: [],
+      homographySettings: {
+        interval: 5
+      },
+      homographyDrag: {
+        index: null,
+        pointerId: null,
+        timer: null,
+        active: false
+      },
+      homographyScalePositions: [],
+      homographyScaleRatios: [],
+      homographyPositionsManual: false,
+      homographySorted: [],
+      homographyScaleDrag: {
+        index: null,
+        pointerId: null,
+        timer: null,
+        active: false
+      },
+      homographyLength: 0,
+      homographySelectedLineIndex: null,
+      hybridMidManual: false,
+      hybridMidControls: {
+        left: null,
+        right: null
+      },
+      hybridMidDrag: {
+        active: false,
+        pointerId: null,
+        line: null,
+        control: null
+      }
+    };
+
+    let suppressLineControlEvents = 0;
+
+    function withSuppressedLineControls(callback) {
+      suppressLineControlEvents += 1;
+      try {
+        callback();
+      } finally {
+        suppressLineControlEvents = Math.max(0, suppressLineControlEvents - 1);
+      }
+    }
+
+    if (homographyIntervalInput) {
+      homographyIntervalInput.value = String(state.homographySettings.interval);
+    }
+
+
+    // ユーティリティ
+    function showMessage(text, variant = 'info') {
+      if (!messageBox) return;
+      if (!text) {
+        messageBox.classList.add('d-none');
+        messageBox.textContent = '';
+        return;
+      }
+      messageBox.textContent = text;
+      messageBox.className = `alert alert-${variant} mt-3`;
+      messageBox.classList.remove('d-none');
+    }
+
+    function sanitizeProfileName(value) {
+      return (value || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 100);
+    }
+
+    function updateProfileInput(value) {
+      if (!profileNameInput) return;
+      const sanitized = sanitizeProfileName(value);
+      profileNameInput.value = sanitized;
+    }
+
+    function setFrameIndex(nextIndex) {
+      const maxIndex = state.totalFrames > 0 ? state.totalFrames - 1 : Number.MAX_SAFE_INTEGER;
+      let idx = Number.isFinite(nextIndex) ? nextIndex : state.frameIndex;
+      if (idx < 0) idx = 0;
+      if (idx > maxIndex) idx = maxIndex;
+      state.frameIndex = idx;
+      if (frameInput) frameInput.value = String(idx);
+      if (frameCounter) {
+        const total = state.totalFrames || 0;
+        frameCounter.textContent = total ? `${idx + 1} / ${total}` : `${idx + 1}`;
+      }
+      if (sourceFrameLabel) {
+        sourceFrameLabel.textContent = `参照フレーム: ${state.frameIndex}`;
+      }
+      state.laneTests = [];
+      refreshLaneTestPanel();
+    }
+
+    function resizeCanvas() {
+      if (!canvas || !state.nativeWidth || !state.nativeHeight) return;
+      const containerWidth = canvasContainer?.clientWidth || state.nativeWidth;
+      const scale = containerWidth / state.nativeWidth;
+      state.displayWidth = Math.max(1, Math.round(state.nativeWidth * scale));
+      state.displayHeight = Math.max(1, Math.round(state.nativeHeight * scale));
+      canvas.width = state.displayWidth;
+      canvas.height = state.displayHeight;
+      if (imageEl) {
+        imageEl.width = state.displayWidth;
+        imageEl.height = state.displayHeight;
+      }
+    }
+
+    function toDisplayPoint(point) {
+      if (!point || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || !state.nativeWidth || !state.nativeHeight) return null;
+      const x = (point[0] / state.nativeWidth) * state.displayWidth;
+      const y = (point[1] / state.nativeHeight) * state.displayHeight;
+      return [x, y];
+    }
+
+    function toNativePoint(x, y) {
+      if (!state.displayWidth || !state.displayHeight) return [Math.round(x), Math.round(y)];
+      const nativeX = Math.round((x / state.displayWidth) * state.nativeWidth);
+      const nativeY = Math.round((y / state.displayHeight) * state.nativeHeight);
+      return [nativeX, nativeY];
+    }
+
+    function toNativeX(x) {
+      if (!state.displayWidth || !state.nativeWidth) return Math.round(x);
+      return Math.round((x / state.displayWidth) * state.nativeWidth);
+    }
+
+    function clearCanvas() {
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawPolyline(points, style, closePath = false) {
+      if (!ctx || !points || points.length < 2) return;
+      const displayPoints = points.map(toDisplayPoint).filter(Boolean);
+      if (displayPoints.length < 2) return;
+      ctx.save();
+      ctx.lineWidth = Math.max(Math.round(state.displayWidth / 600), 2);
+      ctx.strokeStyle = style.color;
+      if (style.dash) ctx.setLineDash(style.dash); else ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(displayPoints[0][0], displayPoints[0][1]);
+      for (let i = 1; i < displayPoints.length; i += 1) {
+        ctx.lineTo(displayPoints[i][0], displayPoints[i][1]);
+      }
+      if (closePath) ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawScaleLines(lines, options = {}) {
+      if (!ctx || !Array.isArray(lines) || !lines.length) return;
+      ctx.save();
+      ctx.lineWidth = Math.max(Math.round(state.displayWidth / 600), 2);
+      ctx.strokeStyle = options.color || TOOL_DEFS.scale_lines.color;
+      ctx.setLineDash(options.dash || []);
+      lines.forEach((line) => {
+        if (!Array.isArray(line) || line.length < 2) return;
+        const p1 = toDisplayPoint(line[0]);
+        const p2 = toDisplayPoint(line[1]);
+        if (!p1 || !p2) return;
+        ctx.beginPath();
+        ctx.moveTo(p1[0], p1[1]);
+        ctx.lineTo(p2[0], p2[1]);
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    function drawScaleConnectors(points, options = {}) {
+      if (!ctx || !Array.isArray(points) || points.length < 2) return;
+      const first = toDisplayPoint(points[0]);
+      if (!first) return;
+      ctx.save();
+      ctx.lineWidth = Math.max(Math.round(state.displayWidth / 800), 1.5);
+      ctx.strokeStyle = options.color || '#ffd60a';
+      ctx.setLineDash(options.dash || [6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(first[0], first[1]);
+      for (let i = 1; i < points.length; i += 1) {
+        const disp = toDisplayPoint(points[i]);
+        if (!disp) continue;
+        ctx.lineTo(disp[0], disp[1]);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function buildConnectorPolyline(lines) {
+      if (!Array.isArray(lines) || lines.length < 2) return [];
+      const mids = [];
+      lines.forEach((line) => {
+        if (!Array.isArray(line) || line.length < 2) return;
+        const midX = (line[0][0] + line[1][0]) / 2;
+        const midY = (line[0][1] + line[1][1]) / 2;
+        mids.push([midX, midY]);
+      });
+      mids.sort((a, b) => a[1] - b[1]);
+      return mids;
+    }
+
+    function sortHomographyPoints(points) {
+      if (!Array.isArray(points) || points.length < 4) return points.slice();
+      const centroidX = points.reduce((sum, pt) => sum + pt[0], 0) / points.length;
+      const centroidY = points.reduce((sum, pt) => sum + pt[1], 0) / points.length;
+      const sorted = points
+        .map((pt) => ({ pt, angle: Math.atan2(pt[1] - centroidY, pt[0] - centroidX) }))
+        .sort((a, b) => a.angle - b.angle)
+        .map((entry) => entry.pt);
+      let topIndex = 0;
+      let minValue = Infinity;
+      sorted.forEach((pt, idx) => {
+        const value = pt[1] - Math.abs(pt[0] - centroidX) * 0.01;
+        if (value < minValue) {
+          minValue = value;
+          topIndex = idx;
+        }
+      });
+      return sorted.slice(topIndex).concat(sorted.slice(0, topIndex));
+    }
+
+    function updateScaleLineGuides() {
+      state.annotations.scale_line_connectors = buildConnectorPolyline(state.annotations.scale_lines);
+      state.annotations.homography_connectors = buildConnectorPolyline(state.annotations.homography_scale_lines);
+    }
+
+    function simplifyHybridPolyline(points) {
+      if (!Array.isArray(points)) return [];
+      const simplified = [];
+      let prev = null;
+      points.forEach((pt) => {
+        if (!Array.isArray(pt) || pt.length < 2) return;
+        const x = Number(pt[0]);
+        const y = Number(pt[1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        if (prev && Math.abs(prev[0] - x) < 1e-6 && Math.abs(prev[1] - y) < 1e-6) return;
+        simplified.push([x, y]);
+        prev = [x, y];
+      });
+      return simplified.length >= 2 ? simplified : [];
+    }
+
+    function interpolateHybrid(line, targetY) {
+      if (!Array.isArray(line) || line.length < 2) return null;
+      let bestX = null;
+      let bestDiff = Infinity;
+      for (let i = 0; i < line.length - 1; i += 1) {
+        const start = line[i];
+        const end = line[i + 1];
+        if (!Array.isArray(start) || !Array.isArray(end)) continue;
+        const x1 = Number(start[0]);
+        const y1 = Number(start[1]);
+        const x2 = Number(end[0]);
+        const y2 = Number(end[1]);
+        if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
+        const yLow = Math.min(y1, y2);
+        const yHigh = Math.max(y1, y2);
+        if (targetY < yLow || targetY > yHigh) continue;
+        if (y2 === y1) continue;
+        let xLine;
+        if (x2 === x1) {
+          xLine = x1;
+        } else {
+          xLine = x1 + ((x2 - x1) * (targetY - y1)) / (y2 - y1);
+        }
+        const diff = Math.abs(targetY - Math.min(Math.max(targetY, yLow), yHigh));
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestX = xLine;
+        }
+      }
+      return Number.isFinite(bestX) ? bestX : null;
+    }
+
+    function buildHybridMidLines() {
+      const left = state.annotations.left_white_line;
+      const right = state.annotations.right_white_line;
+      const center = state.annotations.center_line;
+      if (!Array.isArray(left) || left.length < 2 || !Array.isArray(right) || right.length < 2 || !Array.isArray(center) || center.length < 2) {
+        return { left: [], right: [] };
+      }
+      const ySamples = new Set();
+      [left, center, right].forEach((line) => {
+        line.forEach((pt) => {
+          if (!Array.isArray(pt) || pt.length < 2) return;
+          const y = Number(pt[1]);
+          if (Number.isFinite(y)) ySamples.add(y);
+        });
+      });
+      if (!ySamples.size) return { left: [], right: [] };
+      const sorted = Array.from(ySamples).sort((a, b) => a - b);
+      const yMin = sorted[0];
+      const yMax = sorted[sorted.length - 1];
+      if (Number.isFinite(yMin) && Number.isFinite(yMax) && yMax > yMin) {
+        const sampleCount = Math.max(10, Math.min(80, sorted.length * 3));
+        const step = (yMax - yMin) / (sampleCount - 1);
+        for (let i = 0; i < sampleCount; i += 1) {
+          ySamples.add(yMin + step * i);
+        }
+      }
+      const finalY = Array.from(ySamples).sort((a, b) => a - b);
+      const leftMid = [];
+      const rightMid = [];
+      finalY.forEach((yVal) => {
+        const centerX = interpolateHybrid(center, yVal);
+        if (!Number.isFinite(centerX)) return;
+        const leftX = interpolateHybrid(left, yVal);
+        if (Number.isFinite(leftX)) {
+          leftMid.push([leftX + (centerX - leftX) * 0.5, yVal]);
+        }
+        const rightX = interpolateHybrid(right, yVal);
+        if (Number.isFinite(rightX)) {
+          rightMid.push([rightX + (centerX - rightX) * 0.5, yVal]);
+        }
+      });
+      return {
+        left: simplifyHybridPolyline(leftMid),
+        right: simplifyHybridPolyline(rightMid),
+      };
+    }
+
+    function resetHybridMidDrag() {
+      state.hybridMidDrag = {
+        active: false,
+        pointerId: null,
+        line: null,
+        control: null,
+      };
+    }
+
+    function initializeHybridMidControls(resetManual = false) {
+      const controls = { left: null, right: null };
+      ['left', 'right'].forEach((key) => {
+        const line = state.annotations[`${key}_mid_line`];
+        if (!Array.isArray(line) || line.length < 2) return;
+        const startIndex = 0;
+        const endIndex = line.length - 1;
+        let midIndex = Math.floor(line.length / 2);
+        if (midIndex <= startIndex) {
+          midIndex = Math.min(startIndex + 1, endIndex);
+        }
+        if (midIndex >= endIndex) {
+          midIndex = Math.max(endIndex - 1, startIndex);
+        }
+        controls[key] = {
+          indices: {
+            start: startIndex,
+            mid: midIndex,
+            end: endIndex,
+          },
+          x: {
+            start: line[startIndex][0],
+            mid: line[midIndex][0],
+            end: line[endIndex][0],
+          },
+        };
+      });
+      state.hybridMidControls = controls;
+      if (resetManual) state.hybridMidManual = false;
+      resetHybridMidDrag();
+    }
+
+    function recalcHybridMidLine(lineKey) {
+      const controls = state.hybridMidControls?.[lineKey];
+      const line = state.annotations[`${lineKey}_mid_line`];
+      if (!controls || !Array.isArray(line) || line.length < 2) return;
+      const { start, mid, end } = controls.indices;
+      if (start == null || mid == null || end == null) return;
+      const startY = line[start][1];
+      const midY = line[mid][1];
+      const endY = line[end][1];
+      const denomStart = midY - startY;
+      const denomEnd = endY - midY;
+
+      line[start][0] = controls.x.start;
+      line[mid][0] = controls.x.mid;
+      line[end][0] = controls.x.end;
+
+      for (let i = 0; i < line.length; i += 1) {
+        const point = line[i];
+        if (!Array.isArray(point) || point.length < 2) continue;
+        const yVal = point[1];
+        let newX;
+        if (i <= mid || denomEnd === 0) {
+          let ratio;
+          if (denomStart === 0) {
+            ratio = i <= mid ? 0 : 1;
+          } else {
+            ratio = (yVal - startY) / denomStart;
+          }
+          const clamped = Math.min(1, Math.max(0, ratio));
+          newX = controls.x.start + (controls.x.mid - controls.x.start) * clamped;
+        } else {
+          let ratio;
+          if (denomEnd === 0) {
+            ratio = 1;
+          } else {
+            ratio = (yVal - midY) / denomEnd;
+          }
+          const clamped = Math.min(1, Math.max(0, ratio));
+          newX = controls.x.mid + (controls.x.end - controls.x.mid) * clamped;
+        }
+        point[0] = newX;
+      }
+    }
+
+    function findHybridMidHandle(displayX, displayY) {
+      if (state.scaleMode !== 'vertical_ex') return null;
+      const threshold = Math.max(12, state.displayWidth / 25);
+      let best = null;
+      let bestDist = Number.POSITIVE_INFINITY;
+      ['left', 'right'].forEach((key) => {
+        const line = state.annotations[`${key}_mid_line`];
+        const control = state.hybridMidControls?.[key];
+        if (!Array.isArray(line) || !control) return;
+        ['start', 'mid', 'end'].forEach((position) => {
+          const idx = control.indices[position];
+          if (idx == null || !Array.isArray(line[idx])) return;
+          const disp = toDisplayPoint(line[idx]);
+          if (!disp) return;
+          const dist = Math.hypot(displayX - disp[0], displayY - disp[1]);
+          if (dist <= threshold && dist < bestDist) {
+            bestDist = dist;
+            best = { line: key, control: position };
+          }
+        });
+      });
+      return best;
+    }
+
+    function drawHybridControlPoints() {
+      if (!ctx || state.scaleMode !== 'vertical_ex') return;
+      const radius = Math.max(Math.round(state.displayWidth / 220), 4);
+      ctx.save();
+      ctx.fillStyle = '#ffd60a';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1;
+      ['left', 'right'].forEach((key) => {
+        const line = state.annotations[`${key}_mid_line`];
+        const control = state.hybridMidControls?.[key];
+        if (!Array.isArray(line) || !control) return;
+        ['start', 'mid', 'end'].forEach((position) => {
+          const idx = control.indices[position];
+          if (idx == null || !Array.isArray(line[idx])) return;
+          const disp = toDisplayPoint(line[idx]);
+          if (!disp) return;
+          ctx.beginPath();
+          ctx.arc(disp[0], disp[1], radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        });
+      });
+      ctx.restore();
+    }
+
+    function updateHybridMidLines(force = false) {
+      if (state.scaleMode !== 'vertical_ex') {
+        if (force) {
+          state.annotations.left_mid_line = [];
+          state.annotations.right_mid_line = [];
+        }
+        state.hybridMidControls = { left: null, right: null };
+        state.hybridMidManual = false;
+        resetHybridMidDrag();
+        return false;
+      }
+      if (!force && state.hybridMidManual) {
+        return (
+          Array.isArray(state.annotations.left_mid_line) &&
+          state.annotations.left_mid_line.length >= 2 &&
+          Array.isArray(state.annotations.right_mid_line) &&
+          state.annotations.right_mid_line.length >= 2
+        );
+      }
+      const { left, right } = buildHybridMidLines();
+      state.annotations.left_mid_line = left;
+      state.annotations.right_mid_line = right;
+      const ok = left.length >= 2 && right.length >= 2;
+      if (ok) {
+        initializeHybridMidControls(true);
+      } else {
+        state.hybridMidControls = { left: null, right: null };
+        state.hybridMidManual = false;
+      }
+      return ok;
+    }
+
+    function projectRatioOnEdge(point, start, end) {
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const lengthSq = dx * dx + dy * dy;
+      if (!lengthSq) return 0;
+      const t = ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSq;
+      return Math.min(1, Math.max(0, t));
+    }
+
+    function buildHomographyLines(positions, ratios, sorted, lengthValue) {
+      if (!Array.isArray(positions) || !positions.length || !Array.isArray(sorted) || sorted.length !== 4) {
+        return [];
+      }
+      const leftStart = sorted[0];
+      const rightStart = sorted[1];
+      const rightEnd = sorted[2];
+      const leftEnd = sorted[3];
+      return positions.map((distance, idx) => {
+        const fallback = lengthValue > 0 ? distance / lengthValue : 0;
+        const ratioValue = Array.isArray(ratios) && Number.isFinite(ratios[idx]) ? ratios[idx] : fallback;
+        const clamped = Math.min(1, Math.max(0, ratioValue));
+        const left = [
+          leftStart[0] + (leftEnd[0] - leftStart[0]) * clamped,
+          leftStart[1] + (leftEnd[1] - leftStart[1]) * clamped,
+        ];
+        const right = [
+          rightStart[0] + (rightEnd[0] - rightStart[0]) * clamped,
+          rightStart[1] + (rightEnd[1] - rightStart[1]) * clamped,
+        ];
+        return [left, right];
+      });
+    }
+
+    function computeHomographyPositionsFromLines(lines, sorted, lengthValue) {
+      if (!Array.isArray(lines) || !lines.length || !Array.isArray(sorted) || sorted.length !== 4 || lengthValue <= 0) {
+        return [];
+      }
+      const leftStart = sorted[0];
+      const leftEnd = sorted[3];
+      const positions = [];
+      lines.forEach((line) => {
+        if (!Array.isArray(line) || line.length < 2) return;
+        const mid = [
+          (line[0][0] + line[1][0]) / 2,
+          (line[0][1] + line[1][1]) / 2,
+        ];
+        const ratio = projectRatioOnEdge(mid, leftStart, leftEnd);
+        positions.push(ratio * lengthValue);
+      });
+      return positions;
+    }
+
+    function computeHomographyRatiosFromLines(lines, sorted) {
+      if (!Array.isArray(lines) || !lines.length || !Array.isArray(sorted) || sorted.length !== 4) {
+        return [];
+      }
+      const leftStart = sorted[0];
+      const leftEnd = sorted[3];
+      return lines.map((line) => {
+        if (!Array.isArray(line) || line.length < 2) return 0;
+        const mid = [
+          (line[0][0] + line[1][0]) / 2,
+          (line[0][1] + line[1][1]) / 2,
+        ];
+        return projectRatioOnEdge(mid, leftStart, leftEnd);
+      });
+    }
+
+    function distancePointToSegment(pt, start, end) {
+      const ratio = projectRatioOnEdge(pt, start, end);
+      const x = start[0] + (end[0] - start[0]) * ratio;
+      const y = start[1] + (end[1] - start[1]) * ratio;
+      return Math.hypot(pt[0] - x, pt[1] - y);
+    }
+
+    function findHomographyScaleLine(displayX, displayY) {
+      const lines = state.annotations.homography_scale_lines;
+      if (!Array.isArray(lines) || lines.length < 3) return -1;
+      const threshold = Math.max(12, state.displayWidth / 40);
+      let found = -1;
+      lines.forEach((line, idx) => {
+        if (found !== -1) return;
+        if (idx === 0 || idx === lines.length - 1) return;
+        const p1 = toDisplayPoint(line[0]);
+        const p2 = toDisplayPoint(line[1]);
+        if (!p1 || !p2) return;
+        const dist = distancePointToSegment([displayX, displayY], p1, p2);
+        if (dist <= threshold) found = idx;
+      });
+      return found;
+    }
+
+    function resetHomographyScaleDrag() {
+      if (state.homographyScaleDrag.timer) {
+        window.clearTimeout(state.homographyScaleDrag.timer);
+        state.homographyScaleDrag.timer = null;
+      }
+      state.homographyScaleDrag.active = false;
+      state.homographyScaleDrag.index = null;
+      state.homographyScaleDrag.pointerId = null;
+    }
+
+    function scheduleHomographyScaleDrag(index, pointerId) {
+      resetHomographyScaleDrag();
+      if (index <= 0 || index >= state.homographyScalePositions.length - 1) return;
+      state.homographyScaleDrag.index = index;
+      state.homographyScaleDrag.pointerId = pointerId;
+      state.homographyScaleDrag.timer = window.setTimeout(() => {
+        state.homographyScaleDrag.active = true;
+        if (pointerId != null) {
+          try { canvas.setPointerCapture(pointerId); } catch (e) { /* ignore */ }
+        }
+      }, 300);
+    }
+
+    function updateHomographyScaleLineFromRatio(index, ratio, lengthValue) {
+      if (!Array.isArray(state.homographyScalePositions) || state.homographyScalePositions.length < 2) return;
+      if (!Array.isArray(state.homographySorted) || state.homographySorted.length !== 4 || !(lengthValue > 0)) return;
+      if (index <= 0 || index >= state.homographyScalePositions.length - 1) return;
+      const ratios = Array.isArray(state.homographyScaleRatios) ? state.homographyScaleRatios.slice() : [];
+      if (ratios.length !== state.homographyScalePositions.length) return;
+      const minGap = Math.max(0.001, (state.homographySettings.interval / lengthValue) * 0.1);
+      const prev = ratios[index - 1] + minGap;
+      const next = ratios[index + 1] - minGap;
+      const clamped = Math.min(next, Math.max(prev, ratio));
+      ratios[index] = Math.min(1, Math.max(0, clamped));
+      state.homographyScaleRatios = ratios;
+      state.homographyPositionsManual = true;
+      state.annotations.homography_scale_lines = buildHomographyLines(
+        state.homographyScalePositions,
+        state.homographyScaleRatios,
+        state.homographySorted,
+        lengthValue
+      );
+      updateScaleLineGuides();
+      renderAnnotations();
+      refreshPanels();
+      updateHomographyLineControls();
+    }
+
+    function updateHomographyDerivedData() {
+      const intervalRaw = parseFloat(homographyIntervalInput?.value || '0');
+      if (!Number.isNaN(intervalRaw) && intervalRaw > 0) {
+        state.homographySettings.interval = intervalRaw;
+      } else if (homographyIntervalInput) {
+        homographyIntervalInput.value = String(state.homographySettings.interval);
+      }
+      const points = state.annotations.homography_points;
+      if (!Array.isArray(points) || points.length !== 4) {
+        state.homographySorted = [];
+        state.homographyScalePositions = [];
+        state.homographyScaleRatios = [];
+        state.annotations.homography_scale_lines = [];
+        state.homographyPositionsManual = false;
+        state.homographyLength = 0;
+        resetHomographyScaleDrag();
+        resetHomographyDrag();
+        updateScaleLineGuides();
+        renderAnnotations();
+        refreshPanels();
+        updateHomographyLineControls();
+        return;
+      }
+      const sorted = sortHomographyPoints(points);
+      state.homographySorted = sorted;
+      const lengthValue = parseFloat(homographyLengthInput?.value || '0') || 0;
+      if (!(lengthValue > 0)) {
+        state.homographyScalePositions = [];
+        state.homographyScaleRatios = [];
+        state.annotations.homography_scale_lines = [];
+        state.homographyPositionsManual = false;
+        state.homographyLength = 0;
+        resetHomographyScaleDrag();
+        updateScaleLineGuides();
+        renderAnnotations();
+        refreshPanels();
+        updateHomographyLineControls();
+        return;
+      }
+
+      state.homographyLength = lengthValue;
+      const interval = state.homographySettings.interval;
+      const existingLines = Array.isArray(state.annotations.homography_scale_lines) ? state.annotations.homography_scale_lines : [];
+      const currentRatios = Array.isArray(state.homographyScaleRatios) ? state.homographyScaleRatios.slice() : [];
+      let manual = !!state.homographyPositionsManual;
+
+      const baseCount = interval > 0 ? Math.round(lengthValue / interval) : 1;
+      const expectedCount = Math.max(1, baseCount);
+      const totalLines = expectedCount + 1;
+      const positions = Array.from({ length: totalLines }, (_, idx) => {
+        if (idx === totalLines - 1) return lengthValue;
+        const distance = idx * interval;
+        return Math.min(distance, lengthValue);
+      });
+
+      let ratios = currentRatios;
+      if (manual) {
+        if (!ratios.length && existingLines.length) {
+          ratios = computeHomographyRatiosFromLines(existingLines, sorted);
+        }
+      } else {
+        ratios = [];
+      }
+
+      if (!ratios.length) {
+        ratios = positions.map((distance) => (lengthValue > 0 ? distance / lengthValue : 0));
+        manual = false;
+        resetHomographyScaleDrag();
+      }
+
+      if (ratios.length !== positions.length) {
+        ratios = positions.map((distance) => (lengthValue > 0 ? distance / lengthValue : 0));
+      }
+
+      ratios[0] = 0;
+      ratios[ratios.length - 1] = 1;
+      for (let i = 1; i < ratios.length - 1; i += 1) {
+        if (!Number.isFinite(ratios[i])) ratios[i] = positions[i] / lengthValue;
+      }
+
+      state.homographyScalePositions = positions;
+      state.homographyScaleRatios = ratios.slice();
+      state.homographyPositionsManual = manual;
+      state.annotations.homography_scale_lines = buildHomographyLines(positions, state.homographyScaleRatios, sorted, lengthValue);
+      updateScaleLineGuides();
+      renderAnnotations();
+      refreshPanels();
+      updateHomographyLineControls();
+    }
+    function setHomographyLineSelection(index) {
+      if (typeof index !== 'number' || Number.isNaN(index)) {
+        state.homographySelectedLineIndex = null;
+      } else {
+        state.homographySelectedLineIndex = index;
+      }
+      updateHomographyLineControls();
+    }
+
+    function updateHomographyLineControls() {
+      if (!homographyLineList || !homographyLineSlider || !homographyLineDistance) return;
+      const length = state.homographyLength || 0;
+      const positions = Array.isArray(state.homographyScalePositions) ? state.homographyScalePositions : [];
+      const ratios = Array.isArray(state.homographyScaleRatios) ? state.homographyScaleRatios : [];
+      const isHomographyMode = state.scaleMode === 'homography' && length > 0 && positions.length >= 2;
+
+      withSuppressedLineControls(() => {
+        homographyLineList.innerHTML = '';
+        if (!isHomographyMode || positions.length < 3) {
+          homographyLineList.classList.add('text-muted');
+          homographyLineList.innerHTML = '<div class="form-text">補助線を追加するとここに一覧が表示されます。</div>';
+          homographyLineSlider.disabled = true;
+          homographyLineDistance.disabled = true;
+          homographyLineSlider.value = '0';
+          homographyLineDistance.value = '';
+          state.homographySelectedLineIndex = null;
+          return;
+        }
+
+        homographyLineList.classList.remove('text-muted');
+        const lineEntries = [];
+        for (let i = 1; i < positions.length - 1; i += 1) {
+          lineEntries.push({ index: i, distance: positions[i], delta: Math.abs(positions[i] - positions[i - 1]) });
+        }
+
+        let selected = state.homographySelectedLineIndex;
+        if (!lineEntries.some((entry) => entry.index === selected)) {
+          selected = lineEntries[0].index;
+        }
+        state.homographySelectedLineIndex = selected;
+
+        lineEntries.forEach((entry, idx) => {
+          const wrapper = document.createElement('label');
+          wrapper.className = 'list-group-item d-flex align-items-center gap-2';
+          const input = document.createElement('input');
+          input.type = 'radio';
+          input.name = 'homographyLineChoice';
+          input.value = String(entry.index);
+          input.className = 'form-check-input m-0';
+          input.checked = entry.index === selected;
+          const span = document.createElement('span');
+          span.innerText = `補助線 ${idx + 1} (${entry.distance.toFixed(2)} m, 区間 ${entry.delta.toFixed(2)} m)`;
+          wrapper.appendChild(input);
+          wrapper.appendChild(span);
+          homographyLineList.appendChild(wrapper);
+        });
+
+        homographyLineSlider.disabled = false;
+        homographyLineSlider.min = '0';
+        homographyLineSlider.max = '1';
+        homographyLineSlider.step = '0.001';
+
+        homographyLineDistance.disabled = false;
+        homographyLineDistance.min = '0';
+        homographyLineDistance.max = '1';
+        homographyLineDistance.step = '0.001';
+
+        const currentRatio = ratios[selected] ?? (length > 0 ? positions[selected] / length : 0);
+        homographyLineSlider.value = String(currentRatio);
+        homographyLineDistance.value = currentRatio.toFixed(3);
+      });
+    }
+
+    function applyHomographyLineRatio(ratio) {
+      if (!Array.isArray(state.homographyScaleRatios) || state.homographyScaleRatios.length < 2) return;
+      if (!Array.isArray(state.homographySorted) || state.homographySorted.length !== 4) return;
+      const length = state.homographyLength || parseFloat(homographyLengthInput?.value || '0') || 0;
+      if (!(length > 0)) return;
+      const lineIndex = state.homographySelectedLineIndex;
+      if (typeof lineIndex !== 'number' || Number.isNaN(lineIndex) || lineIndex <= 0 || lineIndex >= state.homographyScaleRatios.length - 1) return;
+      const clamped = Math.min(1, Math.max(0, ratio));
+      updateHomographyScaleLineFromRatio(lineIndex, clamped, length);
+      const latest = state.homographyScaleRatios[lineIndex] ?? clamped;
+      withSuppressedLineControls(() => {
+        homographyLineSlider.value = String(latest);
+        homographyLineDistance.value = latest.toFixed(3);
+      });
+    }
+
+    function resetHomographyDrag() {
+      if (state.homographyDrag.timer) {
+        window.clearTimeout(state.homographyDrag.timer);
+        state.homographyDrag.timer = null;
+      }
+      state.homographyDrag.active = false;
+      state.homographyDrag.index = null;
+      state.homographyDrag.pointerId = null;
+    }
+
+    function scheduleHomographyDrag(index, pointerId) {
+      resetHomographyDrag();
+      resetHomographyScaleDrag();
+      state.homographyDrag.index = index;
+      state.homographyDrag.pointerId = pointerId;
+      state.homographyDrag.timer = window.setTimeout(() => {
+        state.homographyDrag.active = true;
+        if (pointerId != null) {
+          try { canvas.setPointerCapture(pointerId); } catch (e) { /* ignore */ }
+        }
+      }, 300);
+    }
+
+    function findHomographyPoint(displayX, displayY) {
+      if (!Array.isArray(state.annotations.homography_points)) return -1;
+      const threshold = Math.max(12, state.displayWidth / 25);
+      let found = -1;
+      state.annotations.homography_points.forEach((pt, idx) => {
+        if (found !== -1) return;
+        const disp = toDisplayPoint(pt);
+        if (!disp) return;
+        const dist = Math.hypot(displayX - disp[0], displayY - disp[1]);
+        if (dist <= threshold) found = idx;
+      });
+      return found;
+    }
+
+    function drawHomographyPoints(points) {
+      if (!ctx || !Array.isArray(points)) return;
+      const sorted = points.length >= 4 ? sortHomographyPoints(points) : points.slice();
+      const displayPoly = sorted.map(toDisplayPoint).filter(Boolean);
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = TOOL_DEFS.homography.color;
+      ctx.setLineDash([]);
+      if (displayPoly.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(displayPoly[0][0], displayPoly[0][1]);
+        for (let i = 1; i < displayPoly.length; i += 1) {
+          ctx.lineTo(displayPoly[i][0], displayPoly[i][1]);
+        }
+        if (displayPoly.length === 4) ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.fillStyle = TOOL_DEFS.homography.color;
+      ctx.font = '12px sans-serif';
+      const radius = Math.max(Math.round(state.displayWidth / 200), 4);
+      points.forEach((pt, idx) => {
+        const displayPt = toDisplayPoint(pt);
+        if (!displayPt) return;
+        ctx.beginPath();
+        ctx.arc(displayPt[0], displayPt[1], radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeText(String(idx + 1), displayPt[0] + radius + 2, displayPt[1] - radius - 2);
+      });
+      ctx.restore();
+    }
+
+    function drawLaneTestMarkers() {
+      if (!ctx || !Array.isArray(state.laneTests) || !state.laneTests.length) return;
+      const fontSize = Math.max(Math.round(state.displayWidth / 70), 12);
+      ctx.save();
+      ctx.font = `${fontSize}px 'Noto Sans JP', 'Segoe UI', sans-serif`;
+      ctx.textBaseline = 'top';
+      const padding = Math.max(Math.round(fontSize / 4), 3);
+      const circleRadius = Math.max(Math.round(fontSize / 3), 4);
+      state.laneTests.forEach((entry) => {
+        if (!entry || entry.overlay === false) return;
+        const x = Number.isFinite(entry.x) ? entry.x : null;
+        const y = Number.isFinite(entry.y) ? entry.y : null;
+        if (x == null || y == null) return;
+        const displayPt = toDisplayPoint([x, y]);
+        if (!displayPt) return;
+        const [dx, dy] = displayPt;
+        let circleColor = '#ff2d55';
+        if (entry.withinLane === false) {
+          circleColor = '#ff9f0a';
+        } else if (entry.withinLane == null) {
+          circleColor = '#6c757d';
+        }
+        ctx.fillStyle = circleColor;
+        ctx.beginPath();
+        ctx.arc(dx, dy, circleRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        const label = entry.label || '';
+        if (!label) return;
+        const metrics = ctx.measureText(label);
+        const boxX = dx + circleRadius + padding;
+        const boxY = dy - Math.round(fontSize * 0.6);
+        const boxWidth = metrics.width + padding * 2;
+        const boxHeight = fontSize + padding;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, boxX + padding, boxY + padding / 2);
+      });
+      ctx.restore();
+    }
+
+    function renderAnnotations(tempPoints = null) {
+      clearCanvas();
+      drawPolyline(state.annotations.left_white_line, TOOL_DEFS.left_white_line);
+      drawPolyline(state.annotations.right_white_line, TOOL_DEFS.right_white_line);
+      drawPolyline(state.annotations.center_line, TOOL_DEFS.center_line);
+      state.annotations.count_lines.forEach(line => {
+        drawPolyline(line, TOOL_DEFS.count_line);
+      });
+      if (state.annotations.left_mid_line.length) {
+        drawPolyline(state.annotations.left_mid_line, { color: '#ffd60a', dash: [8, 4] });
+      }
+      if (state.annotations.right_mid_line.length) {
+        drawPolyline(state.annotations.right_mid_line, { color: '#ffd60a', dash: [8, 4] });
+      }
+      drawHybridControlPoints();
+      if (state.scaleMode !== 'homography') {
+        drawScaleLines(state.annotations.scale_lines);
+        if (state.annotations.scale_line_connectors.length >= 2) {
+          drawScaleConnectors(state.annotations.scale_line_connectors, { color: '#ffd60a', dash: [6, 6] });
+        }
+      }
+      drawPolyline(state.annotations.scale_path, TOOL_DEFS.scale_path);
+      if (state.annotations.homography_scale_lines.length) {
+        drawScaleLines(state.annotations.homography_scale_lines, { color: '#4ecdc4', dash: [4, 2] });
+        if (state.annotations.homography_connectors.length >= 2) {
+          drawScaleConnectors(state.annotations.homography_connectors, { color: '#4ecdc4', dash: [2, 4] });
+        }
+      }
+      drawHomographyPoints(state.annotations.homography_points);
+
+      if (tempPoints && tempPoints.length >= 1) {
+        const tool = TOOL_DEFS[state.activeTool];
+        if (!tool) return;
+        if (tool.type === 'line' && tempPoints.length >= 2) {
+          drawScaleLines([tempPoints], { dash: [4, 4] });
+        } else if (tool.type === 'freehand' || tool.type === 'path') {
+          drawPolyline(tempPoints, tool);
+        }
+      }
+
+      drawLaneTestMarkers();
+    }
+
+    function computePathLength(points) {
+      if (!points || points.length < 2) return 0;
+      let total = 0;
+      for (let i = 0; i < points.length - 1; i += 1) {
+        const a = points[i];
+        const b = points[i + 1];
+        total += Math.hypot(b[0] - a[0], b[1] - a[1]);
+      }
+      return total;
+    }
+
+    function refreshPanels() {
+      if (scaleLineCount) {
+        const activeLines = state.scaleMode === 'homography'
+          ? state.annotations.homography_scale_lines
+          : state.annotations.scale_lines;
+        scaleLineCount.textContent = `スケール目盛り: ${activeLines.length} 本`;
+      }
+      if (pathPointCount) pathPointCount.textContent = String(state.annotations.scale_path.length);
+      if (pathPixelLength) {
+        const px = computePathLength(state.annotations.scale_path);
+        pathPixelLength.textContent = `${px.toFixed(1)} px`;
+        const meters = parseFloat(pathDistanceInput?.value || '0');
+        const ppm = meters > 0 ? (px / meters) : 0;
+        if (pathPixelsPerMeter) pathPixelsPerMeter.textContent = `${ppm.toFixed(2)} px/m`;
+      }
+      if (homographyIntervalInput) {
+        homographyIntervalInput.value = String(state.homographySettings.interval);
+      }
+      if (homographyPointsList) {
+        homographyPointsList.innerHTML = '';
+        state.annotations.homography_points.forEach((pt, idx) => {
+          const item = document.createElement('li');
+          item.className = 'list-group-item d-flex justify-content-between align-items-center';
+          item.textContent = `${idx + 1}: (${pt[0]}, ${pt[1]})`;
+          homographyPointsList.appendChild(item);
+        });
+        if (!state.annotations.homography_points.length) {
+          const item = document.createElement('li');
+          item.className = 'list-group-item text-muted';
+          item.textContent = 'ポイントをクリックで追加してください。';
+          homographyPointsList.appendChild(item);
+        }
+      }
+      refreshLaneTestPanel();
+    }
+
+    function parseNumeric(value) {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    }
+
+    function updateLaneTestStatus(text, variant = 'muted') {
+      if (!laneTestHelp) return;
+      laneTestHelp.textContent = text;
+      laneTestHelp.classList.remove('text-muted', 'text-danger', 'text-success');
+      if (variant === 'danger') {
+        laneTestHelp.classList.add('text-danger');
+      } else if (variant === 'success') {
+        laneTestHelp.classList.add('text-success');
+      } else {
+        laneTestHelp.classList.add('text-muted');
+      }
+    }
+
+    function refreshLaneTestPanel() {
+      if (clearLaneTestsBtn) {
+        clearLaneTestsBtn.disabled = !state.laneTests.length;
+      }
+      if (!laneTestTableBody) return;
+      laneTestTableBody.innerHTML = '';
+      if (!state.laneTests.length) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 6;
+        cell.className = 'text-muted small';
+        cell.textContent = 'テスト結果はまだありません。';
+        row.appendChild(cell);
+        laneTestTableBody.appendChild(row);
+        updateLaneTestStatus(laneTestDefaultText, 'muted');
+        return;
+      }
+
+      state.laneTests.slice().reverse().forEach((entry, idx) => {
+        const row = document.createElement('tr');
+        if (entry?.error) {
+          row.classList.add('table-warning');
+        } else if (entry?.withinLane === false) {
+          row.classList.add('table-warning');
+        } else if (entry?.withinLane == null) {
+          row.classList.add('table-secondary');
+        }
+
+        const indexCell = document.createElement('th');
+        indexCell.scope = 'row';
+        indexCell.className = 'text-center';
+        indexCell.textContent = String(state.laneTests.length - idx);
+        row.appendChild(indexCell);
+
+        if (entry?.error) {
+          const cell = document.createElement('td');
+          cell.colSpan = 5;
+          cell.className = 'text-danger small';
+          cell.textContent = entry.error;
+          row.appendChild(cell);
+          laneTestTableBody.appendChild(row);
+          return;
+        }
+
+        const yCell = document.createElement('td');
+        yCell.textContent = Number.isFinite(entry?.y) ? `${Math.round(entry.y)}` : '-';
+        row.appendChild(yCell);
+
+        const leftCell = document.createElement('td');
+        leftCell.textContent = entry?.leftText || '---';
+        row.appendChild(leftCell);
+
+        const rightCell = document.createElement('td');
+        rightCell.textContent = entry?.rightText || '---';
+        row.appendChild(rightCell);
+
+        const widthCell = document.createElement('td');
+        widthCell.textContent = entry?.laneWidthText || '---';
+        row.appendChild(widthCell);
+
+        const flagCell = document.createElement('td');
+        flagCell.className = 'text-center';
+        if (entry?.withinLane === true) flagCell.textContent = '◎';
+        else if (entry?.withinLane === false) flagCell.textContent = '×';
+        else flagCell.textContent = '-';
+        row.appendChild(flagCell);
+
+        laneTestTableBody.appendChild(row);
+      });
+    }
+
+    function buildLaneTestPayload(pointList) {
+      const activeScaleLines = state.scaleMode === 'homography'
+        ? state.annotations.homography_scale_lines
+        : state.annotations.scale_lines;
+      const payload = {
+        source_frame: state.frameIndex,
+        lines: {
+          left_white_line: state.annotations.left_white_line,
+          right_white_line: state.annotations.right_white_line,
+          center_line: state.annotations.center_line,
+          left_mid_line: state.annotations.left_mid_line,
+          right_mid_line: state.annotations.right_mid_line,
+        },
+        scale: {
+          mode: state.scaleMode,
+          lines: activeScaleLines,
+          known_distance_m: parseFloat(knownDistanceInput?.value || '0') || 0,
+          num_intervals: parseInt(intervalInput?.value || '0', 10) || 0,
+        },
+        points: (pointList || []).map((pt) => ({ x: pt[0], y: pt[1] })),
+      };
+
+      if (state.scaleMode === 'xy') {
+        payload.scale.path = {
+          points: state.annotations.scale_path,
+          total_distance_m: parseFloat(pathDistanceInput?.value || '0') || 0,
+          pixel_length: computePathLength(state.annotations.scale_path),
+        };
+      }
+
+      if (state.scaleMode === 'homography') {
+        payload.scale.homography = {
+          image_points: state.annotations.homography_points,
+          width_m: parseFloat(homographyWidthInput?.value || '0') || 0,
+          length_m: parseFloat(homographyLengthInput?.value || '0') || 0,
+          interval_m: state.homographySettings.interval,
+        };
+      }
+
+      return payload;
+    }
+
+    async function performLaneTest(nativePoint) {
+      if (!config.laneTestUrl) {
+        updateLaneTestStatus('白線距離テストのエンドポイントが設定されていません。', 'danger');
+        return;
+      }
+      const payload = buildLaneTestPayload([nativePoint]);
+      try {
+        const res = await fetch(config.laneTestUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const message = typeof data?.error === 'string' ? data.error : '白線距離テストに失敗しました。';
+          updateLaneTestStatus(message, 'danger');
+          return;
+        }
+        applyLaneTestResults(data?.results);
+      } catch (err) {
+        updateLaneTestStatus('白線距離テストに失敗しました。', 'danger');
+      }
+    }
+
+    function applyLaneTestResults(results) {
+      if (!Array.isArray(results) || !results.length) {
+        updateLaneTestStatus('距離を計算できませんでした。', 'danger');
+        return;
+      }
+
+      let appended = false;
+      results.forEach((res) => {
+        const errorText = typeof res?.error === 'string' ? res.error : '';
+        const x = parseNumeric(res?.x);
+        const y = parseNumeric(res?.y);
+        const leftCm = parseNumeric(res?.left_distance_cm);
+        const rightCm = parseNumeric(res?.right_distance_cm);
+        const laneWidthCm = parseNumeric(res?.lane_width_cm);
+        const leftPx = parseNumeric(res?.left_distance_px);
+        const rightPx = parseNumeric(res?.right_distance_px);
+        const withinLane = res?.within_lane === true
+          ? true
+          : (res?.within_lane === false ? false : null);
+
+        const labelParts = [];
+        if (leftCm != null) labelParts.push(`L:${leftCm.toFixed(1)}cm`);
+        else labelParts.push('L:-');
+        if (rightCm != null) labelParts.push(`R:${rightCm.toFixed(1)}cm`);
+        else labelParts.push('R:-');
+        const label = labelParts.join(' / ');
+
+        const entry = {
+          id: Date.now() + Math.random(),
+          x,
+          y,
+          leftCm,
+          rightCm,
+          leftPx,
+          rightPx,
+          laneWidthCm,
+          laneWidthText: laneWidthCm != null ? `${laneWidthCm.toFixed(1)}cm` : '---',
+          leftText: leftCm != null ? `${leftCm.toFixed(1)}cm` : '---',
+          rightText: rightCm != null ? `${rightCm.toFixed(1)}cm` : '---',
+          withinLane,
+          label: label || '',
+          overlay: !errorText && x != null && y != null && !!label,
+          error: errorText || null,
+        };
+
+        state.laneTests.push(entry);
+        appended = appended || !entry.error;
+        if (errorText) {
+          updateLaneTestStatus(errorText, 'danger');
+        }
+      });
+
+      if (!appended) {
+        refreshLaneTestPanel();
+        return;
+      }
+
+      if (state.laneTests.length > 12) {
+        state.laneTests.splice(0, state.laneTests.length - 12);
+      }
+
+      const latest = state.laneTests[state.laneTests.length - 1];
+      if (latest && !latest.error) {
+        const yText = latest.y != null ? Math.round(latest.y) : '-';
+        const leftText = latest.leftText || '---';
+        const rightText = latest.rightText || '---';
+        updateLaneTestStatus(`最新: Y=${yText}px ｜ ${leftText} ／ ${rightText}`, 'success');
+      }
+
+      refreshLaneTestPanel();
+      renderAnnotations();
+    }
+
+    function updateScaleModeUI() {
+      const mode = scaleModeSelect?.value || 'vertical';
+      state.scaleMode = mode;
+      verticalControls?.classList.toggle('d-none', mode !== 'vertical');
+      verticalHybridControls?.classList.toggle('d-none', mode !== 'vertical_ex');
+      xyControls?.classList.toggle('d-none', mode !== 'xy');
+      homographyControls?.classList.toggle('d-none', mode !== 'homography');
+      if (mode === 'vertical_ex') {
+        if (state.hybridMidManual) {
+          initializeHybridMidControls();
+        } else {
+          updateHybridMidLines(true);
+        }
+      } else {
+        updateHybridMidLines(true);
+      }
+      const allowed = MODE_AVAILABILITY[mode] || new Set();
+      if (!allowed.has(state.activeTool)) state.activeTool = 'none';
+      toolButtons.forEach((btn) => {
+        const btnMode = btn.getAttribute('data-mode');
+        const enabled = allowed.has(btnMode);
+        btn.disabled = !enabled;
+        btn.classList.toggle('active', state.activeTool === btnMode);
+      });
+      if (mode === 'homography') {
+        updateHomographyDerivedData();
+      } else {
+        updateScaleLineGuides();
+        renderAnnotations();
+        refreshPanels();
+        updateHomographyLineControls();
+      }
+    }
+
+    function setActiveTool(mode) {
+      if (!MODE_AVAILABILITY[state.scaleMode] || !MODE_AVAILABILITY[state.scaleMode].has(mode)) {
+        state.activeTool = 'none';
+      } else {
+        state.activeTool = mode;
+      }
+      resetHomographyDrag();
+      resetHomographyScaleDrag();
+      toolButtons.forEach((btn) => {
+        const btnMode = btn.getAttribute('data-mode');
+        btn.classList.toggle('active', state.activeTool === btnMode);
+      });
+    }
+
+    function resetDrawingState() {
+      state.isDrawing = false;
+      state.tempPoints = [];
+    }
+
+    function applyLoadedPayload(payload) {
+      if (!payload) return;
+      resetHomographyDrag();
+      resetHomographyScaleDrag();
+      if (typeof payload.source_frame === 'number') setFrameIndex(payload.source_frame);
+
+      const rawCountLines = payload.count_lines || [];
+      state.annotations.count_lines = Array.isArray(rawCountLines)
+        ? rawCountLines.map(line => [line[0] && [line[0][0], line[0][1]], line[1] && [line[1][0], line[1][1]]]).filter(l => l[0] && l[1])
+        : [];
+
+      const lines = payload.lines || {};
+      state.annotations.left_white_line = Array.isArray(lines.left_white_line) ? lines.left_white_line.map((pt) => [pt[0], pt[1]]) : [];
+      state.annotations.right_white_line = Array.isArray(lines.right_white_line) ? lines.right_white_line.map((pt) => [pt[0], pt[1]]) : [];
+      state.annotations.center_line = Array.isArray(lines.center_line) ? lines.center_line.map((pt) => [pt[0], pt[1]]) : [];
+      state.annotations.left_mid_line = Array.isArray(lines.left_mid_line)
+        ? lines.left_mid_line.map((pt) => [pt[0], pt[1]])
+        : [];
+      state.annotations.right_mid_line = Array.isArray(lines.right_mid_line)
+        ? lines.right_mid_line.map((pt) => [pt[0], pt[1]])
+        : [];
+
+      const scale = payload.scale || {};
+      const mode = (scale.mode || 'vertical').toLowerCase();
+      if (MODE_AVAILABILITY[mode]) {
+        scaleModeSelect.value = mode;
+        state.scaleMode = mode;
+      }
+
+      if (state.scaleMode === 'vertical_ex') {
+        if (!state.annotations.left_mid_line.length || !state.annotations.right_mid_line.length) {
+          updateHybridMidLines(true);
+        } else {
+          initializeHybridMidControls();
+          state.hybridMidManual = true;
+        }
+      } else {
+        state.annotations.left_mid_line = [];
+        state.annotations.right_mid_line = [];
+      }
+
+      const mappedLines = Array.isArray(scale.lines)
+        ? scale.lines
+          .map((line) => [line[0] && [line[0][0], line[0][1]], line[1] && [line[1][0], line[1][1]]])
+          .filter((line) => line[0] && line[1])
+        : [];
+      state.annotations.scale_lines = mappedLines;
+      state.annotations.homography_scale_lines = mode === 'homography' ? mappedLines : [];
+      state.annotations.scale_path = Array.isArray(scale.path?.points) ? scale.path.points.map((pt) => [pt[0], pt[1]]) : [];
+      state.annotations.homography_points = Array.isArray(scale.homography?.image_points) ? scale.homography.image_points.map((pt) => [pt[0], pt[1]]) : [];
+
+      if (knownDistanceInput && typeof scale.known_distance_m !== 'undefined') {
+        knownDistanceInput.value = String(scale.known_distance_m);
+      }
+      if (intervalInput && typeof scale.num_intervals !== 'undefined') {
+        intervalInput.value = String(scale.num_intervals);
+      }
+      if (pathDistanceInput && scale.path && typeof scale.path.total_distance_m !== 'undefined') {
+        pathDistanceInput.value = String(scale.path.total_distance_m);
+      }
+      if (homographyWidthInput && scale.homography && typeof scale.homography.width_m !== 'undefined') {
+        homographyWidthInput.value = String(scale.homography.width_m);
+      }
+      if (homographyLengthInput && scale.homography && typeof scale.homography.length_m !== 'undefined') {
+        homographyLengthInput.value = String(scale.homography.length_m);
+      }
+      if (homographyIntervalInput && scale.homography && typeof scale.homography.interval_m !== 'undefined') {
+        homographyIntervalInput.value = String(scale.homography.interval_m);
+        const parsedInterval = parseFloat(homographyIntervalInput.value);
+        if (!Number.isNaN(parsedInterval) && parsedInterval > 0) {
+          state.homographySettings.interval = parsedInterval;
+        }
+      } else if (homographyIntervalInput) {
+        homographyIntervalInput.value = String(state.homographySettings.interval);
+      }
+
+      if (mode === 'homography') {
+        state.homographyPositionsManual = mappedLines.length > 0;
+        state.homographyScalePositions = [];
+        state.homographyScaleRatios = [];
+      } else {
+        state.homographyPositionsManual = false;
+        state.homographyScalePositions = [];
+        state.homographyScaleRatios = [];
+      }
+
+      state.laneTests = [];
+      refreshLaneTestPanel();
+
+      updateScaleLineGuides();
+      updateHomographyDerivedData();
+    }
+
+    async function fetchMetadata() {
+      const res = await fetch(config.metadataUrl, { cache: 'no-store' });
+      if (!res.ok) throw new Error('metadata fetch failed');
+      const data = await res.json();
+      state.totalFrames = data.frame_count || 0;
+      state.nativeWidth = data.width || 0;
+      state.nativeHeight = data.height || 0;
+      resizeCanvas();
+      setFrameIndex(state.frameIndex);
+    }
+
+    async function fetchExistingData() {
+      if (!config.dataUrl) return;
+      const url = new URL(config.dataUrl, window.location.origin);
+      if (config.profileName) url.searchParams.set('profile_name', config.profileName);
+      const res = await fetch(url.toString(), { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data) return;
+      if (data.profile_name) updateProfileInput(data.profile_name);
+      if (data.data) applyLoadedPayload(data.data);
+    }
+
+    async function requestFrame() {
+      if (!config.frameUrl || !imageEl) return;
+      const token = ++state.frameRequestToken;
+      showMessage(null);
+      loaderEl?.classList.remove('d-none');
+      imageEl.classList.add('d-none');
+      resetDrawingState();
+
+      try {
+        const urlObj = new URL(config.frameUrl, window.location.origin);
+        urlObj.searchParams.set('frame', String(state.frameIndex));
+        if (state.displayWidth) urlObj.searchParams.set('width', String(state.displayWidth));
+
+        const res = await fetch(urlObj.toString(), { cache: 'no-store' });
+        if (!res.ok) throw new Error('frame fetch failed');
+
+        const blob = await res.blob();
+        if (token !== state.frameRequestToken) return;
+
+        if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
+        state.imageUrl = URL.createObjectURL(blob);
+
+        imageEl.onload = () => {
+          if (token !== state.frameRequestToken) return;
+          imageEl.classList.remove('d-none');
+          loaderEl?.classList.add('d-none');
+          renderAnnotations();
+        };
+        imageEl.onerror = () => {
+          showMessage('フレームを読み込めませんでした。', 'danger');
+          loaderEl?.classList.add('d-none');
+        };
+        imageEl.src = state.imageUrl;
+      } catch (err) {
+        if (token === state.frameRequestToken) {
+          loaderEl?.classList.add('d-none');
+          showMessage('フレーム取得に失敗しました。', 'danger');
+        }
+      }
+    }
+
+    // 入力ハンドラ（描画）
+    function handlePointerDown(event) {
+      if (!canvas || !ctx || !imageEl || imageEl.classList.contains('d-none')) return;
+      const mode = state.activeTool;
+      const def = TOOL_DEFS[mode];
+      const allowHybridHandle = state.scaleMode === 'vertical_ex' && mode === 'none';
+      resetHomographyDrag();
+      resetHomographyScaleDrag();
+
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const nativePoint = toNativePoint(x, y);
+
+      if (allowHybridHandle) {
+        const handle = findHybridMidHandle(x, y);
+        if (handle) {
+          state.hybridMidDrag = {
+            active: true,
+            pointerId: event.pointerId ?? null,
+            line: handle.line,
+            control: handle.control,
+          };
+          if (event.pointerId != null) canvas.setPointerCapture(event.pointerId);
+          event.preventDefault();
+          return;
+        }
+        return;
+      }
+
+      if (!def || def.type === 'none') return;
+
+      if (def.type === 'probe') {
+        performLaneTest(nativePoint);
+        event.preventDefault();
+        return;
+      }
+
+      if (mode === 'homography') {
+        const hitIndex = findHomographyPoint(x, y);
+        if (hitIndex !== -1) {
+          scheduleHomographyDrag(hitIndex, event.pointerId ?? null);
+          event.preventDefault();
+          return;
+        }
+        const lineIndex = findHomographyScaleLine(x, y);
+        if (lineIndex !== -1) {
+          setHomographyLineSelection(lineIndex);
+          scheduleHomographyScaleDrag(lineIndex, event.pointerId ?? null);
+          event.preventDefault();
+          return;
+        }
+        if (state.annotations.homography_points.length < 4) {
+          state.homographyPositionsManual = false;
+          state.homographyScalePositions = [];
+          state.annotations.homography_scale_lines = [];
+          state.annotations.homography_points.push(nativePoint);
+          updateHomographyDerivedData();
+        }
+        event.preventDefault();
+        return;
+      }
+
+      state.isDrawing = true;
+      state.tempPoints = [nativePoint];
+      if (def.type === 'line') state.tempPoints.push(nativePoint);
+      if (event.pointerId != null) canvas.setPointerCapture(event.pointerId);
+      renderAnnotations(state.tempPoints);
+      event.preventDefault();
+    }
+
+    function handlePointerMove(event) {
+      if (!canvas || !ctx) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const nativePoint = toNativePoint(x, y);
+
+      if (
+        state.hybridMidDrag.active &&
+        state.scaleMode === 'vertical_ex' &&
+        (state.hybridMidDrag.pointerId == null || state.hybridMidDrag.pointerId === event.pointerId)
+      ) {
+        const drag = state.hybridMidDrag;
+        const controlSet = state.hybridMidControls?.[drag.line];
+        if (controlSet && controlSet.indices && controlSet.x) {
+          const newX = toNativeX(x);
+          controlSet.x[drag.control] = newX;
+          recalcHybridMidLine(drag.line);
+          state.hybridMidManual = true;
+          renderAnnotations();
+        }
+        event.preventDefault();
+        return;
+      }
+
+      if (state.activeTool === 'homography' && state.homographyScaleDrag.pointerId === event.pointerId) {
+        if (!state.homographyScaleDrag.active) return;
+        const sorted = state.homographySorted;
+        const lengthValue = parseFloat(homographyLengthInput?.value || '0') || 0;
+        if (!Array.isArray(sorted) || sorted.length !== 4 || !(lengthValue > 0)) return;
+        const ratio = projectRatioOnEdge(nativePoint, sorted[0], sorted[3]);
+        updateHomographyScaleLineFromRatio(state.homographyScaleDrag.index, ratio, lengthValue);
+        event.preventDefault();
+        return;
+      }
+
+      if (state.activeTool === 'homography' && state.homographyDrag.pointerId === event.pointerId) {
+        if (!state.homographyDrag.active) return;
+        if (state.homographyDrag.index != null) {
+          state.annotations.homography_points[state.homographyDrag.index] = nativePoint;
+          state.homographyPositionsManual = false;
+          state.homographyScalePositions = [];
+          updateHomographyDerivedData();
+        }
+        event.preventDefault();
+        return;
+      }
+
+      if (!state.isDrawing) return;
+      const def = TOOL_DEFS[state.activeTool];
+      if (!def) return;
+
+      if (def.type === 'line') {
+        state.tempPoints[state.tempPoints.length - 1] = nativePoint;
+      } else {
+        const last = state.tempPoints[state.tempPoints.length - 1];
+        if (!last || Math.hypot(nativePoint[0] - last[0], nativePoint[1] - last[1]) >= 2) {
+          state.tempPoints.push(nativePoint);
+        }
+      }
+      renderAnnotations(state.tempPoints);
+      event.preventDefault();
+    }
+
+    function handlePointerUp(event) {
+      if (
+        state.hybridMidDrag.active &&
+        (state.hybridMidDrag.pointerId == null || state.hybridMidDrag.pointerId === event.pointerId)
+      ) {
+        if (state.hybridMidDrag.pointerId != null) {
+          try { canvas.releasePointerCapture(state.hybridMidDrag.pointerId); } catch (e) { /* ignore */ }
+        }
+        resetHybridMidDrag();
+        event.preventDefault();
+        return;
+      }
+
+      if (state.activeTool === 'homography' && state.homographyScaleDrag.pointerId === event.pointerId) {
+        if (state.homographyScaleDrag.active && event.pointerId != null) {
+          try { canvas.releasePointerCapture(event.pointerId); } catch (e) { /* ignore */ }
+        }
+        resetHomographyScaleDrag();
+        event.preventDefault();
+        return;
+      }
+
+      if (state.activeTool === 'homography' && state.homographyDrag.pointerId === event.pointerId) {
+        if (state.homographyDrag.active && event.pointerId != null) {
+          try { canvas.releasePointerCapture(event.pointerId); } catch (e) { /* ignore */ }
+        }
+        resetHomographyDrag();
+        resetHomographyScaleDrag();
+        event.preventDefault();
+        return;
+      }
+
+      if (!state.isDrawing) return;
+      if (event.pointerId != null) canvas.releasePointerCapture(event.pointerId);
+      const def = TOOL_DEFS[state.activeTool];
+      if (!def) {
+        resetDrawingState();
+        renderAnnotations();
+        return;
+      }
+      if (def.type === 'line') {
+        if (state.tempPoints.length >= 2) {
+          const startPt = state.tempPoints[0];
+          const endPt = state.tempPoints[state.tempPoints.length - 1];
+          if (Math.hypot(endPt[0] - startPt[0]) + Math.hypot(endPt[1] - startPt[1]) > 2) {
+            const newLine = [startPt.slice(), endPt.slice()];
+            if (state.activeTool === 'count_line') {
+              state.annotations.count_lines.push(newLine);
+            } else {
+              state.annotations.scale_lines.push(newLine);
+            }
+          }
+        }
+      } else if (def.type === 'freehand') {
+        if (state.tempPoints.length >= 2) {
+          state.annotations[state.activeTool] = state.tempPoints.map((pt) => pt.slice());
+        }
+      } else if (def.type === 'path') {
+        if (state.tempPoints.length >= 2) {
+          state.annotations.scale_path = state.tempPoints.map((pt) => pt.slice());
+        }
+      }
+      if (['left_white_line', 'right_white_line', 'center_line'].includes(state.activeTool)) {
+        updateHybridMidLines(true);
+      }
+      resetDrawingState();
+      updateScaleLineGuides();
+      renderAnnotations();
+      refreshPanels();
+      event.preventDefault();
+    }
+
+    // 操作系
+    // 操作系
+    function handleUndo() {
+      const mode = state.activeTool;
+      switch (mode) {
+        case 'left_white_line':
+        case 'right_white_line':
+        case 'center_line':
+          state.annotations[mode] = [];
+          updateHybridMidLines(true);
+          break;
+        case 'count_line':
+          state.annotations.count_lines.pop();
+          break;
+        case 'scale_lines':
+          state.annotations.scale_lines.pop();
+          updateScaleLineGuides();
+          break;
+        case 'scale_path':
+          state.annotations.scale_path.pop();
+          if (state.annotations.scale_path.length < 2) state.annotations.scale_path = [];
+          break;
+        case 'homography':
+          state.annotations.homography_points.pop();
+          state.homographyPositionsManual = false;
+          state.homographyScalePositions = [];
+          state.annotations.homography_scale_lines = [];
+          updateHomographyDerivedData();
+          break;
+        default:
+          return;
+      }
+      renderAnnotations();
+      refreshPanels();
+    }
+
+    function handleClearCurrent() {
+      const mode = state.activeTool;
+      switch (mode) {
+        case 'left_white_line':
+        case 'right_white_line':
+        case 'center_line':
+          state.annotations[mode] = [];
+          updateHybridMidLines(true);
+          break;
+        case 'count_line':
+          state.annotations.count_lines = [];
+          break;
+        case 'scale_lines':
+          state.annotations.scale_lines = [];
+          updateScaleLineGuides();
+          break;
+        case 'scale_path':
+          state.annotations.scale_path = [];
+          break;
+        case 'homography':
+          state.annotations.homography_points = [];
+          state.homographyPositionsManual = false;
+          state.homographyScalePositions = [];
+          state.annotations.homography_scale_lines = [];
+          updateHomographyDerivedData();
+          break;
+        default:
+          return;
+      }
+      renderAnnotations();
+      refreshPanels();
+    }
+
+    function handleClearAll() {
+      state.annotations.left_white_line = [];
+      state.annotations.right_white_line = [];
+      state.annotations.center_line = [];
+      state.annotations.left_mid_line = [];
+      state.annotations.right_mid_line = [];
+      state.annotations.count_lines = [];
+      state.annotations.scale_lines = [];
+      state.annotations.scale_path = [];
+      state.annotations.homography_points = [];
+      state.annotations.homography_scale_lines = [];
+      state.homographyScalePositions = [];
+      state.homographyPositionsManual = false;
+      resetHomographyScaleDrag();
+      updateScaleLineGuides();
+      updateHomographyDerivedData();
+      updateHybridMidLines(true);
+      state.laneTests = [];
+      refreshLaneTestPanel();
+      renderAnnotations();
+      refreshPanels();
+    }
+
+    async function handleSave() {
+      if (!config.saveUrl) {
+        showMessage('保存先が設定されていません。', 'danger');
+        return;
+      }
+      const profileName = sanitizeProfileName(profileNameInput?.value || '');
+      if (!profileName) {
+        showMessage('プロファイル名を入力してください。', 'danger');
+        profileNameInput?.focus();
+        return;
+      }
+      const activeScaleLines = state.scaleMode === 'homography'
+        ? state.annotations.homography_scale_lines
+        : state.annotations.scale_lines;
+      const body = {
+        profile_name: profileName,
+        source_frame: state.frameIndex,
+        count_lines: state.annotations.count_lines,
+        lines: {
+          left_white_line: state.annotations.left_white_line,
+          right_white_line: state.annotations.right_white_line,
+          center_line: state.annotations.center_line,
+          left_mid_line: state.annotations.left_mid_line,
+          right_mid_line: state.annotations.right_mid_line,
+        },
+        scale: {
+          mode: state.scaleMode,
+          lines: activeScaleLines,
+          known_distance_m: parseFloat(knownDistanceInput?.value || '0') || 0,
+          num_intervals: parseInt(intervalInput?.value || '0', 10) || 0,
+        },
+      };
+      if (state.scaleMode === 'xy') {
+        body.scale.path = {
+          points: state.annotations.scale_path,
+          total_distance_m: parseFloat(pathDistanceInput?.value || '0') || 0,
+          pixel_length: computePathLength(state.annotations.scale_path),
+        };
+      }
+      if (state.scaleMode === 'homography') {
+        body.scale.homography = {
+          image_points: state.annotations.homography_points,
+          width_m: parseFloat(homographyWidthInput?.value || '0') || 0,
+          length_m: parseFloat(homographyLengthInput?.value || '0') || 0,
+          interval_m: state.homographySettings.interval,
+        };
+      }
+
+      saveButton.disabled = true;
+      showMessage('保存中...', 'info');
+      try {
+        const res = await fetch(config.saveUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const errorText = data?.error || '保存に失敗しました。';
+          showMessage(errorText, 'danger');
+        } else {
+          updateProfileInput(data.profile_name || profileName);
+          showMessage('設定を保存しました。', 'success');
+        }
+      } catch (err) {
+        showMessage('保存に失敗しました。', 'danger');
+      } finally {
+        saveButton.disabled = false;
+      }
+    }
+
+    function handleResize() {
+      const prevWidth = state.displayWidth;
+      resizeCanvas();
+      if (state.displayWidth !== prevWidth) {
+        requestFrame();
+      } else {
+        renderAnnotations();
+      }
+    }
+
+    // イベント登録
+    toolButtons.forEach((btn) => btn.addEventListener('click', () => setActiveTool(btn.getAttribute('data-mode'))));
+
+    frameButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const step = parseInt(btn.getAttribute('data-frame-step') || '0', 10);
+        if (Number.isFinite(step)) {
+          setFrameIndex(state.frameIndex + step);
+          requestFrame();
+        }
+      });
+    });
+
+    frameInput?.addEventListener('change', () => {
+      const value = parseInt(frameInput.value, 10);
+      setFrameIndex(Number.isNaN(value) ? state.frameIndex : value);
+      requestFrame();
+    });
+
+    reloadButton?.addEventListener('click', () => requestFrame());
+    clearLaneTestsBtn?.addEventListener('click', () => {
+      state.laneTests = [];
+      refreshLaneTestPanel();
+      renderAnnotations();
+      updateLaneTestStatus(laneTestDefaultText, 'muted');
+    });
+
+    scaleModeSelect?.addEventListener('change', () => {
+      updateScaleModeUI();
+      renderAnnotations();
+      refreshPanels();
+    });
+
+    pathDistanceInput?.addEventListener('input', refreshPanels);
+    knownDistanceInput?.addEventListener('input', () => { });
+    intervalInput?.addEventListener('input', () => { });
+    homographyWidthInput?.addEventListener('input', updateHomographyDerivedData);
+    homographyLengthInput?.addEventListener('input', updateHomographyDerivedData);
+    homographyIntervalInput?.addEventListener('input', () => {
+      state.homographyPositionsManual = false;
+      state.homographyScalePositions = [];
+      state.annotations.homography_scale_lines = [];
+      resetHomographyScaleDrag();
+      updateHomographyDerivedData();
+    });
+    homographyLineList?.addEventListener('change', (event) => {
+      if (suppressLineControlEvents > 0) return;
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || target.name !== 'homographyLineChoice') return;
+      const value = Number(target.value);
+      if (!Number.isNaN(value)) setHomographyLineSelection(value);
+    });
+    homographyLineSlider?.addEventListener('input', (event) => {
+      if (suppressLineControlEvents > 0) return;
+      const value = Number(event.target.value);
+      if (!Number.isNaN(value)) applyHomographyLineRatio(value);
+    });
+    homographyLineDistance?.addEventListener('input', (event) => {
+      if (suppressLineControlEvents > 0) return;
+      const value = Number(event.target.value);
+      if (!Number.isNaN(value)) applyHomographyLineRatio(value);
+    });
+
+    profileNameInput?.addEventListener('input', () => {
+      const sanitized = sanitizeProfileName(profileNameInput.value);
+      if (sanitized !== profileNameInput.value) profileNameInput.value = sanitized;
+    });
+
+    document.getElementById('undoBtn')?.addEventListener('click', handleUndo);
+    document.getElementById('clearModeBtn')?.addEventListener('click', handleClearCurrent);
+    document.getElementById('clearAllBtn')?.addEventListener('click', handleClearAll);
+    adjustHybridLinesBtn?.addEventListener('click', () => {
+      if (state.scaleMode !== 'vertical_ex') {
+        showMessage('改型Y軸スケールを選択してください。', 'warning');
+        return;
+      }
+      let hasMidLines = (
+        Array.isArray(state.annotations.left_mid_line) && state.annotations.left_mid_line.length >= 2 &&
+        Array.isArray(state.annotations.right_mid_line) && state.annotations.right_mid_line.length >= 2
+      );
+      if (!hasMidLines) {
+        hasMidLines = updateHybridMidLines(true);
+        renderAnnotations();
+        refreshPanels();
+      }
+      if (!hasMidLines) {
+        showMessage('白線と中央線を描いてから中間線を生成してください。', 'warning');
+        return;
+      }
+      initializeHybridMidControls();
+      state.hybridMidManual = true;
+      renderAnnotations();
+      showMessage('先頭・中央・末尾の黄色いハンドルをドラッグして中間線を調整できます。', 'info');
+    });
+    regenHybridLinesBtn?.addEventListener('click', () => {
+      if (state.scaleMode !== 'vertical_ex') {
+        showMessage('改型Y軸スケールを選択してください。', 'warning');
+        return;
+      }
+      const ok = updateHybridMidLines(true);
+      renderAnnotations();
+      refreshPanels();
+      if (ok) {
+        showMessage('中間線を再生成しました。', 'success');
+      } else {
+        showMessage('白線と中央線を描いてから再生成してください。', 'warning');
+      }
+    });
+    saveButton?.addEventListener('click', handleSave);
+
+    canvas?.addEventListener('pointerdown', handlePointerDown);
+    canvas?.addEventListener('pointermove', handlePointerMove);
+    canvas?.addEventListener('pointerup', handlePointerUp);
+    canvas?.addEventListener('pointerleave', handlePointerUp);
+
+    window.addEventListener('resize', () => {
+      window.clearTimeout(handleResize._timer);
+      handleResize._timer = window.setTimeout(handleResize, 150);
+    });
+
+    refreshLaneTestPanel();
+
+    // メタデータ取得
+    async function fetchMetadata() {
+      if (!config.metadataUrl) throw new Error('メタデータURLが設定されていません');
+      const res = await fetch(config.metadataUrl);
+      if (!res.ok) throw new Error('メタデータ取得に失敗');
+      const data = await res.json();
+      state.totalFrames = data.total_frames || 0;
+      state.nativeWidth = data.width || 1920;
+      state.nativeHeight = data.height || 1080;
+      setFrameIndex(0);
+      resizeCanvas();
+    }
+
+    // 既存プロファイルデータ取得
+    async function fetchExistingData() {
+      if (!config.dataUrl) return;
+      try {
+        const res = await fetch(config.dataUrl);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || typeof data !== 'object') return;
+
+        // 線データを復元
+        const lines = data.lines || {};
+        if (Array.isArray(lines.left_white_line)) state.annotations.left_white_line = lines.left_white_line;
+        if (Array.isArray(lines.right_white_line)) state.annotations.right_white_line = lines.right_white_line;
+        if (Array.isArray(lines.center_line)) state.annotations.center_line = lines.center_line;
+        if (Array.isArray(lines.left_mid_line)) state.annotations.left_mid_line = lines.left_mid_line;
+        if (Array.isArray(lines.right_mid_line)) state.annotations.right_mid_line = lines.right_mid_line;
+
+        // カウント線
+        if (Array.isArray(data.count_lines)) state.annotations.count_lines = data.count_lines;
+
+        // スケール設定
+        const scale = data.scale || {};
+        if (scale.mode) {
+          state.scaleMode = scale.mode;
+          if (scaleModeSelect) scaleModeSelect.value = scale.mode;
+        }
+        if (Array.isArray(scale.lines)) {
+          if (scale.mode === 'homography') {
+            state.annotations.homography_scale_lines = scale.lines;
+          } else {
+            state.annotations.scale_lines = scale.lines;
+          }
+        }
+        if (scale.known_distance_m && knownDistanceInput) knownDistanceInput.value = String(scale.known_distance_m);
+        if (scale.num_intervals && intervalInput) intervalInput.value = String(scale.num_intervals);
+
+        // XY経路
+        if (scale.path && Array.isArray(scale.path.points)) {
+          state.annotations.scale_path = scale.path.points;
+          if (pathDistanceInput && scale.path.total_distance_m) pathDistanceInput.value = String(scale.path.total_distance_m);
+        }
+
+        // ホモグラフィ
+        if (scale.homography) {
+          if (Array.isArray(scale.homography.image_points)) state.annotations.homography_points = scale.homography.image_points;
+          if (homographyWidthInput && scale.homography.width_m) homographyWidthInput.value = String(scale.homography.width_m);
+          if (homographyLengthInput && scale.homography.length_m) homographyLengthInput.value = String(scale.homography.length_m);
+          if (scale.homography.interval_m) state.homographySettings.interval = scale.homography.interval_m;
+        }
+
+        // ソースフレーム
+        if (typeof data.source_frame === 'number') {
+          setFrameIndex(data.source_frame);
+        }
+
+        // 描画更新
+        updateScaleLineGuides();
+        updateHomographyDerivedData();
+        updateHybridMidLines(false);
+
+        console.log('Profile data loaded:', data);
+      } catch (err) {
+        console.warn('Failed to load existing profile data:', err);
+      }
+    }
+
+    // 初期化
+    async function init() {
+      updateProfileInput(config.profileName || profileNameInput?.value || '');
+      updateScaleModeUI();
+      showMessage('読み込み中...', 'info');
+      try {
+        await fetchMetadata();
+        await fetchExistingData();
+        updateScaleModeUI();
+        refreshPanels();
+        await requestFrame();
+        showMessage(null);
+      } catch (err) {
+        showMessage('初期化に失敗しました。', 'danger');
+      }
+      updateHomographyLineControls();
+    }
+    init();
+
+  })();
+</script>
+{% endif %}
+{% endblock %}

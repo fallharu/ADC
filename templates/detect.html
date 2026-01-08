@@ -1,0 +1,1155 @@
+{% extends "base.html" %}
+{% block title %}YOLO処理{% endblock %}
+
+{% block content %}
+<h2 class="mb-3">2. YOLO処理</h2>
+<p class="text-muted">アップロード済みの動画やフォルダを選択してYOLO推論を実行できます。</p>
+
+<div class="card mb-4" id="systemMetricsCard">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>システムリソース状況</span>
+    <span class="small text-muted" id="metricsTimestamp">-</span>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-warning small d-none" role="alert" id="metricsUnavailableAlert">
+      リアルタイムのリソース情報を取得できませんでした。必要に応じて psutil / pynvml をインストールしてください。
+    </div>
+    <div class="row gy-3" id="metricsDataRow">
+      <div class="col-md-4">
+        <div class="d-flex justify-content-between small mb-1">
+          <span>GPU 使用率</span>
+          <span id="gpuUsageLabel">-</span>
+        </div>
+        <div class="progress" style="height: 16px;">
+          <div class="progress-bar" id="gpuUsageBar" role="progressbar" style="width: 0%;"></div>
+        </div>
+        <div class="text-muted small mt-1" id="gpuMemoryLabel">-</div>
+      </div>
+      <div class="col-md-4">
+        <div class="d-flex justify-content-between small mb-1">
+          <span>CPU 使用率</span>
+          <span id="cpuUsageLabel">-</span>
+        </div>
+        <div class="progress" style="height: 16px;">
+          <div class="progress-bar bg-info" id="cpuUsageBar" role="progressbar" style="width: 0%;"></div>
+        </div>
+        <div class="text-muted small mt-1" id="cpuCoresLabel"></div>
+      </div>
+      <div class="col-md-4">
+        <div class="d-flex justify-content-between small mb-1">
+          <span>DRAM 使用量</span>
+          <span id="ramUsageLabel">-</span>
+        </div>
+        <div class="progress" style="height: 16px;">
+          <div class="progress-bar bg-warning" id="ramUsageBar" role="progressbar" style="width: 0%;"></div>
+        </div>
+        <div class="text-muted small mt-1" id="ramAvailableLabel">-</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card h-100" id="singleVideoCard">
+      <div class="card-header">単体動画を処理</div>
+      <div class="card-body">
+        <form method="POST" id="singleVideoForm">
+          <div class="mb-3">
+            <label for="fileSelect" class="form-label">動画を選択</label>
+            <select class="form-select" name="selected_video" id="fileSelect">
+              {% if not uploaded_files %}
+              <option value="" disabled selected>アップロード済みの動画がありません</option>
+              {% endif %}
+              {% for f in uploaded_files %}
+              <option value="{{ f }}">{{ f }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3 form-check">
+            <input type="checkbox" class="form-check-input" id="singleUseStored" name="single_use_stored" value="1"
+              checked>
+            <label class="form-check-label" for="singleUseStored">サブフォルダ設定（場所・年度・道路タイプ）を優先して使用</label>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label for="singleYear" class="form-label">年度 (任意)</label>
+              <input type="number" class="form-control" id="singleYear" name="single_year" placeholder="例: 2025">
+              <div class="form-text">メタデータとして保存する年度を指定できます。</div>
+            </div>
+            <div class="col-md-6">
+              <label for="singleLocation" class="form-label">場所 (任意)</label>
+              <select class="form-select" id="singleLocation" name="single_location_id">
+                <option value="">選択しない</option>
+                {% for loc in locations %}
+                <option value="{{ loc.location_id }}">{{ loc.location_name }}{% if loc.setting_mode %} ({{
+                  loc.setting_mode }}){% endif %}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">場所は「場所設定」から登録したIDを選択してください。</div>
+            </div>
+            <div class="col-md-6">
+              <label for="singleVehicleModel" class="form-label">車両検出モデル (Vehicle)</label>
+              <select class="form-select" id="singleVehicleModel" name="vehicle_model_select">
+                <option value="">自動 (Auto)</option>
+                {% for m in available_models %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">車両検出に使用するモデルを選択します。</div>
+            </div>
+            <div class="col-md-6">
+              <label for="singleTireModel" class="form-label">タイヤ検出モデル (Tire)</label>
+              <select class="form-select" id="singleTireModel" name="tire_model_select">
+                <option value="">自動 (Auto/None)</option>
+                {% for m in available_models %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">タイヤ検出に使用するモデルを選択します。</div>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="singleProfile" class="form-label">キャリブレーション (任意・例外用)</label>
+            <input list="calibrationProfiles" class="form-control" id="singleProfile" name="single_profile"
+              placeholder="例: highway_day" autocomplete="off">
+            <div class="form-text">動画単体で処理する際だけ、適用するキャリブレーション名を上書きできます。</div>
+            <datalist id="calibrationProfiles">
+              {% for profile in available_profiles %}
+              <option value="{{ profile }}"></option>
+              {% endfor %}
+            </datalist>
+          </div>
+          <div class="alert alert-info small" role="status">
+            並列フレーム数はシステムの負荷に応じて自動調整されます。
+          </div>
+          <button type="submit" class="btn btn-success w-100" {% if not uploaded_files %}disabled{% endif
+            %}>処理開始</button>
+        </form>
+        <div class="small text-muted mt-3">
+          選択した動画はGPU最適化済みの設定で処理され、完了するとProcessLogにRun IDが追加されます。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <!-- Folder Batch Processing -->
+    <div class="card h-100 mb-4" id="folderBatchCard">
+      <div class="card-header">フォルダ一括処理</div>
+      <div class="card-body">
+        <form method="POST" id="folderBatchForm">
+          <input type="hidden" name="batch_process" value="1">
+          <div class="mb-3">
+            <label for="folderSelect" class="form-label">フォルダ選択</label>
+            <select class="form-select" name="selected_folder" id="folderSelect">
+              {% if not available_folders %}
+              <option value="" disabled selected>フォルダが見つかりません</option>
+              {% endif %}
+              {% for folder in available_folders %}
+              <option value="{{ folder }}">{{ folder }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div id="folderSummary" class="alert alert-secondary small" role="status">
+            フォルダを選択すると概要が表示されます。
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label for="batchYear" class="form-label">年度 (任意)</label>
+              <input type="number" class="form-control" id="batchYear" name="batch_year" placeholder="例: 2025">
+              <div class="form-text">フォルダ内のRunに共通の年度を保存します。</div>
+            </div>
+            <div class="col-md-6">
+              <label for="batchLocation" class="form-label">場所 (任意)</label>
+              <select class="form-select" id="batchLocation" name="batch_location_id">
+                <option value="">選択しない</option>
+                {% for loc in locations %}
+                <option value="{{ loc.location_id }}">{{ loc.location_name }}{% if loc.setting_mode %} ({{
+                  loc.setting_mode }}){% endif %}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">設定モード込みで登録した場所IDを適用します。</div>
+            </div>
+            <div class="col-md-6">
+              <label for="batchVehicleModel" class="form-label">車両検出モデル (登録用)</label>
+              <select class="form-select" id="batchVehicleModel" name="batch_vehicle_model">
+                <option value="">自動 (Auto)</option>
+                {% for m in available_models %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">フォルダ設定として保存する車両モデルを選択します。</div>
+            </div>
+            <div class="col-md-6">
+              <label for="batchTireModel" class="form-label">タイヤ検出モデル (登録用)</label>
+              <select class="form-select" id="batchTireModel" name="batch_tire_model">
+                <option value="">自動 (Auto/None)</option>
+                {% for m in available_models %}
+                <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">フォルダ設定として保存するタイヤモデルを選択します。</div>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="batchProfile" class="form-label">適用するプロファイル (任意)</label>
+            <input type="text" class="form-control" id="batchProfile" name="batch_profile"
+              placeholder="例: calibration_a">
+            <div class="form-text">Run作成後にキャリブレーションプロファイル名を自動で設定します。</div>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="batchAutoPostprocess" name="batch_auto_postprocess"
+              value="1">
+            <label class="form-check-label" for="batchAutoPostprocess">処理完了後に後処理パイプラインを自動実行する</label>
+            <div class="form-text">フォルダごとの既定設定として保存されます。</div>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="batchCsv" name="batch_csv">
+            <label class="form-check-label" for="batchCsv">処理完了後にCSVを出力する</label>
+          </div>
+          <div class="alert alert-info small" role="status">
+            フォルダ処理でも並列度は自動で最適化されます。
+          </div>
+          <button type="submit" class="btn btn-primary w-100 d-flex align-items-center justify-content-center gap-2"
+            id="batchSubmitButton" {% if not available_folders or batch_status.status=='processing' %}disabled{% endif
+            %}>
+            <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"
+              id="batchSubmitSpinner"></span>
+            <span class="button-label">{% if batch_status.status == 'processing' %}処理中...{% else %}フォルダを処理{% endif
+              %}</span>
+          </button>
+        </form>
+
+        {% set batch_total = batch_status.total or 0 %}
+        {% set batch_current = batch_status.current or 0 %}
+        {% if batch_total > 0 %}
+        {% set batch_percent = (batch_current * 100) // batch_total %}
+        {% else %}
+        {% set batch_percent = 0 %}
+        {% endif %}
+        {% if batch_status.status == 'processing' %}
+        {% set batch_badge_class = 'bg-info' %}
+        {% set batch_badge_label = '処理中' %}
+        {% elif batch_status.status == 'complete' %}
+        {% set batch_badge_class = 'bg-success' %}
+        {% set batch_badge_label = '完了' %}
+        {% elif batch_status.status == 'error' %}
+        {% set batch_badge_class = 'bg-danger' %}
+        {% set batch_badge_label = 'エラー' %}
+        {% else %}
+        {% set batch_badge_class = 'bg-secondary' %}
+        {% set batch_badge_label = '待機中' %}
+        {% endif %}
+
+        <div id="batchStatusContainer" class="mt-4">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h6 class="mb-0">フォルダ進捗モニター</h6>
+            <span class="badge {{ batch_badge_class }}" id="batchStatusBadge">{{ batch_badge_label }}</span>
+          </div>
+          <p class="small text-muted mb-2" id="batchStatusMessage">{{ batch_status.message or 'フォルダ処理の進捗はここに表示されます。' }}
+          </p>
+          <div
+            class="progress mb-2 {% if batch_status.status == 'idle' and not batch_total and not batch_status.results %}d-none{% endif %}"
+            id="batchProgressWrapper" style="height: 20px;">
+            <div id="batchProgressBar"
+              class="progress-bar {% if batch_status.status == 'processing' %}progress-bar-striped progress-bar-animated{% endif %} {% if batch_status.status == 'complete' %}bg-success{% elif batch_status.status == 'error' %}bg-danger{% endif %}"
+              role="progressbar" style="width: {{ batch_percent }}%;">{{ batch_percent }}%</div>
+          </div>
+          <p class="small mb-0" id="batchProgressDetail">
+            {% if batch_status.status == 'processing' %}
+            {% if batch_total %}{{ batch_current }}/{{ batch_total }} 本完了{% else %}処理中です...{% endif %}
+            {% if batch_status.current_video %}（{{ batch_status.current_video }} を処理中）{% endif %}
+            {% elif batch_total %}
+            {{ batch_current }}/{{ batch_total }} 本処理済み
+            {% else %}
+            まだフォルダ処理は実行されていません。
+            {% endif %}
+          </p>
+
+          <div class="table-responsive mt-3 {% if not batch_status.results %}d-none{% endif %}"
+            id="batchResultsWrapper">
+            <table class="table table-sm table-striped align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col">ステータス</th>
+                  <th scope="col">動画</th>
+                  <th scope="col">Run ID</th>
+                  <th scope="col">検出件数</th>
+                  <th scope="col">使用モデル</th>
+                  <th scope="col">プロファイル</th>
+                  <th scope="col">CSV</th>
+                  <th scope="col">後処理</th>
+                  <th scope="col">メッセージ</th>
+                </tr>
+              </thead>
+              <tbody id="batchResultBody">
+                {% for row in batch_status.results %}
+                <tr class="{% if row.error %}table-danger{% endif %}">
+                  <td>
+                    {% if row.error %}
+                    <span class="badge bg-danger">失敗</span>
+                    {% else %}
+                    <span class="badge bg-success">完了</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ row.video or '-' }}</td>
+                  <td>{{ row.run_id or '-' }}</td>
+                  <td>{{ row.detection_summary or '-' }}</td>
+                  <td>{{ row.models_label or '-' }}</td>
+                  <td>{{ row.profile or '-' }}</td>
+                  <td>{% if row.csv_path %}<code class="small">{{ row.csv_path }}</code>{% else %}-{% endif %}</td>
+                  <td>{{ row.postprocess or '-' }}</td>
+                  <td class="small text-muted">{{ row.error or '-' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="alert alert-secondary small mt-3 {% if not batch_status.csv_bundle %}d-none{% endif %}"
+            id="batchCsvBundle">
+            <div class="fw-bold mb-1">CSV一括出力</div>
+            <code id="batchCsvBundlePath">{{ batch_status.csv_bundle or '' }}</code>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Model Management -->
+    <div class="card mt-4" id="modelManageCard">
+      <div class="card-header">モデル管理</div>
+      <div class="card-body">
+        <label for="newModelName" class="form-label">モデル名 (例: yolo11x.pt)</label>
+        <div class="input-group mb-3">
+          <input type="text" class="form-control" id="newModelName" placeholder="yolov8n.pt" aria-label="モデル名">
+          <button class="btn btn-primary d-flex align-items-center gap-2" type="button" id="downloadModelButton">
+            <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"
+              id="downloadSpinner"></span>
+            ダウンロード
+          </button>
+        </div>
+        <div class="form-text">Ultralyticsから指定したモデルをダウンロードし、<code>models/</code> ディレクトリに保存します。</div>
+        <div id="downloadMessage" class="mt-2"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- Subfolder Config Modal Trigger -->
+<div class="card mt-4" id="subfolderConfigCard">
+  <div class="card-header">サブフォルダ別プロファイル設定</div>
+  <div class="card-body">
+    <p class="card-text small text-muted">フォルダ内の特定サブフォルダに対して、デフォルトと異なるキャリブレーションプロファイルを割り当てることができます。</p>
+    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal"
+      data-bs-target="#subfolderConfigModal">
+      設定を開く
+    </button>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="subfolderConfigModal" tabindex="-1" aria-labelledby="subfolderConfigModalLabel"
+  aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="subfolderConfigModalLabel">サブフォルダ設定の管理</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info small">
+          <code>folder_settings.json</code> を編集します。設定はフォルダごとに保存されます。
+        </div>
+        <div class="mb-3">
+          <label for="subfolderSelectFolder" class="form-label">対象フォルダ</label>
+          <select class="form-select" id="subfolderSelectFolder">
+            <option value="">選択してください</option>
+            {% for folder in available_folders %}
+            <option value="{{ folder }}">{{ folder }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div id="subfolderConfigEditorArea" class="d-none">
+          <hr>
+          <h6>現在の設定</h6>
+          <div class="table-responsive mb-3">
+            <table class="table table-sm table-bordered">
+              <thead>
+                <tr>
+                  <th>サブフォルダ名</th>
+                  <th>キャリブレーション</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="subfolderConfigTableBody">
+                <!-- JS populated -->
+              </tbody>
+            </table>
+          </div>
+          <hr>
+          <h6>新規追加 / 編集</h6>
+          <div class="row g-2 align-items-center">
+            <div class="col-md-5">
+              <input type="text" class="form-control form-control-sm" id="subfolderInputName"
+                placeholder="サブフォルダ名 (例: 20240101_Part1)">
+            </div>
+            <div class="col-md-5">
+              <select class="form-select form-select-sm" id="subfolderInputProfile">
+                <option value="">(プロファイル選択)</option>
+                {% for p in available_profiles %}
+                <option value="{{ p }}">{{ p }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2">
+              <button type="button" class="btn btn-sm btn-primary w-100" id="subfolderAddButton">追加/更新</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-4" id="locationSettingsCard">
+  <div class="card-header">場所設定</div>
+  <div class="card-body">
+    <form class="row g-3 align-items-end" method="POST" action="{{ url_for('main.register_location') }}">
+      <div class="col-md-5">
+        <label for="locationName" class="form-label">場所名</label>
+        <input type="text" class="form-control" id="locationName" name="location_name" placeholder="例: MainStreet">
+        <div class="form-text">表示用の名称を登録します。</div>
+      </div>
+      <div class="col-md-5">
+        <label for="locationMode" class="form-label">設定モード (任意)</label>
+        <input type="text" class="form-control" id="locationMode" name="location_mode" placeholder="例: urban"
+          autocomplete="off">
+        <div class="form-text">場所に紐づく設定モードをメモしておけます。</div>
+      </div>
+      <div class="col-md-2 d-grid">
+        <button type="submit" class="btn btn-outline-primary">場所を登録</button>
+      </div>
+    </form>
+
+    <div class="mt-3">
+      {% if locations %}
+      <ul class="list-group list-group-flush">
+        {% for loc in locations %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span>{{ loc.location_name }}{% if loc.setting_mode %} ({{ loc.setting_mode }}){% endif %}</span>
+          <span class="badge bg-secondary">ID: {{ loc.location_id }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="text-muted small">まだ場所が登録されていません。ここで場所と設定モードを登録できます。</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if progress.status == 'processing' %}
+<div class="card mt-4" id="progressCard">
+  <div class="card-header">処理進捗</div>
+  <div class="card-body">
+    <div class="progress" style="height: 25px;">
+      <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"
+        style="width: 0%;">0%</div>
+    </div>
+    <p id="progressStatus" class="mt-2 mb-0"></p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const initialStatus = "{{ progress.status }}";
+    const folderSummaries = {{ folder_summaries | tojson
+  }};
+  const availableLocations = {{ locations | tojson }};
+  const locationMap = new Map((availableLocations || []).map(loc => [String(loc.location_id), loc]));
+  const singleYearInput = document.getElementById('singleYear');
+  const singleLocationSelect = document.getElementById('singleLocation');
+  const batchYearInput = document.getElementById('batchYear');
+  const batchLocationSelect = document.getElementById('batchLocation');
+  const initialBatchStatus = {{ batch_status | tojson }};
+  const batchStatusUrl = "{{ url_for('main.batch_status_api') }}";
+  const initialMetrics = {{ system_metrics | tojson }};
+  const metricsUrl = "{{ url_for('main.system_metrics_api') }}";
+
+  const metricsCard = document.getElementById('systemMetricsCard');
+  const metricsTimestamp = document.getElementById('metricsTimestamp');
+  const metricsUnavailableAlert = document.getElementById('metricsUnavailableAlert');
+  const metricsDataRow = document.getElementById('metricsDataRow');
+  const gpuUsageBar = document.getElementById('gpuUsageBar');
+  const gpuUsageLabel = document.getElementById('gpuUsageLabel');
+  const gpuMemoryLabel = document.getElementById('gpuMemoryLabel');
+  const cpuUsageBar = document.getElementById('cpuUsageBar');
+  const cpuUsageLabel = document.getElementById('cpuUsageLabel');
+  const cpuCoresLabel = document.getElementById('cpuCoresLabel');
+  const ramUsageBar = document.getElementById('ramUsageBar');
+  const ramUsageLabel = document.getElementById('ramUsageLabel');
+  const ramAvailableLabel = document.getElementById('ramAvailableLabel');
+  const cpuCoreCount = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : null;
+  if (cpuCoresLabel) {
+    cpuCoresLabel.textContent = cpuCoreCount ? `論理コア数: ${cpuCoreCount}` : '';
+  }
+  let metricsTimer = null;
+
+  const singleVideoCard = document.getElementById('singleVideoCard');
+  const alertPlaceholder = document.createElement('div');
+  if (singleVideoCard) {
+    singleVideoCard.after(alertPlaceholder);
+  }
+
+  function formatPercent(value, digits = 0) {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return '-';
+    }
+    return Number(value).toFixed(digits) + '%';
+  }
+
+  function formatMegabytes(value, digits = 0) {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return '-';
+    }
+    return Number(value).toFixed(digits) + ' MB';
+  }
+
+  function updateBar(bar, percent, { baseClass = 'bg-success' } = {}) {
+    if (!bar) return;
+    const valid = typeof percent === 'number' && Number.isFinite(percent);
+    const clamped = valid ? Math.min(100, Math.max(0, percent)) : 0;
+    bar.style.width = `${clamped.toFixed(0)}%`;
+    bar.textContent = valid ? `${clamped.toFixed(0)}%` : '---';
+    bar.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary', 'bg-info');
+    if (!valid) {
+      bar.classList.add('bg-secondary');
+      return;
+    }
+    if (baseClass === 'bg-info') {
+      bar.classList.add('bg-info');
+      return;
+    }
+    if (clamped >= 85) {
+      bar.classList.add('bg-danger');
+    } else if (clamped >= 65) {
+      bar.classList.add('bg-warning');
+    } else {
+      bar.classList.add(baseClass);
+    }
+  }
+
+  function applyMetrics(data) {
+    if (!metricsCard) return;
+    const payload = data || {};
+    const gpuPercent = typeof payload.gpu_util_percent === 'number' ? payload.gpu_util_percent : null;
+    const cpuPercent = typeof payload.cpu_util_percent === 'number' ? payload.cpu_util_percent : null;
+    const ramPercent = typeof payload.ram_used_percent === 'number' ? payload.ram_used_percent : null;
+    const hasAny = gpuPercent !== null || cpuPercent !== null || ramPercent !== null;
+
+    if (metricsUnavailableAlert) {
+      metricsUnavailableAlert.classList.toggle('d-none', hasAny);
+    }
+    if (metricsDataRow) {
+      metricsDataRow.classList.toggle('d-none', !hasAny);
+    }
+
+    updateBar(gpuUsageBar, gpuPercent, { baseClass: 'bg-success' });
+    updateBar(cpuUsageBar, cpuPercent, { baseClass: 'bg-info' });
+    updateBar(ramUsageBar, ramPercent, { baseClass: 'bg-warning' });
+
+    if (gpuUsageLabel) {
+      gpuUsageLabel.textContent = formatPercent(gpuPercent);
+    }
+    if (gpuMemoryLabel) {
+      if (
+        payload.gpu_mem_used_mb !== null && payload.gpu_mem_used_mb !== undefined &&
+        payload.gpu_mem_total_mb !== null && payload.gpu_mem_total_mb !== undefined
+      ) {
+        gpuMemoryLabel.textContent = `メモリ: ${formatMegabytes(payload.gpu_mem_used_mb, 0)} / ${formatMegabytes(payload.gpu_mem_total_mb, 0)}`;
+      } else {
+        gpuMemoryLabel.textContent = 'メモリ情報なし';
+      }
+    }
+    if (cpuUsageLabel) {
+      cpuUsageLabel.textContent = formatPercent(cpuPercent);
+    }
+    if (ramUsageLabel) {
+      ramUsageLabel.textContent = formatPercent(ramPercent);
+    }
+    if (ramAvailableLabel) {
+      if (
+        payload.ram_available_mb !== null && payload.ram_available_mb !== undefined &&
+        payload.ram_total_mb !== null && payload.ram_total_mb !== undefined
+      ) {
+        ramAvailableLabel.textContent = `空き ${formatMegabytes(payload.ram_available_mb, 0)} / 全体 ${formatMegabytes(payload.ram_total_mb, 0)}`;
+      } else {
+        ramAvailableLabel.textContent = 'メモリ情報なし';
+      }
+    }
+
+    if (metricsTimestamp) {
+      if (payload.timestamp) {
+        const date = new Date(payload.timestamp * 1000);
+        metricsTimestamp.textContent = `更新: ${date.toLocaleTimeString()}`;
+      } else {
+        metricsTimestamp.textContent = '-';
+      }
+    }
+  }
+
+  function pollMetrics() {
+    if (!metricsUrl) return;
+    fetch(metricsUrl)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Failed to fetch metrics');
+        }
+        return response.json();
+      })
+      .then(data => {
+        applyMetrics(data);
+      })
+      .catch(() => {
+        if (metricsUnavailableAlert) {
+          metricsUnavailableAlert.classList.remove('d-none');
+        }
+      })
+      .finally(() => {
+        metricsTimer = window.setTimeout(pollMetrics, 5000);
+      });
+  }
+
+  function showAlert(message, type) {
+    alertPlaceholder.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = [
+      `<div class="alert alert-${type} alert-dismissible fade show" role="alert">`,
+      `  <div>${message}</div>`,
+      '  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>',
+      '</div>'
+    ].join('');
+    alertPlaceholder.append(wrapper);
+  }
+
+  function updateProgress() {
+    fetch("{{ url_for('main.progress') }}")
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        return response.json();
+      })
+      .then(data => {
+        const current = data.current;
+        const total = data.total;
+        const status = data.status;
+        const message = data.message;
+        const percent = total > 0 ? Math.floor((current / total) * 100) : 0;
+
+        const progressBar = document.getElementById("progressBar");
+        const progressStatus = document.getElementById("progressStatus");
+        const progressCard = document.getElementById("progressCard");
+
+        if (!progressBar || !progressStatus || !progressCard) return;
+
+        progressCard.style.display = 'block';
+        progressBar.style.width = percent + "%";
+        progressBar.textContent = percent + "%";
+
+        if (status === "processing") {
+          progressBar.classList.remove("bg-success", "bg-danger");
+          progressStatus.textContent = "進捗: " + current + " / " + total + " フレーム";
+          setTimeout(updateProgress, 1500);
+        } else if (status === "complete") {
+          const summaryText = message || '処理が完了しました。';
+          progressStatus.innerHTML = summaryText;
+          progressBar.classList.remove("progress-bar-animated");
+          progressBar.classList.add("bg-success");
+          if (message) {
+            showAlert(message, 'success');
+          }
+        } else if (status === "error") {
+          progressStatus.textContent = "エラーが発生しました。";
+          progressBar.classList.remove("progress-bar-animated");
+          progressBar.classList.add("bg-danger");
+          if (message) {
+            showAlert(message, 'danger');
+          }
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching progress:', error);
+        const progressStatus = document.getElementById("progressStatus");
+        if (progressStatus) progressStatus.textContent = "進捗の取得に失敗しました。";
+      });
+  }
+
+  if (initialStatus === "processing") {
+    updateProgress();
+  }
+
+  applyMetrics(initialMetrics);
+  pollMetrics();
+
+  window.addEventListener('beforeunload', () => {
+    if (metricsTimer) {
+      clearTimeout(metricsTimer);
+    }
+  });
+
+  const summaryMap = new Map(folderSummaries.map(item => [item.name, item]));
+  const folderSelect = document.getElementById('folderSelect');
+  const summaryBox = document.getElementById('folderSummary');
+  const folderSettingsMap = new Map(folderSummaries.map(item => [item.name, item.settings || {}]));
+  const batchProfileInput = document.getElementById('batchProfile');
+  const batchAutoPostprocessInput = document.getElementById('batchAutoPostprocess');
+  const batchCsvInput = document.getElementById('batchCsv');
+
+  function formatSize(sizeMb) {
+    if (!sizeMb) return '0.0 MB';
+    if (sizeMb >= 1024) {
+      return (sizeMb / 1024).toFixed(1) + ' GB';
+    }
+    return sizeMb.toFixed(1) + ' MB';
+  }
+
+  function formatLocationLabel(id) {
+    if (!id) return '未設定';
+    const key = String(id);
+    const loc = locationMap.get(key);
+    if (!loc) return `ID: ${key}`;
+    const mode = loc.setting_mode ? ` (${loc.setting_mode})` : '';
+    return `${loc.location_name}${mode}`;
+  }
+
+  function applyFolderSettings(name) {
+    const settings = folderSettingsMap.get(name) || {};
+    if (batchProfileInput) {
+      batchProfileInput.value = settings.profile || '';
+    }
+    if (batchAutoPostprocessInput) {
+      batchAutoPostprocessInput.checked = Boolean(settings.auto_postprocess);
+    }
+    if (batchCsvInput) {
+      batchCsvInput.checked = Boolean(settings.auto_csv);
+    }
+    if (batchYearInput) {
+      batchYearInput.value = settings.process_year || '';
+    }
+    if (batchLocationSelect) {
+      batchLocationSelect.value = settings.location_id ? String(settings.location_id) : '';
+    }
+  }
+
+  function renderFolderSummary(name) {
+    if (!summaryBox) return;
+    if (!name) {
+      summaryBox.className = 'alert alert-secondary small';
+      summaryBox.textContent = 'フォルダを選択すると概要が表示されます。';
+      return;
+    }
+    applyFolderSettings(name);
+    const summary = summaryMap.get(name);
+    if (!summary) {
+      summaryBox.className = 'alert alert-warning small';
+      summaryBox.textContent = '対象の動画が見つかりません。';
+      return;
+    }
+    const sourceInfo = summary.source_path ? `<div class="mt-2 small text-muted text-break">参照先: <code>${escapeHtml(summary.source_path)}</code></div>` : '';
+    if (!summary.exists) {
+      summaryBox.className = 'alert alert-danger small';
+      summaryBox.innerHTML = `
+        <div class="fw-semibold mb-1">${escapeHtml(name)}</div>
+        <div>参照先のフォルダにアクセスできません。</div>
+        ${sourceInfo}
+      `;
+      return;
+    }
+    if (!summary.count) {
+      summaryBox.className = 'alert alert-warning small';
+      summaryBox.innerHTML = `
+        <div class="fw-semibold mb-1">${escapeHtml(name)}</div>
+        <div>対象の動画ファイルが見つかりません。</div>
+        ${sourceInfo}
+      `;
+      return;
+    }
+
+    const sampleList = (summary.samples || []).map(item => `<li class="list-group-item py-1 px-2">${escapeHtml(item)}</li>`).join('');
+    const subdirSamples = (summary.subdir_samples || []).map(item => `<code class="me-2">${escapeHtml(item)}</code>`).join('');
+    const subdirInfo = summary.subdir_count
+      ? `<div class="mt-2">サブフォルダ検出: ${summary.subdir_count} 箇所${subdirSamples ? `<div class="small text-muted mt-1">例: ${subdirSamples}</div>` : ''}</div>`
+      : '<div class="mt-2 small text-muted">サブフォルダ内も自動的に探索しますが、このフォルダでは検出されていません。</div>';
+    const settings = folderSettingsMap.get(name) || {};
+    const profileLabel = settings.profile ? `<code>${escapeHtml(settings.profile)}</code>` : '未設定';
+    const postprocessLabel = settings.auto_postprocess ? '自動実行' : '手動実行';
+    const csvLabel = settings.auto_csv ? '自動出力' : '手動出力';
+    const yearLabel = settings.process_year ? `${settings.process_year} 年度` : '未設定';
+    const locationLabel = settings.location_id ? formatLocationLabel(settings.location_id) : '未設定';
+    summaryBox.className = 'alert alert-info small';
+    summaryBox.innerHTML = `
+      <div class="d-flex justify-content-between">
+        <span>動画ファイル数</span>
+        <strong>${summary.count} 本</strong>
+      </div>
+      <div class="d-flex justify-content-between">
+        <span>合計サイズ (推定)</span>
+        <strong>${formatSize(summary.size_mb)}</strong>
+      </div>
+      <div class="mt-2">
+        <div>既定プロファイル: ${profileLabel}</div>
+        <div>後処理: ${postprocessLabel}</div>
+        <div>CSV出力: ${csvLabel}</div>
+        <div>年度: ${escapeHtml(yearLabel)}</div>
+        <div>場所: ${escapeHtml(locationLabel)}</div>
+      </div>
+      ${subdirInfo}
+      ${sampleList ? `<div class="mt-2">サンプル:</div><ul class="list-group list-group-flush border-top mt-1">${sampleList}</ul>` : ''}
+      ${sourceInfo}
+    `;
+  }
+
+  if (folderSelect) {
+    renderFolderSummary(folderSelect.value);
+    folderSelect.addEventListener('change', (event) => {
+      renderFolderSummary(event.target.value);
+      syncBatchSubmit(currentBatchStatus.status);
+    });
+  }
+
+  const batchStatusBadge = document.getElementById('batchStatusBadge');
+  const batchStatusMessage = document.getElementById('batchStatusMessage');
+  const batchProgressWrapper = document.getElementById('batchProgressWrapper');
+  const batchProgressBar = document.getElementById('batchProgressBar');
+  const batchProgressDetail = document.getElementById('batchProgressDetail');
+  const batchResultsWrapper = document.getElementById('batchResultsWrapper');
+  const batchResultBody = document.getElementById('batchResultBody');
+  const batchCsvBundle = document.getElementById('batchCsvBundle');
+  const batchCsvBundlePath = document.getElementById('batchCsvBundlePath');
+  const batchSubmitButton = document.getElementById('batchSubmitButton');
+  const batchSubmitSpinner = document.getElementById('batchSubmitSpinner');
+  let batchPollTimer = null;
+  // --- Subfolder Config JS ---
+  const subfolderModal = document.getElementById('subfolderConfigModal');
+  const subfolderSelect = document.getElementById('subfolderSelectFolder');
+  const subfolderEditorArea = document.getElementById('subfolderConfigEditorArea');
+  const subfolderTableBody = document.getElementById('subfolderConfigTableBody');
+  const subfolderAddBtn = document.getElementById('subfolderAddButton');
+  const subfolderNameInput = document.getElementById('subfolderInputName');
+  const subfolderProfileInput = document.getElementById('subfolderInputProfile');
+
+  let currentSubfolderSettings = {}; // { sub_name: profile_name, ... }
+
+  if (subfolderModal && subfolderSelect) {
+    // Modal open event: reset or load
+    subfolderModal.addEventListener('shown.bs.modal', () => {
+      // Reset selection
+      subfolderSelect.value = "";
+      subfolderEditorArea.classList.add('d-none');
+      subfolderTableBody.innerHTML = "";
+    });
+
+    // Folder selection changed
+    subfolderSelect.addEventListener('change', async () => {
+      const folder = subfolderSelect.value;
+      if (!folder) {
+        subfolderEditorArea.classList.add('d-none');
+        return;
+      }
+
+      const summary = summaryMap.get(folder);
+      if (!summary) {
+        alert("フォルダ情報が見つかりません");
+        return;
+      }
+
+      const settings = summary.settings || {};
+      currentSubfolderSettings = settings.subfolders || {};
+
+      renderSubfolderTable();
+      subfolderEditorArea.classList.remove('d-none');
+    });
+
+    // Add/Update Button
+    subfolderAddBtn.addEventListener('click', async () => {
+      const subName = subfolderNameInput.value.trim();
+      const profile = subfolderProfileInput.value;
+
+      if (!subName) {
+        alert("サブフォルダ名は必須です。");
+        return;
+      }
+
+      currentSubfolderSettings[subName] = profile; // Update map
+      await saveCurrentSubfolderSettings();
+
+      subfolderNameInput.value = "";
+      subfolderProfileInput.value = "";
+    });
+  }
+
+  function renderSubfolderTable() {
+    subfolderTableBody.innerHTML = "";
+    if (Object.keys(currentSubfolderSettings).length === 0) {
+      subfolderTableBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">設定なし</td></tr>';
+      return;
+    }
+
+    for (const [sub, prof] of Object.entries(currentSubfolderSettings)) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+            <td>${escapeHtml(sub)}</td>
+            <td>${escapeHtml(prof)}</td>
+            <td>
+              <button class="btn btn-xs btn-danger" onclick="removeSubfolderSetting('${escapeHtml(sub)}')">削除</button>
+            </td>
+          `;
+      subfolderTableBody.appendChild(tr);
+    }
+  }
+
+  // GLOBAL scope needed for onclick handler
+  window.removeSubfolderSetting = async function (subKey) {
+    if (!confirm(`サブフォルダ '${subKey}' の設定を削除しますか？`)) return;
+    delete currentSubfolderSettings[subKey];
+    await saveCurrentSubfolderSettings();
+  };
+
+  async function saveCurrentSubfolderSettings() {
+    const folder = subfolderSelect.value;
+    if (!folder) return;
+
+    const payload = {
+      folder_path: folder,
+      subfolders: currentSubfolderSettings
+    };
+
+    try {
+      const res = await fetch('/api/update_folder_settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const summary = summaryMap.get(folder);
+        if (summary && summary.settings) {
+          summary.settings.subfolders = currentSubfolderSettings;
+        }
+        renderSubfolderTable();
+        // alert("設定を保存しました。"); // Optional feedback
+      } else {
+        alert("エラー: " + data.message);
+      }
+    } catch (e) {
+      alert("通信エラー: " + e);
+    }
+  }
+
+  let currentBatchStatus = initialBatchStatus;
+
+  function escapeHtml(value) {
+    if (typeof value !== 'string') {
+      return value === undefined || value === null ? '' : String(value);
+    }
+    return value.replace(/[&<>"']/g, function (char) {
+      switch (char) {
+        case '&': return '&amp;';
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '"': return '&quot;';
+        case "'": return '&#39;';
+        default: return char;
+      }
+    });
+  }
+
+  function formatDetectionCounts(rawCounts) {
+    if (!rawCounts || typeof rawCounts !== 'object') {
+      return '-';
+    }
+    let yoloTotal = 0;
+    let bestTotal = 0;
+    const yoloBreakdown = [];
+    const bestBreakdown = [];
+    for (const [name, value] of Object.entries(rawCounts)) {
+      const count = Number(value);
+      if (!Number.isFinite(count) || count <= 0) {
+        continue;
+      }
+      const lower = name ? String(name).toLowerCase() : '';
+      if (lower.includes('best')) {
+        bestTotal += count;
+        bestBreakdown.push(`${name}: ${count}件`);
+      } else {
+        yoloTotal += count;
+        yoloBreakdown.push(`${name}: ${count}件`);
+      }
+    }
+    if (!yoloTotal && !bestTotal) {
+      return '-';
+    }
+    const parts = [];
+    const yoloLabel = yoloBreakdown.length
+      ? `YOLO: ${yoloTotal}件（${yoloBreakdown.join(' / ')}）`
+      : `YOLO: ${yoloTotal}件`;
+    const bestLabel = bestBreakdown.length
+      ? `best: ${bestTotal}件（${bestBreakdown.join(' / ')}）`
+      : `best: ${bestTotal}件`;
+    parts.push(yoloLabel);
+    parts.push(bestLabel);
+    return parts.join(' / ');
+  }
+
+  function renderBatchRow(row) {
+    const statusBadge = row.error ? '<span class="badge bg-danger">失敗</span>' : '<span class="badge bg-success">完了</span>';
+    const csvCell = row.csv_path ? `<code class="small">${escapeHtml(row.csv_path)}</code>` : '-';
+    const detectionLabel = row.detection_summary || formatDetectionCounts(row.detection_counts);
+    const postprocessCell = row.postprocess ? escapeHtml(row.postprocess) : '-';
+    return `
+      <tr class="${row.error ? 'table-danger' : ''}">
+        <td>${statusBadge}</td>
+        <td>${escapeHtml(row.video || '-')}</td>
+        <td>${escapeHtml(row.run_id || '-')}</td>
+        <td>${escapeHtml(detectionLabel)}</td>
+        <td>${escapeHtml(row.profile || '-')}</td>
+        <td>${csvCell}</td>
+        <td>${postprocessCell}</td>
+        <td class="small text-muted">${escapeHtml(row.error || '-')}</td>
+      </tr>
+    `;
+  }
+
+  function syncBatchSubmit(status) {
+    if (!batchSubmitButton) return;
+    const isProcessing = status === 'processing';
+    const selectedSummary = folderSelect ? summaryMap.get(folderSelect.value) : null;
+    const hasFolder = folderSelect && folderSelect.value && selectedSummary && selectedSummary.exists;
+    batchSubmitButton.disabled = isProcessing || !hasFolder;
+    if (batchSubmitSpinner) {
+      batchSubmitSpinner.classList.toggle('d-none', !isProcessing);
+    }
+    const label = batchSubmitButton.querySelector('.button-label');
+    if (label) {
+      label.textContent = isProcessing ? '処理中...' : 'フォルダを処理';
+    }
+  }
+
+  function applyBatchStatus(data) {
+    if (!data) return;
+    currentBatchStatus = data;
+    const status = data.status || 'idle';
+    const total = data.total || 0;
+    const current = Math.min(data.current || 0, total || 0);
+    const percent = total > 0 ? Math.floor((current / total) * 100) : (status === 'processing' ? 5 : 0);
+
+    if (batchStatusBadge) {
+      const badgeClass = status === 'processing' ? 'bg-info' : status === 'complete' ? 'bg-success' : status === 'error' ? 'bg-danger' : 'bg-secondary';
+      const badgeLabel = status === 'processing' ? '処理中' : status === 'complete' ? '完了' : status === 'error' ? 'エラー' : '待機中';
+      batchStatusBadge.className = `badge ${badgeClass}`;
+      batchStatusBadge.textContent = badgeLabel;
+    }
+
+    if (batchStatusMessage) {
+      batchStatusMessage.textContent = data.message || 'フォルダ処理の進捗はここに表示されます。';
+    }
+
+    if (batchProgressWrapper && batchProgressBar) {
+      if (status === 'idle' && !total && !(data.results && data.results.length)) {
+        batchProgressWrapper.classList.add('d-none');
+      } else {
+        batchProgressWrapper.classList.remove('d-none');
+        batchProgressBar.style.width = `${percent}%`;
+        batchProgressBar.textContent = `${percent}%`;
+        batchProgressBar.classList.toggle('bg-success', status === 'complete');
+        batchProgressBar.classList.toggle('bg-danger', status === 'error');
+        if (status === 'processing') {
+          batchProgressBar.classList.add('progress-bar-striped', 'progress-bar-animated');
+        } else {
+          batchProgressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+        }
+      }
+    }
+
+    if (batchProgressDetail) {
+      let detail = '';
+      if (status === 'processing') {
+        detail = total ? `${current}/${total} 本完了` : '処理中です...';
+        if (data.current_video) {
+          detail += `（${data.current_video} を処理中）`;
+        }
+      } else if (total) {
+        detail = `${current}/${total} 本処理済み`;
+      } else {
+        detail = 'まだフォルダ処理は実行されていません。';
+      }
+      batchProgressDetail.textContent = detail;
+    }
+
+    if (batchResultsWrapper && batchResultBody) {
+      const results = Array.isArray(data.results) ? data.results : [];
+      if (results.length) {
+        batchResultsWrapper.classList.remove('d-none');
+        batchResultBody.innerHTML = results.map(renderBatchRow).join('');
+      } else {
+        batchResultsWrapper.classList.add('d-none');
+        batchResultBody.innerHTML = '';
+      }
+    }
+
+    if (batchCsvBundle && batchCsvBundlePath) {
+      const bundlePath = data.csv_bundle;
+      if (bundlePath) {
+        batchCsvBundle.classList.remove('d-none');
+        batchCsvBundlePath.textContent = bundlePath;
+      } else {
+        batchCsvBundle.classList.add('d-none');
+        batchCsvBundlePath.textContent = '';
+      }
+    }
+
+    syncBatchSubmit(status);
+  }
+
+  function ensureBatchPolling(status) {
+    if (status === 'processing') {
+      if (!batchPollTimer) {
+        batchPollTimer = setInterval(fetchBatchStatus, 2000);
+      }
+    } else if (batchPollTimer) {
+      clearInterval(batchPollTimer);
+      batchPollTimer = null;
+    }
+  }
+
+  function fetchBatchStatus() {
+    fetch(batchStatusUrl)
+      .then(response => response.json())
+      .then(data => {
+        applyBatchStatus(data);
+        ensureBatchPolling(data.status || 'idle');
+      })
+      .catch(err => console.error('Error fetching batch status:', err));
+  }
+
+  applyBatchStatus(initialBatchStatus);
+  ensureBatchPolling(initialBatchStatus.status || 'idle');
+
+  const folderForm = document.getElementById('folderBatchForm');
+  if (folderForm) {
+    folderForm.addEventListener('submit', () => {
+      syncBatchSubmit('processing');
+    });
+  }
+});
+</script>
+{% endblock %}

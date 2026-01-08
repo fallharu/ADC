@@ -1,0 +1,29 @@
+--- Track ID Samples ---
+   track_id  ... run_id
+0         1  ...      1
+1         1  ...      2
+2         2  ...      3
+3         2  ...      1
+4         3  ...      1
+5         3  ...      2
+6         4  ...      5
+7         4  ...      1
+8         5  ...      1
+9         5  ...      6
+
+[10 rows x 3 columns]
+
+--- Movement Analysis ---
+  Direction_Label  ...           Movement
+0               B  ...  Down (Increase Y)
+1               F  ...    Up (Decrease Y)
+2               B  ...  Down (Increase Y)
+3               F  ...  Down (Increase Y)
+4               B  ...  Down (Increase Y)
+5               F  ...    Up (Decrease Y)
+6               B  ...  Down (Increase Y)
+7               F  ...    Up (Decrease Y)
+8               B  ...  Down (Increase Y)
+9               F  ...    Up (Decrease Y)
+
+[10 rows x 5 columns]

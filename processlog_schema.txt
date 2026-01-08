@@ -1,0 +1,14 @@
+ProcessLog table columns:
+============================================================
+run_id                         INTEGER        
+video_id                       INTEGER        
+process_start                  TEXT           
+process_end                    TEXT           
+total_detections               INTEGER        
+status                         TEXT           
+output_folder                  TEXT           
+calibration_profile            TEXT           
+folder_alias                   TEXT           
+is_folder_batch                INTEGER        
+process_year                   INTEGER        
+location_id                    INTEGER        

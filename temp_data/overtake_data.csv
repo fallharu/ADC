@@ -1,0 +1,5 @@
+year,road_type,overtake_distance,vehicle_speed,overtake_speed,inner_overtake,outer_overtake
+2023,widened,30,60,55,1,0
+2023,non-widened,25,55,50,0,1
+2024,widened,35,65,60,1,0
+2024,non-widened,28,58,53,0,1

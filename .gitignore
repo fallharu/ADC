@@ -1,0 +1,55 @@
+# ---- 動画 ----
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.flv
+*.mts
+*.m2ts
+
+# ---- 学習モデル／重い配布物（LFS運用か、そもそも無視するか方針を決める）----
+# LFS運用にするなら上の lfs track に任せる。無視したいなら下を有効化。
+ *.pt
+ *.zip
+# *.otf
+# *.ttf
+
+# Specific large files (>100MB)
+db.zip
+models/best.pt
+models/yolo*.pt
+
+# ---- Python ----
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+dist/
+build/
+*.egg-info/
+
+# ---- ログなど ----
+*.log
+*.tmp
+.cache/
+
+# ---- OS/IDE ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+output/
+uploads/
+db.zips/
+
+# ---- Database ----
+*.db
+*.db-wal
+*.db-shm
+*.backup*
+db/
+old/

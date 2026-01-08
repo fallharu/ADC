@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row g-4 align-items-stretch">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body p-4 p-lg-5 d-flex flex-column">
+        <h1 class="display-6 fw-bold mb-3">ADCワークフローへようこそ</h1>
+        <p class="text-muted lead">
+          動画のアップロードから解析、レポート生成までをひとつの画面から開始できます。下記のクイックアクションから次のステップへ移動してください。
+        </p>
+        <div class="d-flex flex-wrap gap-2 mb-4">
+          <a class="btn btn-primary btn-lg" href="{{ url_for('main.upload_video') }}">
+            <i class="bi bi-cloud-upload me-2"></i>動画をアップロード
+          </a>
+          <a class="btn btn-outline-secondary btn-lg" href="{{ url_for('main.detect') }}">
+            <i class="bi bi-play-circle me-2"></i>処理を開始
+          </a>
+          <a class="btn btn-outline-primary btn-lg" href="{{ url_for('main.post_process') }}">
+            <i class="bi bi-list-check me-2"></i>後処理を確認
+          </a>
+        </div>
+        <div class="row g-3 mt-auto">
+          <div class="col-md-6">
+            <div class="d-flex align-items-center p-3 bg-light rounded-3 h-100">
+              <span class="badge bg-primary fs-5 me-3">{{ run_summary.total | default(0) }}</span>
+              <div>
+                <div class="fw-semibold">登録済みRun</div>
+                <div class="small text-muted">処理済み・待機中すべてを含む総数です。</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="d-flex align-items-center p-3 bg-light rounded-3 h-100">
+              <span class="badge bg-success fs-5 me-3">{{ run_summary.completed | default(0) }}</span>
+              <div>
+                <div class="fw-semibold">完了済みRun</div>
+                <div class="small text-muted">後処理まで完了したRunの件数です。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body p-4 d-flex flex-column">
+        <h2 class="h5 fw-bold mb-3">Run管理</h2>
+        <p class="small text-muted">
+          処理が行き詰まった場合は、下のリセットボタンでRun関連データと進捗情報を初期化できます。実行中の処理がある際は完了するまでお待ちください。
+        </p>
+        <div class="mt-auto">
+          <form method="post" action="{{ url_for('main.ensure_default_classes') }}" class="mb-2">
+            <button type="submit" class="btn btn-outline-primary w-100">自転車・車クラスを追加</button>
+          </form>
+          <p class="small text-muted">YOLO推論前に主要クラス（自転車・車・バス/トラック）をClassテーブルへ登録します。</p>
+          <form method="post" action="{{ url_for('main.reset_runs') }}"
+            onsubmit="return confirm('すべてのRunデータと進行状況をリセットします。よろしいですか？');">
+            <button type="submit" class="btn btn-outline-danger w-100">Runデータをリセット</button>
+          </form>
+          <ul class="list-unstyled small text-muted mt-3 mb-0">
+            <li class="d-flex justify-content-between">
+              <span><i class="bi bi-arrow-repeat me-1"></i>進行中</span>
+              <span class="fw-semibold">{{ run_summary.processing | default(0) }}</span>
+            </li>
+            <li class="d-flex justify-content-between">
+              <span><i class="bi bi-exclamation-triangle me-1"></i>エラー</span>
+              <span class="fw-semibold">{{ run_summary.errors | default(0) }}</span>
+            </li>
+            <li class="d-flex justify-content-between">
+              <span><i class="bi bi-hourglass me-1"></i>待機中</span>
+              <span class="fw-semibold">{{ run_summary.waiting | default(0) }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mt-5">
+  <h2 class="h5 fw-bold mb-3">操作ガイド</h2>
+  <div class="row g-3">
+    <div class="col-12 col-md-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <span class="badge bg-secondary mb-2">STEP 1</span>
+          <h3 class="h6 fw-bold"><i class="bi bi-file-earmark-play me-2"></i>動画アップロード</h3>
+          <p class="small text-muted">PC内のファイルや登録フォルダを指定して解析対象を登録します。</p>
+          <a class="btn btn-sm btn-outline-primary stretched-link icon-link" href="{{ url_for('main.upload_video') }}">
+            アップロード画面へ<i class="bi bi-arrow-right"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <span class="badge bg-secondary mb-2">STEP 2</span>
+          <h3 class="h6 fw-bold"><i class="bi bi-cpu me-2"></i>YOLO推論</h3>
+          <p class="small text-muted">登録した動画・フォルダを選び、自動解析を実行します。</p>
+          <a class="btn btn-sm btn-outline-primary stretched-link icon-link" href="{{ url_for('main.detect') }}">
+            推論画面へ<i class="bi bi-arrow-right"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <span class="badge bg-secondary mb-2">STEP 3</span>
+          <h3 class="h6 fw-bold"><i class="bi bi-calculator me-2"></i>後処理 &amp; 校正</h3>
+          <p class="small text-muted">Runを選択して白線距離やTTCなどの指標を計算します。</p>
+          <a class="btn btn-sm btn-outline-primary stretched-link icon-link" href="{{ url_for('main.post_process') }}">
+            後処理画面へ<i class="bi bi-arrow-right"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <span class="badge bg-secondary mb-2">STEP 4</span>
+          <h3 class="h6 fw-bold"><i class="bi bi-check2-circle me-2"></i>結果の確認</h3>
+          <p class="small text-muted">検出結果や生成動画、CSVを一覧で確認できます。</p>
+          <a class="btn btn-sm btn-outline-primary stretched-link icon-link" href="{{ url_for('main.detections') }}">
+            検出結果を見る<i class="bi bi-arrow-right"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mt-5 row g-4">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h2 class="h5 fw-bold mb-0">最近のRun</h2>
+          <a class="btn btn-sm btn-link" href="{{ url_for('main.detections') }}">Run一覧を開く</a>
+        </div>
+        {% if recent_runs %}
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">Run ID</th>
+                <th scope="col">動画</th>
+                <th scope="col">状態</th>
+                <th scope="col">開始日時</th>
+                <th scope="col">プロファイル</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for run in recent_runs %}
+              {% set status_label = run.status or '未処理' %}
+              {% set status_lower = status_label|lower %}
+              {% set badge_class = 'bg-secondary' %}
+              {% if status_lower == 'completed' %}
+              {% set badge_class = 'bg-success' %}
+              {% elif status_lower == 'processing' %}
+              {% set badge_class = 'bg-info text-dark' %}
+              {% elif status_lower == 'error' %}
+              {% set badge_class = 'bg-danger' %}
+              {% endif %}
+              <tr>
+                <td class="fw-semibold">#{{ run.run_id }}</td>
+                <td>{{ run.filename }}</td>
+                <td><span class="badge {{ badge_class }}">{{ status_label }}</span></td>
+                <td>{{ run.process_start }}</td>
+                <td>{{ run.calibration_profile or '---' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">まだRunが登録されていません。まずは動画をアップロードしてください。</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h6 fw-bold mb-3">進行状況</h2>
+        {% set yolo_total = yolo_progress.total or 0 %}
+        {% set yolo_current = yolo_progress.current or 0 %}
+        {% set yolo_percent = 0 %}
+        {% if yolo_total > 0 %}
+        {% set yolo_percent = (yolo_current * 100) // yolo_total %}
+        {% endif %}
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>YOLO推論</span>
+            <span>{{ yolo_current }}/{{ yolo_total }} ({{ yolo_percent }}%)</span>
+          </div>
+          <div class="progress" role="progressbar" aria-label="YOLO Progress" aria-valuemin="0" aria-valuemax="100"
+            aria-valuenow="{{ yolo_percent }}">
+            <div class="progress-bar" style="width: {{ yolo_percent }}%"></div>
+          </div>
+          {% if yolo_progress.message %}
+          <div class="small text-muted mt-1">{{ yolo_progress.message }}</div>
+          {% endif %}
+        </div>
+
+        {% set post_percent = post_process_progress.percent or 0 %}
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>後処理</span>
+            <span>{{ post_percent }}%</span>
+          </div>
+          <div class="progress" role="progressbar" aria-label="Post Process Progress" aria-valuemin="0"
+            aria-valuemax="100" aria-valuenow="{{ post_percent }}">
+            <div class="progress-bar bg-success" style="width: {{ post_percent }}%"></div>
+          </div>
+          {% if post_process_progress.message %}
+          <div class="small text-muted mt-1">{{ post_process_progress.message }}</div>
+          {% endif %}
+        </div>
+
+        {% set batch_total = batch_status.total or 0 %}
+        {% set batch_current = batch_status.current or 0 %}
+        {% set batch_percent = 0 %}
+        {% if batch_total > 0 %}
+        {% set batch_percent = (batch_current * 100) // batch_total %}
+        {% endif %}
+        <div>
+          <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>フォルダ一括処理</span>
+            <span>{{ batch_current }}/{{ batch_total }} ({{ batch_percent }}%)</span>
+          </div>
+          <div class="progress" role="progressbar" aria-label="Batch Progress" aria-valuemin="0" aria-valuemax="100"
+            aria-valuenow="{{ batch_percent }}">
+            <div class="progress-bar bg-info" style="width: {{ batch_percent }}%"></div>
+          </div>
+          {% if batch_status.message %}
+          <div class="small text-muted mt-1">{{ batch_status.message }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <h2 class="h6 fw-bold mb-3">登録済みフォルダ</h2>
+        {% if folder_summaries %}
+        <div class="list-group list-group-flush">
+          {% for folder in folder_summaries %}
+          <div class="list-group-item px-0">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <div class="fw-semibold">{{ folder.folder_alias }}</div>
+                <div class="small text-muted">Run数: {{ folder.run_count }} / 未キャリブレーション: {{ folder.missing_profiles }}
+                </div>
+                {% if folder.profiles %}
+                <div class="small">プロファイル: {{ folder.profiles|join(', ') }}</div>
+                {% endif %}
+              </div>
+              <span class="badge bg-light text-dark">最新Run {{ '#' ~ folder.last_run_id if folder.last_run_id else '---'
+                }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <a class="btn btn-sm btn-outline-secondary mt-3" href="{{ url_for('main.detect') }}">フォルダ管理を開く</a>
+        {% else %}
+        <p class="text-muted mb-0">登録済みフォルダはまだありません。フォルダリンク機能で登録するとここに表示されます。</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

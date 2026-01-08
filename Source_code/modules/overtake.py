@@ -1,0 +1,869 @@
+# 役割: 追い越し判定（フラグと相手ID）、および追い越しイベントの速度プロファイル保存
+import sqlite3
+from typing import List, Optional, Tuple
+
+import pandas as pd
+from tqdm import tqdm
+import json
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+import cv2
+import numpy as np
+
+from .db_manager import (
+    MAIN_DB_PATH,
+    configure_connection,
+    ensure_detection_distance_columns,
+    ensure_overtake_event_columns,
+)
+from .video_path_resolver import collect_video_candidates
+from .calibration_loader import load_calibration_json
+
+OVERTAKE_EVENT_INSERT_COLUMNS = [
+    "run_id",
+    "event_frame_num",
+    "overtaker_group_id",
+    "overtaken_group_id",
+    "overtaker_auto_id",
+    "overtaken_auto_id",
+    "approach_distance_px",
+    "approach_distance_m",
+    "clearance_distance_px",
+    "clearance_distance_m",
+    "clearance_distance_cm",
+    "l_line_distance",
+    "l_line_distance_m",
+    "l_line_distance_cm",
+    "r_line_distance",
+    "r_line_distance_m",
+    "r_line_distance_cm",
+    "line_distance",
+    "line_distance_m",
+    "line_distance_cm",
+    "speed_profile_json",
+]
+
+_OVERTAKE_EVENT_INSERT_SQL = (
+    "INSERT INTO OvertakeEvents ("
+    + ", ".join(OVERTAKE_EVENT_INSERT_COLUMNS)
+    + ") VALUES ("
+    + ", ".join(["?"] * len(OVERTAKE_EVENT_INSERT_COLUMNS))
+    + ")"
+)
+
+load_dotenv()
+
+
+def _resolve_aliases(env_key: str, defaults: str) -> set[str]:
+    raw = os.getenv(env_key, defaults)
+    return {token.strip().lower() for token in raw.split(",") if token.strip()}
+
+
+def _select_representative_class(values: pd.Series) -> str:
+    if values.empty:
+        return ""
+    mode = values.mode()
+    if not mode.empty:
+        return str(mode.iat[0])
+    return str(values.iat[0])
+
+
+def _safe_float(value) -> Optional[float]:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _export_overtake_snapshots(
+    run_id: int,
+    snapshot_requests: List[dict],
+    *,
+    output_folder: Optional[str],
+    video_filename: Optional[str],
+    source_path: Optional[str],
+    folder_alias: Optional[str],
+    calibration_profile: Optional[str],
+    calibration_data: Optional[dict] = None,
+) -> int:
+    """追い越し発生フレームの静止画を保存する。生成枚数を返す。"""
+
+    if not snapshot_requests:
+        return 0
+
+    upload_folder = os.getenv("Upload_folder", "uploads")
+
+    candidates = collect_video_candidates(
+        upload_folder=upload_folder,
+        filename=video_filename or "",
+        source_path=source_path,
+        output_folder=output_folder,
+        folder_alias=folder_alias,
+    )
+
+    video_path = next((path for path in candidates if os.path.exists(path)), None)
+    video_path = next((path for path in candidates if os.path.exists(path)), None)
+    
+    # Fallback: Try source_path directly if resolver failed but source_path exists
+    if video_path is None and source_path and os.path.exists(source_path):
+        video_path = source_path
+        print(f"[assign_overtake] リゾルバで動画が見つかりませんでしたが、source_path ({source_path}) を使用します。")
+
+    if video_path is None:
+        print(
+            "[assign_overtake] 🛑 追い越しスナップショット用の動画が見つかりません。探索候補:\n"
+            + "\n".join(candidates)
+        )
+        if source_path:
+             print(f"source_path: {source_path} (存在しません)")
+        return
+    
+    print(f"[assign_overtake] 動画ファイルをオープンします: {video_path}")
+
+    try:
+        cap = cv2.VideoCapture(video_path)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[assign_overtake] 動画のオープンに失敗したためスナップショット生成をスキップします: {exc}"
+        )
+        return 0
+
+    if not cap.isOpened():
+        print(f"[assign_overtake] 動画が開けないためスナップショット生成をスキップします: {video_path}")
+        cap.release()
+        return 0
+
+    snapshot_dir = Path(output_folder or os.path.dirname(video_path)) / "overtake_snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    calibration = calibration_data
+    left_line_points: Optional[np.ndarray] = None
+    right_line_points: Optional[np.ndarray] = None
+    if calibration is None and calibration_profile:
+        try:
+            calibration, _ = load_calibration_json(run_id, calibration_profile)
+        except Exception as exc:  # noqa: BLE001
+            print(
+                "[assign_overtake] スナップショット描画用のキャリブレーション取得に失敗しました:"
+                f" {exc}"
+            )
+
+    if calibration:
+        lines = calibration.get("lines", {}) if isinstance(calibration, dict) else {}
+
+        def _to_array(points) -> Optional[np.ndarray]:
+            if not points:
+                return None
+            try:
+                arr = np.array(points, dtype=float)
+            except Exception:
+                return None
+            if arr.ndim != 2 or arr.shape[1] != 2:
+                return None
+            return arr
+
+        left_line_points = _to_array(lines.get("left_white_line"))
+        right_line_points = _to_array(lines.get("right_white_line"))
+
+    def _interpolate_lane_x(points: Optional[np.ndarray], y: int) -> Optional[float]:
+        if points is None or len(points) < 2:
+            return None
+        for idx in range(len(points) - 1):
+            x1, y1 = points[idx]
+            x2, y2 = points[idx + 1]
+            if (y1 <= y <= y2) or (y2 <= y <= y1):
+                if y2 == y1:
+                    return float(x1)
+                ratio = (y - y1) / (y2 - y1)
+                return float(x1 + ratio * (x2 - x1))
+        return None
+
+    def _as_point(value) -> Optional[Tuple[int, int]]:
+        if not isinstance(value, (tuple, list)) or len(value) != 2:
+            return None
+        try:
+            x_val = float(value[0])
+            y_val = float(value[1])
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(x_val) or not np.isfinite(y_val):
+            return None
+        return int(round(x_val)), int(round(y_val))
+
+    def _format_clearance_label(payload: dict) -> Optional[str]:
+        for key, unit in (
+            ("clearance_cm", "cm"),
+            ("clearance_m", "m"),
+            ("clearance_px", "px"),
+            ("approach_m", "m"),
+            ("approach_px", "px"),
+        ):
+            value = payload.get(key)
+            if value is None or (isinstance(value, float) and np.isnan(value)):
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(numeric):
+                continue
+            if unit == "cm":
+                return f"離隔:{numeric:.0f}cm"
+            if unit == "m":
+                return f"離隔:{numeric:.2f}m"
+            return f"離隔:{numeric:.1f}px"
+        return None
+
+    def _format_lane_label(side: str, value) -> Optional[str]:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(numeric):
+            return None
+        return f"{side}:{abs(numeric):.1f}px"
+
+    created = 0
+    for index, request in enumerate(snapshot_requests, start=1):
+        frame_num = int(request.get("frame", 0))
+        target_index = max(frame_num, 0)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_index)
+
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            print(f"[assign_overtake] フレーム {frame_num} の読み込みに失敗しました。")
+            continue
+
+        annotated = frame.copy()
+        car_box = request.get("car_box")
+        bike_box = request.get("bike_box")
+        car_measure = _as_point(request.get("car_measure"))
+        bike_measure = _as_point(request.get("bike_measure"))
+
+        if car_box and all(v is not None and not pd.isna(v) for v in car_box):
+            x1, y1, x2, y2 = [int(round(float(v))) for v in car_box]
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 3)
+            label = f"CAR G{request.get('car_group')}"
+            cv2.putText(
+                annotated,
+                label,
+                (x1, max(y1 - 10, 0)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 255),
+                2,
+            )
+
+        if bike_box and all(v is not None and not pd.isna(v) for v in bike_box):
+            x1, y1, x2, y2 = [int(round(float(v))) for v in bike_box]
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (255, 255, 0), 3)
+            label = f"BIKE G{request.get('bike_group')}"
+            cv2.putText(
+                annotated,
+                label,
+                (x1, max(y1 - 10, 0)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 0),
+                2,
+            )
+
+        if car_measure and bike_measure:
+            cv2.line(annotated, bike_measure, car_measure, (0, 0, 255), 3, cv2.LINE_AA)
+            mid_x = int(round((bike_measure[0] + car_measure[0]) / 2))
+            mid_y = int(round((bike_measure[1] + car_measure[1]) / 2))
+            label = _format_clearance_label(request)
+            if label:
+                (text_w, text_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                pad = 6
+                top_left = (max(0, mid_x - text_w // 2 - pad), max(0, mid_y - text_h - baseline - pad))
+                bottom_right = (min(annotated.shape[1] - 1, mid_x + text_w // 2 + pad), min(annotated.shape[0] - 1, mid_y + baseline + pad))
+                cv2.rectangle(annotated, top_left, bottom_right, (0, 0, 0), -1)
+                cv2.putText(
+                    annotated,
+                    label,
+                    (top_left[0] + pad, bottom_right[1] - baseline - 1),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (255, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+        if bike_measure:
+            cv2.circle(annotated, bike_measure, 5, (64, 255, 255), -1, cv2.LINE_AA)
+
+            nearest = None
+            nearest_side = None
+            if left_line_points is not None:
+                left_x = _interpolate_lane_x(left_line_points, bike_measure[1])
+                if left_x is not None:
+                    dist = abs(left_x - bike_measure[0])
+                    nearest = (int(round(left_x)), bike_measure[1], dist)
+                    nearest_side = "L"
+            if right_line_points is not None:
+                right_x = _interpolate_lane_x(right_line_points, bike_measure[1])
+                if right_x is not None:
+                    dist = abs(right_x - bike_measure[0])
+                    if nearest is None or dist < nearest[2]:
+                        nearest = (int(round(right_x)), bike_measure[1], dist)
+                        nearest_side = "R"
+
+            if nearest is not None:
+                lane_point = (nearest[0], nearest[1])
+                cv2.line(annotated, bike_measure, lane_point, (255, 128, 0), 3, cv2.LINE_AA)
+                cv2.circle(annotated, lane_point, 5, (255, 255, 255), -1, cv2.LINE_AA)
+
+                lane_value = None
+                if nearest_side == "L":
+                    lane_value = request.get("l_line_distance")
+                elif nearest_side == "R":
+                    lane_value = request.get("r_line_distance")
+
+                lane_label = _format_lane_label(nearest_side, lane_value if lane_value is not None else nearest[2])
+                if lane_label:
+                    (text_w, text_h), baseline = cv2.getTextSize(lane_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    pad = 5
+                    text_x = min(bike_measure[0], lane_point[0])
+                    text_y = max(0, bike_measure[1] - 12)
+                    bg_tl = (max(0, text_x - pad), max(0, text_y - text_h - pad))
+                    bg_br = (min(annotated.shape[1] - 1, text_x + text_w + pad), min(annotated.shape[0] - 1, text_y + baseline + pad))
+                    cv2.rectangle(annotated, bg_tl, bg_br, (0, 0, 0), -1)
+                    cv2.putText(
+                        annotated,
+                        lane_label,
+                        (bg_tl[0] + pad, bg_br[1] - baseline - 1),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+        filename = (
+            f"overtake_{frame_num:06d}_car{request.get('car_group')}_"
+            f"bike{request.get('bike_group')}_{index:02d}.png"
+        )
+        output_path = snapshot_dir / filename
+        try:
+            cv2.imwrite(str(output_path), annotated)
+            created += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"[assign_overtake] スナップショットの保存に失敗しました ({output_path}): {exc}")
+
+    cap.release()
+
+    if created:
+        print(f"✅ [assign_overtake] 追い越しスナップショット {created} 枚を以下に保存しました:\n   📂 {snapshot_dir}")
+    else:
+        print(f"[assign_overtake] スナップショットリクエスト {len(snapshot_requests)} 件に対し、生成された画像は 0 件でした。")
+
+    return created
+
+
+def assign_overtake(run_id: int) -> int:
+    """
+    自転車と自動車のペアが追い越しを行った瞬間のみ自転車側にフラグを付与し、
+    `overtake_by` に追い越した車両グループID、`overtake_by_second` に自転車自身のグループIDを保存する。
+    戻り値: 生成されたスナップショット枚数
+    """
+    car_aliases = _resolve_aliases("OVERTAKE_CAR_CLASSES", "car")
+    bicycle_aliases = _resolve_aliases("OVERTAKE_BICYCLE_CLASSES", "bicycle")
+
+    if not car_aliases or not bicycle_aliases:
+        print("[assign_overtake] 追い越し対象クラスが設定されていないためスキップします。")
+        return 0
+
+    video_filename: Optional[str] = None
+    source_path: Optional[str] = None
+    output_folder: Optional[str] = None
+    folder_alias: Optional[str] = None
+    calibration_profile: Optional[str] = None
+
+    calibration_data: Optional[dict] = None
+
+    with sqlite3.connect(MAIN_DB_PATH) as conn:
+        ensure_detection_distance_columns(conn)
+        ensure_overtake_event_columns(conn)
+        conn.execute(
+            """
+            UPDATE Detection
+            SET overtake = 0,
+                overtake_after = 0,
+                overtake_window_offset = NULL,
+                overtake_by = NULL,
+                overtake_by_second = NULL
+            WHERE run_id = ?
+            """,
+            (run_id,),
+        )
+
+        meta_sql = (
+            "SELECT v.fps, v.filename, v.source_path, p.output_folder, p.folder_alias, p.calibration_profile "
+            "FROM Video v JOIN ProcessLog p ON v.video_id = p.video_id WHERE p.run_id = ?"
+        )
+        meta_row = conn.execute(meta_sql, (run_id,)).fetchone()
+        if meta_row:
+            (
+                fps,
+                video_filename,
+                source_path,
+                output_folder,
+                folder_alias,
+                calibration_profile,
+            ) = meta_row
+            fps = fps or 30.0
+        else:
+            fps = 30.0
+
+        try:
+            calibration_data, _ = load_calibration_json(run_id, calibration_profile)
+        except FileNotFoundError:
+            calibration_data = None
+        except Exception as exc:  # noqa: BLE001
+            calibration_data = None
+            print(f"[assign_overtake] キャリブレーション読込に失敗したためホモグラフィを利用できません: {exc}")
+
+        df = pd.read_sql_query(
+            """
+            SELECT d.auto_id, d.frame_num, d.group_id, d.x1, d.x2, d.y1, d.y2,
+                   d.speed_km_h, d.measure_x, d.measure_y,
+                   d.approach_distance_px, d.approach_distance_m,
+                   d.clearance_distance_px, d.clearance_distance_m, d.clearance_distance_cm,
+                   d.l_line_distance, d.l_line_distance_m, d.l_line_distance_cm,
+                   d.r_line_distance, d.r_line_distance_m, d.r_line_distance_cm,
+                   d.line_distance, d.line_distance_m, d.line_distance_cm,
+                   d.travel_direction,
+                   c.class_name
+            FROM Detection AS d
+            JOIN Class AS c ON d.class_id = c.class_id
+            WHERE d.run_id = ?
+              AND d.group_id IS NOT NULL
+              AND d.model_name != 'best'
+            ORDER BY d.group_id, d.frame_num
+            """,
+            conn,
+            params=(run_id,),
+        )
+
+    if df.empty or len(df['group_id'].unique()) < 2:
+        print("追い越し相手判定スキップ: 比較対象の車両が2台未満です。")
+        return 0
+
+    df['class_name'] = df['class_name'].str.lower()
+    valid_classes = car_aliases.union(bicycle_aliases)
+    df = df[df['class_name'].isin(valid_classes)]
+
+    if df.empty:
+        print("[assign_overtake] 指定クラスの検出が存在しないためスキップします。")
+        return 0
+
+    df['center_y'] = (df['y1'] + df['y2']) / 2
+    df['center_x'] = (df['x1'] + df['x2']) / 2
+
+    measure_x = pd.to_numeric(df['measure_x'], errors='coerce')
+    measure_y = pd.to_numeric(df['measure_y'], errors='coerce')
+    df['measure_x_filled'] = measure_x.fillna(df['center_x'])
+    df['measure_y_filled'] = measure_y.fillna(df['y2'])
+
+    df['relative_y'] = df['measure_y_filled']
+    df.loc[~np.isfinite(df['relative_y']), 'relative_y'] = np.nan
+    df['relative_y'] = df['relative_y'].fillna(df['center_y'])
+
+    df['direction_norm'] = (
+        df['travel_direction']
+        .fillna('')
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+    df.loc[~df['direction_norm'].isin({'F', 'B'}), 'direction_norm'] = ''
+
+    unique_group_ids = df['group_id'].unique()
+    group_class_map = (
+        df.groupby('group_id')['class_name']
+        .agg(_select_representative_class)
+        .to_dict()
+    )
+    group_direction_map = (
+        df.groupby('group_id')['direction_norm']
+        .agg(_select_representative_class)
+        .to_dict()
+    )
+
+    bike_event_updates: List[Tuple[int, int, int]] = []
+    bike_after_auto_ids: set[int] = set()
+    events_for_overtake_table: list[tuple] = []
+    overtake_offset_updates: dict[int, int] = {}
+    max_frame_num = int(df['frame_num'].max())
+    window_radius = 30
+    snapshot_requests: List[dict] = []
+
+    def _record_offset(auto_id: Optional[int], offset: int) -> None:
+        if auto_id is None:
+            return
+        current = overtake_offset_updates.get(auto_id)
+        if current is None or abs(offset) < abs(current):
+            overtake_offset_updates[auto_id] = offset
+
+    def _capture_offsets(
+        traj: pd.DataFrame,
+        event_frame: int,
+        *,
+        after_auto_ids: Optional[set[int]] = None,
+    ) -> None:
+        if traj.empty:
+            return
+        start_frame = event_frame - window_radius
+        end_frame = event_frame + window_radius
+        window_df = traj[(traj.index >= start_frame) & (traj.index <= end_frame)]
+        if window_df.empty:
+            return
+        for frame_idx, row in window_df.iterrows():
+            auto_val = row.get('auto_id')
+            if pd.isna(auto_val):
+                continue
+            try:
+                auto_id_val = int(auto_val)
+            except (TypeError, ValueError):
+                continue
+            try:
+                frame_index = int(frame_idx)
+            except (TypeError, ValueError):
+                frame_index = event_frame
+            offset_val = frame_index - event_frame
+            if -window_radius <= offset_val <= window_radius:
+                _record_offset(auto_id_val, offset_val)
+                if after_auto_ids is not None and offset_val > 0:
+                    after_auto_ids.add(auto_id_val)
+
+    for i in tqdm(range(len(unique_group_ids)), desc="追い越し相手判定中"):
+        for j in range(i + 1, len(unique_group_ids)):
+            id_a, id_b = unique_group_ids[i], unique_group_ids[j]
+            traj_a = df[df['group_id'] == id_a].set_index('frame_num')
+            traj_b = df[df['group_id'] == id_b].set_index('frame_num')
+
+            common_frames = traj_a.index.intersection(traj_b.index)
+            if len(common_frames) < 2:
+                continue
+
+            class_a = group_class_map.get(id_a)
+            class_b = group_class_map.get(id_b)
+
+            if class_a not in valid_classes or class_b not in valid_classes:
+                continue
+
+            dir_a = group_direction_map.get(id_a, '')
+            dir_b = group_direction_map.get(id_b, '')
+            if not dir_a or not dir_b or dir_a != dir_b:
+                continue
+
+            if class_a in car_aliases and class_b in bicycle_aliases:
+                car_key, bike_key = 'A', 'B'
+                car_group_id, bike_group_id = id_a, id_b
+            elif class_b in car_aliases and class_a in bicycle_aliases:
+                car_key, bike_key = 'B', 'A'
+                car_group_id, bike_group_id = id_b, id_a
+            else:
+                continue
+
+            merged_traj = pd.concat(
+                [traj_a.loc[common_frames], traj_b.loc[common_frames]],
+                axis=1,
+                keys=['A', 'B'],
+            )
+
+            car_width_series = merged_traj[(car_key, 'x2')] - merged_traj[(car_key, 'x1')]
+            bike_width_series = merged_traj[(bike_key, 'x2')] - merged_traj[(bike_key, 'x1')]
+            width_candidates = [val for val in [car_width_series.mean(), bike_width_series.mean()] if pd.notna(val)]
+            if not width_candidates:
+                continue
+
+            lateral_distance_threshold = max(width_candidates) * 2.0
+            car_center_x = merged_traj[(car_key, 'center_x')]
+            bike_center_x = merged_traj[(bike_key, 'center_x')]
+            merged_traj['is_adjacent'] = (car_center_x - bike_center_x).abs() < lateral_distance_threshold
+
+            adjacent_traj = merged_traj[merged_traj['is_adjacent']]
+            if len(adjacent_traj) < 2:
+                continue
+
+            car_direction = adjacent_traj[(car_key, 'direction_norm')]
+            bike_direction = adjacent_traj[(bike_key, 'direction_norm')]
+            direction_mask = (
+                car_direction.notna()
+                & bike_direction.notna()
+                & (car_direction != '')
+                & (car_direction == bike_direction)
+            )
+            if not direction_mask.any():
+                continue
+
+            aligned_traj = adjacent_traj[direction_mask]
+            if len(aligned_traj) < 2:
+                continue
+
+            valid_relative = (
+                aligned_traj[(car_key, 'relative_y')].notna()
+                & aligned_traj[(bike_key, 'relative_y')].notna()
+            )
+            aligned_traj = aligned_traj[valid_relative]
+            if len(aligned_traj) < 2:
+                continue
+
+            y_diff = aligned_traj[(car_key, 'relative_y')] - aligned_traj[(bike_key, 'relative_y')]
+            prev_diff = y_diff.shift(1)
+            dirs = aligned_traj[(car_key, 'direction_norm')]
+            mask_f = (dirs == 'F') & (prev_diff > 0) & (y_diff <= 0)
+            mask_b = (dirs == 'B') & (prev_diff < 0) & (y_diff >= 0)
+            car_overtake_mask = mask_f | mask_b
+            overtake_frames = y_diff[car_overtake_mask].index
+
+            if len(overtake_frames) == 0:
+                continue
+
+            car_traj = traj_a if car_key == 'A' else traj_b
+            bike_traj = traj_b if car_key == 'A' else traj_a
+
+            for frame in overtake_frames:
+                car_row = car_traj.loc[frame]
+                bike_row = bike_traj.loc[frame]
+
+                if isinstance(car_row, pd.DataFrame):
+                    car_row = car_row.iloc[0]
+                if isinstance(bike_row, pd.DataFrame):
+                    bike_row = bike_row.iloc[0]
+
+                event_frame = int(frame)
+                car_auto_id = int(car_row['auto_id'])
+                bike_auto_id = int(bike_row['auto_id'])
+
+                bike_event_updates.append(
+                    (
+                        int(car_group_id),
+                        int(bike_group_id),
+                        bike_auto_id,
+                    )
+                )
+                _record_offset(bike_auto_id, 0)
+                _capture_offsets(bike_traj, event_frame, after_auto_ids=bike_after_auto_ids)
+
+                seconds = 5
+                frame_window = int(seconds * fps)
+                start_frame = max(0, event_frame - frame_window)
+                end_frame = min(max_frame_num, event_frame + frame_window)
+
+                speed_profile_df = car_traj[(car_traj.index >= start_frame) & (car_traj.index <= end_frame)]
+                speed_profile_dict = {
+                    f"{((idx - event_frame) / fps):.1f}s": (f"{row.speed_km_h:.1f}" if pd.notna(row.speed_km_h) else None)
+                    for idx, row in speed_profile_df.iterrows()
+                }
+
+                speed_profile_json = json.dumps(speed_profile_dict)
+
+                events_for_overtake_table.append(
+                    (
+                        run_id,
+                        event_frame,
+                        int(car_group_id),
+                        int(bike_group_id),
+                        car_auto_id,
+                        bike_auto_id,
+                        _safe_float(bike_row.get("approach_distance_px")),
+                        _safe_float(bike_row.get("approach_distance_m")),
+                        _safe_float(bike_row.get("clearance_distance_px")),
+                        _safe_float(bike_row.get("clearance_distance_m")),
+                        _safe_float(bike_row.get("clearance_distance_cm")),
+                        _safe_float(bike_row.get("l_line_distance")),
+                        _safe_float(bike_row.get("l_line_distance_m")),
+                        _safe_float(bike_row.get("l_line_distance_cm")),
+                        _safe_float(bike_row.get("r_line_distance")),
+                        _safe_float(bike_row.get("r_line_distance_m")),
+                        _safe_float(bike_row.get("r_line_distance_cm")),
+                        _safe_float(bike_row.get("line_distance")),
+                        _safe_float(bike_row.get("line_distance_m")),
+                        _safe_float(bike_row.get("line_distance_cm")),
+                        speed_profile_json,
+                    )
+                )
+
+                def _resolve_measure(row: pd.Series) -> Tuple[Optional[float], Optional[float]]:
+                    def _extract(primary: str, fallback: str) -> Optional[float]:
+                        value = row.get(primary)
+                        if value is None or (isinstance(value, float) and pd.isna(value)):
+                            value = row.get(fallback)
+                        try:
+                            return float(value) if value is not None else None
+                        except (TypeError, ValueError):
+                            return None
+
+                    return _extract("measure_x", "x2"), _extract("measure_y", "y2")
+
+                car_measure = _resolve_measure(car_row)
+                bike_measure = _resolve_measure(bike_row)
+
+                snapshot_requests.append(
+                    {
+                        "frame": event_frame,
+                        "car_group": int(car_group_id),
+                        "bike_group": int(bike_group_id),
+                        "car_measure": car_measure,
+                        "bike_measure": bike_measure,
+                        "clearance_cm": bike_row.get("clearance_distance_cm"),
+                        "clearance_m": bike_row.get("clearance_distance_m"),
+                        "clearance_px": bike_row.get("clearance_distance_px"),
+                        "approach_m": bike_row.get("approach_distance_m"),
+                        "approach_px": bike_row.get("approach_distance_px"),
+                        "l_line_distance": bike_row.get("l_line_distance"),
+                        "r_line_distance": bike_row.get("r_line_distance"),
+                        "line_distance": bike_row.get("line_distance"),
+                        "car_box": (
+                            float(car_row['x1']),
+                            float(car_row['y1']),
+                            float(car_row['x2']),
+                            float(car_row['y2']),
+                        ),
+                        "bike_box": (
+                            float(bike_row['x1']),
+                            float(bike_row['y1']),
+                            float(bike_row['x2']),
+                            float(bike_row['y2']),
+                        ),
+                    }
+                )
+
+    with sqlite3.connect(MAIN_DB_PATH) as conn:
+        c = conn.cursor()
+        if bike_event_updates:
+            c.executemany(
+                """
+                UPDATE Detection
+                SET overtake = 1,
+                    overtake_after = 0,
+                    overtake_by = ?,
+                    overtake_by_second = ?
+                WHERE auto_id = ?
+                """,
+                bike_event_updates,
+            )
+
+        if bike_after_auto_ids:
+            c.executemany(
+                "UPDATE Detection SET overtake_after = 1 WHERE auto_id = ?",
+                [(auto_id,) for auto_id in bike_after_auto_ids],
+            )
+
+        if overtake_offset_updates:
+            offset_payload = [
+                (int(offset), int(auto_id))
+                for auto_id, offset in overtake_offset_updates.items()
+            ]
+            c.executemany(
+                "UPDATE Detection SET overtake_window_offset = ? WHERE auto_id = ?",
+                offset_payload,
+            )
+
+        c.execute("DELETE FROM OvertakeEvents WHERE run_id = ?", (run_id,))
+        if events_for_overtake_table:
+            c.executemany(_OVERTAKE_EVENT_INSERT_SQL, events_for_overtake_table)
+
+        conn.commit()
+        print(
+            (
+                f"Run ID {run_id}: 自転車の追い越しフレーム{len(bike_event_updates)}件、"
+                f"追い越しイベント{len(events_for_overtake_table)}件を保存しました。"
+            )
+        )
+
+    return _export_overtake_snapshots(
+        run_id,
+        snapshot_requests,
+        output_folder=output_folder,
+        video_filename=video_filename,
+        source_path=source_path,
+        folder_alias=folder_alias,
+        calibration_profile=calibration_profile,
+        calibration_data=calibration_data,
+    )
+
+
+def summarize_run_overtakes(run_id: int) -> dict:
+    """Runの追い越しイベント統計とスナップショット一覧を取得する。"""
+    import glob
+    
+    summary = {
+        "total": 0,
+        "inner": 0,
+        "outer": 0,
+        "images": [],
+    }
+    
+    with sqlite3.connect(MAIN_DB_PATH) as conn:
+        configure_connection(conn, mode="read")
+        
+        # Count Total
+        cursor = conn.execute("SELECT COUNT(*) FROM OvertakeEvents WHERE run_id = ?", (run_id,))
+        row = cursor.fetchone()
+        if row:
+            summary["total"] = row[0]
+            
+        if summary["total"] > 0:
+            # Count Inner/Outer (using Detection's lane_position_flag for the bicycle)
+            query = """
+                SELECT d.lane_position_flag
+                FROM OvertakeEvents o
+                JOIN Detection d ON o.run_id = d.run_id AND o.overtaken_auto_id = d.auto_id
+                WHERE o.run_id = ?
+            """
+            cursor = conn.execute(query, (run_id,))
+            for (flag,) in cursor:
+                if flag == '+':
+                    summary["inner"] += 1
+                elif flag == '-':
+                    summary["outer"] += 1
+            
+            # Avg Overtake Speed (Speed of Overtaker)
+            query_speed = """
+                SELECT AVG(d.speed_km_h)
+                FROM OvertakeEvents o
+                JOIN Detection d ON o.run_id = d.run_id AND o.overtaker_auto_id = d.auto_id AND o.event_frame_num = d.frame_num
+                WHERE o.run_id = ? AND d.speed_km_h > 0
+            """
+            cursor = conn.execute(query_speed, (run_id,))
+            s_row = cursor.fetchone()
+            if s_row and s_row[0] is not None:
+                 summary["avg_overtake_speed"] = round(s_row[0], 2)
+
+        # Avg Speed (All detections in Run)
+        cursor = conn.execute("SELECT AVG(speed_km_h) FROM Detection WHERE run_id = ? AND speed_km_h > 0", (run_id,))
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            summary["avg_speed"] = round(row[0], 2)
+
+        # Get Images
+        cursor = conn.execute("SELECT output_folder FROM ProcessLog WHERE run_id = ?", (run_id,))
+        out_row = cursor.fetchone()
+        if out_row and out_row[0]:
+            out_folder = out_row[0]
+            snapshot_dir = os.path.join(out_folder, "overtake_snapshots")
+            if os.path.exists(snapshot_dir):
+                # Search for png
+                files = glob.glob(os.path.join(snapshot_dir, "*.png"))
+                
+                # Convert to relative path from OPT_FILES_PATH (output root)
+                opt_root = os.getenv("Opt_files", "output").strip('"')
+                abs_opt = os.path.abspath(opt_root)
+                
+                for f in files:
+                    abs_f = os.path.abspath(f)
+                    if abs_f.startswith(abs_opt):
+                        # Make it relative to 'output' so it can be served via /results/
+                        rel = os.path.relpath(abs_f, abs_opt).replace(os.path.sep, '/')
+                        summary["images"].append(rel)
+
+    summary["images"].sort()
+    return summary

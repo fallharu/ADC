@@ -1,0 +1,9 @@
+--- 2025 Overtake Counts ---
+Road Type: non_widened, Total Events: 2, Processed Events: 2
+Road Type: widened, Total Events: 38, Processed Events: 38
+
+--- OvertakeEvents Columns ---
+['overtake_event_id', 'run_id', 'event_frame_num', 'overtaker_group_id', 'overtaken_group_id', 'overtaker_auto_id', 'overtaken_auto_id', 'approach_distance_px', 'approach_distance_m', 'clearance_distance_px', 'clearance_distance_m', 'clearance_distance_cm', 'l_line_distance', 'l_line_distance_m', 'l_line_distance_cm', 'r_line_distance', 'r_line_distance_m', 'r_line_distance_cm', 'line_distance', 'line_distance_m', 'line_distance_cm', 'speed_profile_json']
+
+--- Detection Columns ---
+['auto_id', 'run_id', 'video_id', 'class_id', 'frame_num', 'x1', 'y1', 'x2', 'y2', 'measure_x', 'measure_y', 'model_name', 'track_id', 'confidence', 'group_id', 'approach_partner_group_id', 'approach_distance_m', 'approach_distance_px', 'clearance_distance_m', 'clearance_distance_cm', 'clearance_distance_px', 'pixel_speed', 'pixel_speed_frame', 'speed_km_h', 'overtake', 'overtake_after', 'overtake_window_offset', 'overtake_by', 'overtake_by_second', 'oncoming_flag', 'l_line_distance', 'l_line_distance_m', 'l_line_distance_cm', 'r_line_distance', 'r_line_distance_m', 'r_line_distance_cm', 'line_distance', 'line_distance_m', 'line_distance_cm', 'lane_position_flag', 'front_distance_m', 'front_vehicle_id', 'travel_direction', 'scale_pixels_per_meter', 'x_pixels_per_meter', 'acceleration_m_s2', 'acceleration_state', 'ttc_s', 'obj_id']

@@ -1,0 +1,2329 @@
+{% extends "base.html" %}
+{% block title %}手動追い越し観覧{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <ul class="nav nav-tabs" id="manualViewTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" type="button" data-manual-tab="table" role="tab">5-1. 手動追い越しテーブル観覧</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" type="button" data-manual-tab="group" role="tab">5-2. グループID別観覧</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" type="button" data-manual-tab="snapshot" role="tab">5-3. 追い越し写真生成</button>
+    </li>
+  </ul>
+</div>
+
+<div data-manual-tab-panel="table">
+  <h2 class="mb-3">5-1. 手動追い越しテーブル観覧</h2>
+  <p class="text-muted">保存済みの手動追い越しイベントをRun横断で確認できます。必要なRunを複数選択して一覧に反映してください。</p>
+
+  <style>
+    .manual-run-legend .badge {
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+
+    .manual-badge-annotated {
+      background-color: #d1e7dd;
+      color: #0f5132;
+      border-color: #badbcc;
+    }
+
+    .manual-badge-visited {
+      background-color: #cff4fc;
+      color: #055160;
+      border-color: #b6effb;
+    }
+
+    .manual-badge-new {
+      background-color: #f8f9fa;
+      color: #495057;
+      border-color: #e9ecef;
+    }
+
+    #manualViewRuns option.manual-run-option[data-status="annotated"] {
+      background-color: #d1e7dd;
+      color: #0f5132;
+      font-weight: 600;
+    }
+
+    #manualViewRuns option.manual-run-option[data-status="visited"] {
+      background-color: #cff4fc;
+      color: #055160;
+    }
+
+    #manualViewRuns option.manual-run-option[data-status="new"] {
+      background-color: #f8f9fa;
+    }
+
+    .manual-timeline-note {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .manual-timeline-status {
+      font-size: 0.75rem;
+    }
+  </style>
+
+  <form method="get" class="row g-3 align-items-end mb-3">
+    <div class="col-12 col-lg-6">
+      <label for="manualViewRuns" class="form-label small">対象Run（複数選択可）</label>
+      <div class="manual-run-legend d-flex align-items-center gap-2 mb-1 small">
+        <span class="badge rounded-pill manual-badge-annotated">付与済み</span>
+        <span class="badge rounded-pill manual-badge-visited">観覧済み</span>
+        <span class="badge rounded-pill manual-badge-new">未訪問</span>
+      </div>
+      <select id="manualViewRuns" name="run_id" class="form-select form-select-sm" multiple size="10">
+        {% for option in run_options %}
+        {% set rid = option.run_id if option.run_id is defined else option['run_id'] %}
+        {% set status = option.manual_status if option.manual_status is defined else option['manual_status'] %}
+        {% if status is none %}{% set status = 'new' %}{% endif %}
+        {% set status_label = '未訪問' %}
+        {% if status == 'annotated' %}
+        {% set status_label = '手動追い越し付与済み' %}
+        {% elif status == 'visited' %}
+        {% set status_label = '観覧済み (付与なし)' %}
+        {% endif %}
+        <option value="{{ rid }}" class="manual-run-option" data-status="{{ status }}" title="{{ status_label }}" {% if
+          rid in selected_run_ids_set %}selected{% endif %}>
+          Run #{{ rid }}{% if option.filename or option['filename'] %} - {{ option.filename if option.filename is
+          defined else option['filename'] }}{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Ctrl / Command キーを押しながらクリックすると複数選択できます。</div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+      <label for="manualViewLimit" class="form-label small">最大表示件数</label>
+      <input type="number" id="manualViewLimit" name="limit" class="form-control form-control-sm" min="1" max="2000"
+        value="{{ limit or '' }}">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-primary btn-sm">表示</button>
+    </div>
+    <div class="col-auto">
+      <a href="{{ url_for('main.manual_overtake_view') }}" class="btn btn-outline-secondary btn-sm">リセット</a>
+    </div>
+  </form>
+
+  {% set all_ids = status_groups['all'] if status_groups is defined and 'all' in status_groups else [] %}
+  {% set annotated_ids = status_groups['annotated'] if status_groups is defined and 'annotated' in status_groups else []
+  %}
+  {% set visited_ids = status_groups['visited'] if status_groups is defined and 'visited' in status_groups else [] %}
+  {% set new_ids = status_groups['new'] if status_groups is defined and 'new' in status_groups else [] %}
+
+  <div class="alert alert-warning small">
+    手動追い越しデータや観覧ステータスをまとめて初期化したい場合は、対象のカテゴリを選んでリセットしてください。
+    「付与済み」はイベントと観覧ステータスを、「観覧済み」「未訪問」は観覧ステータスのみをリセットします。
+  </div>
+
+  <div class="alert alert-primary d-flex flex-wrap justify-content-between align-items-center gap-3">
+    <div>
+      <div class="fw-semibold">手動追い越しで後処理</div>
+      <div class="small text-muted mb-0">選択Runまたは後処理待ちをまとめてキューへ投入し、再計算を開始します。</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <div class="d-flex flex-column align-items-end">
+        <div class="small text-muted">現在の追い越し総数</div>
+        <div class="d-flex flex-wrap gap-1 justify-content-end">
+          <span class="badge bg-secondary text-light">選択Run {{ manual_event_total_selected }}件</span>
+          <span class="badge bg-dark">全体 {{ manual_event_total }}件</span>
+        </div>
+      </div>
+      <div class="input-group input-group-sm" style="width: 210px;">
+        <span class="input-group-text">白線間隔(m)</span>
+        <input type="number" step="0.1" min="0.1" class="form-control" id="manualLaneWidthInput"
+          value="{{ lane_width_default|default(8.0) }}" aria-describedby="laneWidthHelp">
+      </div>
+      <div class="form-text text-end w-100" id="laneWidthHelp">後処理前に道幅(既定8m)を設定してください。</div>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="manualCalibrationButton"
+        data-calibration-url="{{ url_for('main.manual_overtake_events_api', run_id=0, calibration='recreate') }}">
+        キャリブレーション再作成
+      </button>
+      <button type="button" class="btn btn-primary" data-manual-process-trigger="context"
+        data-process-url="{{ url_for('main.manual_overtake_context_process_api') }}"
+        data-status-url="{{ url_for('main.manual_overtake_context_backlog_status_api') }}" data-batch-size="5">
+        手動追い越しで後処理
+      </button>
+    </div>
+  </div>
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <form method="post" action="{{ url_for('main.manual_overtake_reset') }}" class="d-inline">
+      <input type="hidden" name="scope" value="all">
+      <input type="hidden" name="run_ids" value="{{ all_ids|join(',') }}">
+      <button type="submit" class="btn btn-outline-danger btn-sm" {% if not all_ids %}disabled{% else %}
+        onclick="return confirm('全Runの手動追い越しイベントとステータスを初期化します。よろしいですか？');" {% endif %}>
+        すべてのデータをリセット ({{ all_ids|length }})
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('main.manual_overtake_reset') }}" class="d-inline">
+      <input type="hidden" name="scope" value="all">
+      <input type="hidden" name="run_ids" value="{{ annotated_ids|join(',') }}">
+      <button type="submit" class="btn btn-outline-warning btn-sm" {% if not annotated_ids %}disabled{% else %}
+        onclick="return confirm('付与済みRunの手動追い越しイベントとステータスを初期化します。よろしいですか？');" {% endif %}>
+        付与済みをリセット ({{ annotated_ids|length }})
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('main.manual_overtake_reset') }}" class="d-inline">
+      <input type="hidden" name="scope" value="progress">
+      <input type="hidden" name="run_ids" value="{{ visited_ids|join(',') }}">
+      <button type="submit" class="btn btn-outline-secondary btn-sm" {% if not visited_ids %}disabled{% else %}
+        onclick="return confirm('観覧済みRunの観覧ステータスを未訪問に戻します。よろしいですか？');" {% endif %}>
+        観覧済みをリセット ({{ visited_ids|length }})
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('main.manual_overtake_reset') }}" class="d-inline">
+      <input type="hidden" name="scope" value="progress">
+      <input type="hidden" name="run_ids" value="{{ new_ids|join(',') }}">
+      <button type="submit" class="btn btn-outline-secondary btn-sm" {% if not new_ids %}disabled{% else %}
+        onclick="return confirm('未訪問Runの観覧ステータスを初期化します。よろしいですか？');" {% endif %}>
+        未訪問をリセット ({{ new_ids|length }})
+      </button>
+    </form>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body py-2">
+      <form method="get" action="{{ url_for('main.manual_overtake_export') }}" class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label for="exportScope" class="form-label small mb-0">出力対象</label>
+          <select class="form-select form-select-sm" id="exportScope" name="scope" style="min-width: 180px;">
+            <option value="events">選択Run (イベントのみ)</option>
+            <option value="context">選択Run (全フレーム)</option>
+            <option value="context_legacy">選択Run (従来±150f)</option>
+            <option value="context_fixed">選択Run (修正グループ)</option>
+            <option value="groups">選択Run (グループ別)</option>
+            <hr>
+            <option value="all_events">全Run (イベントのみ)</option>
+            <option value="all_context">全Run (全フレーム)</option>
+            <option value="range">Run範囲指定</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label small mb-0">Run範囲 (指定時)</label>
+          <div class="input-group input-group-sm">
+            <input type="number" name="range_start" class="form-control" placeholder="開始" style="width: 70px;">
+            <span class="input-group-text">〜</span>
+            <input type="number" name="range_end" class="form-control" placeholder="終了" style="width: 70px;">
+          </div>
+        </div>
+        <div class="col-auto">
+          <label for="exportFormat" class="form-label small mb-0">形式</label>
+          <select class="form-select form-select-sm" id="exportFormat" name="format">
+            <option value="csv">CSV</option>
+            <option value="xlsx">Excel</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label for="exportLimit" class="form-label small mb-0">制限</label>
+          <input type="number" name="limit" id="exportLimit" class="form-control form-control-sm" placeholder="件数"
+            value="{{ limit or '' }}" style="width: 80px;">
+        </div>
+        {% for rid in selected_run_ids %}
+        <input type="hidden" name="run_id" value="{{ rid }}">
+        {% endfor %}
+        <div class="col-auto">
+          <button type="submit" class="btn btn-primary btn-sm">
+            <i class="bi bi-download"></i> エクスポート
+          </button>
+        </div>
+        <div class="col-auto ms-auto small text-muted align-self-center">
+          イベントCSV/Excelは、選択したスコープに応じて必要なデータを出力します。
+        </div>
+      </form>
+    </div>
+  </div>
+
+<div class="card shadow-sm mt-4">
+  <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <div class="fw-semibold">追い越しタイムライン</div>
+      <div class="small text-muted">動画ごとに記録した追い越しタイミングと再処理状況を確認できます。</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      {% if timeline_total %}
+      <span class="badge bg-secondary text-light rounded-pill">記録 {{ timeline_total }}件</span>
+      {% endif %}
+      {% if context_backlog_total %}
+      <span class="badge bg-warning text-dark rounded-pill">手動後処理待ち {{ context_backlog_total }}件</span>
+      {% endif %}
+      <form method="post" action="{{ url_for('main.manual_overtake_context_process') }}" class="d-inline">
+        {% for rid in selected_run_ids %}
+        <input type="hidden" name="run_id" value="{{ rid }}">
+        {% endfor %}
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="manualTimelineProcessButton"
+          data-manual-process-trigger="context"
+          data-process-url="{{ url_for('main.manual_overtake_context_process_api') }}"
+          data-status-url="{{ url_for('main.manual_overtake_context_backlog_status_api') }}" data-batch-size="5" {% if
+          not selected_run_ids and not context_backlog_total %}disabled{% endif %}>
+          手動追い越しで後処理
+        </button>
+      </form>
+      <form method="post" action="{{ url_for('main.manual_overtake_reprocess') }}" class="d-inline">
+        {% for rid in selected_run_ids %}
+        <input type="hidden" name="run_id" value="{{ rid }}">
+        {% endfor %}
+        <button type="submit" class="btn btn-outline-primary btn-sm" {% if not selected_run_ids %}disabled{% endif %}>
+          {% if selected_run_ids %}選択Runを再処理{% else %}Runを選択{% endif %}
+        </button>
+      </form>
+    </div>
+  </div>
+  <div class="card-body">
+    <div id="manualTimelineProcessStatus" class="mb-3 d-none"
+      data-backlog-summary='{{ (context_backlog_summary or {}) | tojson | safe }}'
+      data-backlog-status='{{ {"status_totals": context_backlog_status or {}, "pending_total": context_backlog_total, "backlog_total": context_backlog_status_total} | tojson | safe }}'>
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <div class="spinner-border spinner-border-sm text-warning d-none" role="status" data-progress-spinner
+          aria-hidden="true"></div>
+        <div class="small" data-progress-label></div>
+      </div>
+      <div class="progress" style="height: 0.75rem;">
+        <div class="progress-bar" role="progressbar" data-progress-bar style="width: 0%;" aria-valuenow="0"
+          aria-valuemin="0" aria-valuemax="100">0%</div>
+      </div>
+      <div class="small text-muted mt-2" data-progress-note></div>
+      <div class="small text-warning mt-1 d-none" data-progress-notices></div>
+    </div>
+    {% if not selected_run_ids %}
+    <p class="text-muted mb-0">左のリストからRunを選択すると、追い越しタイムラインが表示されます。</p>
+    {% elif not timeline_grouped %}
+    <p class="text-muted mb-0">選択したRunに記録されたタイムラインはありません。再処理ボタンを押すと既存の手動追い越しイベントから再計算できます。</p>
+    {% else %}
+    {% for run_id, entries in timeline_grouped.items() %}
+    {% set summary = timeline_summary.get(run_id) %}
+    {% if summary is none %}
+    {% set summary = {'total': entries|length, 'processed': 0, 'pending': entries|length} %}
+    {% endif %}
+    <div class="mb-4">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <div>
+          <h6 class="mb-0">Run #{{ run_id }}{% if run_label_map.get(run_id) %}<span class="small text-muted"> / {{
+              run_label_map[run_id] }}</span>{% endif %}</h6>
+          <div class="small text-muted">記録 {{ summary['total'] }} 件 / 再処理済み {{ summary['processed'] }} 件 / 未処理 {{
+            summary['pending'] }} 件</div>
+          {% set backlog_pending = context_backlog_summary.get(run_id, 0) %}
+          {% if backlog_pending %}
+          <div class="small text-warning">手動後処理待ち {{ backlog_pending }} 件</div>
+          {% endif %}
+        </div>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <span class="badge bg-success text-light manual-timeline-status">再処理済み {{ summary['processed'] }}</span>
+          <span class="badge bg-warning text-dark manual-timeline-status">未処理 {{ summary['pending'] }}</span>
+          <form method="post" action="{{ url_for('main.manual_overtake_reprocess') }}" class="d-inline">
+            <input type="hidden" name="run_id" value="{{ run_id }}">
+            <button type="submit" class="btn btn-outline-primary btn-sm">このRunを再処理</button>
+          </form>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-striped table-bordered align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">フレーム</th>
+              <th scope="col">Group</th>
+              <th scope="col">ノート</th>
+              <th scope="col">イベントID</th>
+              <th scope="col">ステータス</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in entries %}
+            {% set processed = entry.last_processed_at %}
+            <tr{% if not processed %} class="table-warning" {% endif %}>
+              <td>{{ entry.timeline_id }}</td>
+              <td>
+                <div>Frame {{ entry.frame_num }}</div>
+                <div class="small text-muted">記録: {{ entry.created_at|default('-', true) }}</div>
+              </td>
+              <td>
+                <span class="fw-semibold">{{ entry.overtaker_group_id }}</span>
+                <span class="text-muted">→</span>
+                <span class="fw-semibold">{{ entry.overtaken_group_id }}</span>
+              </td>
+              <td class="manual-timeline-note">{{ entry.notes|default('-', true) }}</td>
+              <td>
+                {% if entry.last_event_id is not none %}
+                <span class="badge bg-primary">{{ entry.last_event_id }}</span>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if processed %}
+                <span class="badge bg-success text-light">再処理済み</span>
+                <div class="small text-muted">最終再処理: {{ processed }}</div>
+                {% else %}
+                <span class="badge bg-warning text-dark">未処理</span>
+                {% endif %}
+                <div class="small text-muted">最終更新: {{ entry.updated_at|default('-', true) }}</div>
+              </td>
+              </tr>
+              {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
+<div class="card shadow-sm mt-4">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span>グループ出現フレーム コンテキスト一覧</span>
+    <span class="small text-muted">選択したRunの追い越しイベントに紐づく、追い越し側/追い越され側グループが映る全フレームのBBOXと速度・距離を確認できます。</span>
+  </div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">イベントID</th>
+            <th scope="col">Run</th>
+            <th scope="col">動画名</th>
+            <th scope="col">オフセット</th>
+            <th scope="col">フレーム</th>
+            <th scope="col">動画時間(s)</th>
+            <th scope="col">追い越し側 Group/Track</th>
+            <th scope="col">追い越し側BBOX(x1,y1,x2,y2)</th>
+            <th scope="col">追い越し側 速度</th>
+            <th scope="col">追い越され側 Group/Track</th>
+            <th scope="col">追い越され側BBOX(x1,y1,x2,y2)</th>
+            <th scope="col">追い越され側 速度</th>
+            <th scope="col">離隔距離</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if context_rows %}
+          {% for row in context_rows %}
+          <tr>
+            <td>{{ row.manual_event_id }}</td>
+            <td>{{ row.run_id }}</td>
+            <td>{{ row.video_filename or '-' }}</td>
+            <td>{{ row.offset_frames }}</td>
+            <td>{{ row.frame_num }}</td>
+            <td>{{ row.video_time_s is not none and "%.2f"|format(row.video_time_s) or '-' }}</td>
+            <td>
+              <div>Group {{ row.overtaker_group_id }}</div>
+              <div class="text-muted small">Track {{ row.overtaker_track_id if row.overtaker_track_id is not none else
+                '-' }}</div>
+            </td>
+            <td>
+              {% set ctx_ot_x1 = row.overtaker_x1 %}
+              {% set ctx_ot_y1 = row.overtaker_y1 %}
+              {% set ctx_ot_x2 = row.overtaker_x2 %}
+              {% set ctx_ot_y2 = row.overtaker_y2 %}
+              {% if ctx_ot_x1 is not none or ctx_ot_y1 is not none or ctx_ot_x2 is not none or ctx_ot_y2 is not none %}
+              <div class="text-muted small">({{ ctx_ot_x1 is not none and "%.1f"|format(ctx_ot_x1) or '-' }}, {{
+                ctx_ot_y1 is not none and "%.1f"|format(ctx_ot_y1) or '-' }}) → ({{ ctx_ot_x2 is not none and
+                "%.1f"|format(ctx_ot_x2) or '-' }}, {{ ctx_ot_y2 is not none and "%.1f"|format(ctx_ot_y2) or '-' }})
+              </div>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>
+              {% if row.overtaker_speed_km_h is not none %}
+              <div>{{ "%.1f"|format(row.overtaker_speed_km_h) }} km/h</div>
+              {% endif %}
+              {% if row.overtaker_pixel_speed is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(row.overtaker_pixel_speed) }} px/s</div>
+              {% endif %}
+              {% if row.overtaker_pixel_speed_frame is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(row.overtaker_pixel_speed_frame) }} px/f</div>
+              {% endif %}
+            </td>
+            <td>
+              <div>Group {{ row.overtaken_group_id }}</div>
+              <div class="text-muted small">Track {{ row.overtaken_track_id if row.overtaken_track_id is not none else
+                '-' }}</div>
+            </td>
+            <td>
+              {% set ctx_on_x1 = row.overtaken_x1 %}
+              {% set ctx_on_y1 = row.overtaken_y1 %}
+              {% set ctx_on_x2 = row.overtaken_x2 %}
+              {% set ctx_on_y2 = row.overtaken_y2 %}
+              {% if ctx_on_x1 is not none or ctx_on_y1 is not none or ctx_on_x2 is not none or ctx_on_y2 is not none %}
+              <div class="text-muted small">({{ ctx_on_x1 is not none and "%.1f"|format(ctx_on_x1) or '-' }}, {{
+                ctx_on_y1 is not none and "%.1f"|format(ctx_on_y1) or '-' }}) → ({{ ctx_on_x2 is not none and
+                "%.1f"|format(ctx_on_x2) or '-' }}, {{ ctx_on_y2 is not none and "%.1f"|format(ctx_on_y2) or '-' }})
+              </div>
+              {% else %}
+              -
+              {% endif %}
+            </td>
+            <td>
+              {% if row.overtaken_speed_km_h is not none %}
+              <div>{{ "%.1f"|format(row.overtaken_speed_km_h) }} km/h</div>
+              {% endif %}
+              {% if row.overtaken_pixel_speed is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(row.overtaken_pixel_speed) }} px/s</div>
+              {% endif %}
+              {% if row.overtaken_pixel_speed_frame is not none %}
+              <div class="text-muted small">{{ "%.1f"|format(row.overtaken_pixel_speed_frame) }} px/f</div>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.clearance_distance_cm is not none %}
+              <div>{{ "%.0f"|format(row.clearance_distance_cm) }} cm</div>
+              {% endif %}
+              {% if row.clearance_distance_m is not none %}
+              <div class="text-muted small">{{ "%.2f"|format(row.clearance_distance_m) }} m</div>
+              {% endif %}
+              {% if row.clearance_distance_px is not none %}
+              <div class="text-muted small">{{ "%.0f"|format(row.clearance_distance_px) }} px</div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+          {% else %}
+          <tr>
+            <td colspan="13" class="text-center text-muted py-3">追い越し側/追い越され側グループのコンテキストデータがまだ登録されていません。</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <button type="button" class="btn btn-outline-primary btn-sm" id="manualDbCheckButton"
+    data-check-url="{{ url_for('main.manual_overtake_db_link_check') }}" data-default-label="手動追い越しDB連携確認"
+    data-sample-limit="5">
+    手動追い越しDB連携確認
+  </button>
+  <div id="manualDbCheckSummary" class="small flex-grow-1 text-muted"></div>
+</div>
+
+<div id="manualViewMessage" class="alert alert-info small d-none"></div>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+  <div class="input-group input-group-sm" style="max-width: 320px;">
+    <span class="input-group-text">イベント検索</span>
+    <input type="search" id="manualViewSearch" class="form-control" placeholder="Run / Group / Track などのキーワード">
+  </div>
+  <div id="manualViewSearchSummary" class="small text-muted"></div>
+</div>
+
+<div class="table-responsive">
+  <table id="manualViewTable" class="table table-hover table-striped table-sm align-middle"
+    data-delete-url-base="{{ url_for('main.manual_overtake_delete', manual_event_id=0)[:-1] }}"
+    data-scale-info-base="{{ url_for('main.manual_overtake_scale_info', manual_event_id=0)[:-1] }}"
+    data-scale-image-base="{{ url_for('main.manual_overtake_scale_image', manual_event_id=0)[:-1] }}"
+    data-snapshot-info-base="{{ url_for('main.manual_overtake_snapshot_info', manual_event_id=0)[:-1] }}"
+    data-snapshot-image-base="{{ url_for('main.manual_overtake_snapshot_image', manual_event_id=0)[:-1] }}">
+    <thead class="table-light">
+      <tr>
+        <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">イベント概要</th>
+        <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">追い越し側</th>
+        <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">追い越され側</th>
+        <th scope="col" class="text-nowrap align-top" style="min-width: 240px;">Distance / scale</th>
+        <th scope="col" class="text-nowrap align-top" style="min-width: 140px;">操作</th>
+      </tr>
+    </thead>
+    <tbody id="manualViewBody">
+      {% if events %}
+      {% for event in events %}
+      <tr data-event-row="1">
+        <td class="align-top">
+          <div class="fw-bold">ID {{ event.manual_event_id }}</div>
+          <div class="small text-muted">Run {{ event.run_id }} / Frame {{ event.frame_num }}</div>
+          <div class="small">{{ event.video_filename or '-' }}</div>
+          <div class="small text-muted">{{ event.video_time_s is not none and "%.2f秒"|format(event.video_time_s) or
+            "動画時間 -" }}</div>
+          <div class="small text-muted">登録: {{ event.created_at or '-' }}</div>
+          {% if event.notes %}
+          <div class="badge bg-light text-dark mt-1">メモ: {{ event.notes }}</div>
+          {% endif %}
+        </td>
+        <td class="align-top">
+          <div class="fw-bold">Group {{ event.overtaker_group_id }}</div>
+          <div class="small text-muted">{{ event.overtaker_class_name or '-' }}</div>
+          <div class="small text-muted">Track {{ event.overtaker_track_id if event.overtaker_track_id is not none else
+            '-' }}</div>
+          {% set ot_mx = event.overtaker_measure_x %}
+          {% set ot_my = event.overtaker_measure_y %}
+          <div class="small text-muted">測定点: {{ ot_mx is not none and "%.1f"|format(ot_mx) or '-' }}, {{ ot_my is not
+            none and "%.1f"|format(ot_my) or '-' }}</div>
+          {% set ot_x1 = event.overtaker_x1 %}
+          {% set ot_y1 = event.overtaker_y1 %}
+          {% set ot_x2 = event.overtaker_x2 %}
+          {% set ot_y2 = event.overtaker_y2 %}
+          <div class="small text-muted">BBOX: {% if ot_x1 is not none or ot_y1 is not none or ot_x2 is not none or ot_y2
+            is not none %}({{ ot_x1 is not none and "%.1f"|format(ot_x1) or '-' }}, {{ ot_y1 is not none and
+            "%.1f"|format(ot_y1) or '-' }}) → ({{ ot_x2 is not none and "%.1f"|format(ot_x2) or '-' }}, {{ ot_y2 is not
+            none and "%.1f"|format(ot_y2) or '-' }}){% else %}-{% endif %}</div>
+          <div class="mt-1">
+            <span class="badge bg-primary text-light">{{ event.overtaker_speed_km_h is not none and "%.1f
+              km/h"|format(event.overtaker_speed_km_h) or "速度 -" }}</span>
+            {% if event.overtaker_pixel_speed is not none %}
+            <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaker_pixel_speed) }}
+              px/s</span>
+            {% endif %}
+            {% if event.overtaker_pixel_speed_frame is not none %}
+            <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaker_pixel_speed_frame) }}
+              px/f</span>
+            {% endif %}
+          </div>
+        </td>
+        <td class="align-top">
+          <div class="fw-bold">Group {{ event.overtaken_group_id }}</div>
+          <div class="small text-muted">{{ event.overtaken_class_name or '-' }}</div>
+          <div class="small text-muted">Track {{ event.overtaken_track_id if event.overtaken_track_id is not none else
+            '-' }}</div>
+          {% set on_mx = event.overtaken_measure_x %}
+          {% set on_my = event.overtaken_measure_y %}
+          <div class="small text-muted">測定点: {{ on_mx is not none and "%.1f"|format(on_mx) or '-' }}, {{ on_my is not
+            none and "%.1f"|format(on_my) or '-' }}</div>
+          {% set on_x1 = event.overtaken_x1 %}
+          {% set on_y1 = event.overtaken_y1 %}
+          {% set on_x2 = event.overtaken_x2 %}
+          {% set on_y2 = event.overtaken_y2 %}
+          <div class="small text-muted">BBOX: {% if on_x1 is not none or on_y1 is not none or on_x2 is not none or on_y2
+            is not none %}({{ on_x1 is not none and "%.1f"|format(on_x1) or '-' }}, {{ on_y1 is not none and
+            "%.1f"|format(on_y1) or '-' }}) → ({{ on_x2 is not none and "%.1f"|format(on_x2) or '-' }}, {{ on_y2 is not
+            none and "%.1f"|format(on_y2) or '-' }}){% else %}-{% endif %}</div>
+          <div class="mt-1">
+            <span class="badge bg-primary text-light">{{ event.overtaken_speed_km_h is not none and "%.1f
+              km/h"|format(event.overtaken_speed_km_h) or "速度 -" }}</span>
+            {% if event.overtaken_pixel_speed is not none %}
+            <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaken_pixel_speed) }}
+              px/s</span>
+            {% endif %}
+            {% if event.overtaken_pixel_speed_frame is not none %}
+            <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaken_pixel_speed_frame) }}
+              px/f</span>
+            {% endif %}
+          </div>
+        </td>
+        <td class="align-top">
+          <div>
+            <span class="fw-bold">接近距離:</span>
+            {{ event.approach_distance_m is not none and "%.2f m"|format(event.approach_distance_m) or '-' }}
+          </div>
+          <div>
+            <span class="fw-bold">離隔距離:</span>
+            {% if event.clearance_distance_cm is not none %}
+            {{ "%.0f cm"|format(event.clearance_distance_cm) }}
+            {% elif event.clearance_distance_m is not none %}
+            {{ "%.2f m"|format(event.clearance_distance_m) }}
+            {% else %}
+            -
+            {% endif %}
+            {% if event.clearance_distance_px is not none %}
+            <span class="text-muted small ms-1">({{ "%.0f"|format(event.clearance_distance_px) }} px)</span>
+            {% endif %}
+            {% if event.clearance_distance_px_ratio is not none %}
+            <span class="badge bg-light text-dark border ms-1">比率 {{ "%.1f"|format(event.clearance_distance_px_ratio)
+              }}%</span>
+            {% endif %}
+          </div>
+          <div class="small text-muted mt-2">追い越し側 白線距離:</div>
+          <div class="small">
+            {{ event.overtaker_line_distance_cm is not none and "%.0f cm"|format(event.overtaker_line_distance_cm) or
+            event.overtaker_line_distance_m is not none and "%.2f m"|format(event.overtaker_line_distance_m) or '-' }}
+            / {{ event.overtaker_line_distance_px is not none and "%.0f px"|format(event.overtaker_line_distance_px) or
+            '-' }}
+            {% if event.overtaker_line_distance_px_ratio is not none %}
+            <span class="text-muted">(比率 {{ "%.1f"|format(event.overtaker_line_distance_px_ratio) }}%)</span>
+            {% endif %}
+          </div>
+          <div class="small text-muted mt-2">追い越され側 白線距離:</div>
+          <div class="small">
+            {{ event.overtaken_line_distance_cm is not none and "%.0f cm"|format(event.overtaken_line_distance_cm) or
+            event.overtaken_line_distance_m is not none and "%.2f m"|format(event.overtaken_line_distance_m) or '-' }}
+            / {{ event.overtaken_line_distance_px is not none and "%.0f px"|format(event.overtaken_line_distance_px) or
+            '-' }}
+            {% if event.overtaken_line_distance_px_ratio is not none %}
+            <span class="text-muted">(比率 {{ "%.1f"|format(event.overtaken_line_distance_px_ratio) }}%)</span>
+            {% endif %}
+          </div>
+        </td>
+        <td class="text-end text-nowrap align-top">
+          <div class="d-flex flex-column gap-2 align-items-end">
+            <button type="button" class="btn btn-outline-success btn-sm"
+              data-snapshot-preview="{{ event.manual_event_id }}">追い越し写真</button>
+            <button type="button" class="btn btn-outline-primary btn-sm"
+              data-scale-preview="{{ event.manual_event_id }}">View scale</button>
+            <button type="button" class="btn btn-outline-danger btn-sm"
+              data-manual-delete="{{ event.manual_event_id }}">削除</button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+      <tr data-no-match-row class="d-none">
+        <td colspan="5" class="text-center text-muted py-4">検索条件に一致する手動追い越しイベントがありません。</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5" class="text-center text-muted py-4">該当する手動追い越しイベントがありません。</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+</div>
+
+<div data-manual-tab-panel="group" class="d-none">
+  <hr class="my-5">
+  <h2 class="mb-3">5-2. グループID別観覧</h2>
+  <p class="text-muted">追い越し側/追い越され側をグループ単位で並べ替えた一覧です。ここからも写真生成モーダルを呼び出せます。</p>
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+    <div class="input-group input-group-sm" style="max-width: 320px;">
+      <span class="input-group-text">グループ検索</span>
+      <input type="search" id="manualGroupSearch" class="form-control" placeholder="Group / Run / 役割 などのキーワード">
+    </div>
+    <div id="manualGroupSearchSummary" class="small text-muted"></div>
+  </div>
+
+  <div class="table-responsive">
+    <table id="manualGroupTable" class="table table-hover table-striped table-sm align-middle">
+      <thead class="table-light">
+        <tr>
+          <th scope="col" class="text-nowrap" style="min-width: 140px;">イベント/時間</th>
+          <th scope="col" class="text-nowrap" style="min-width: 160px;">役割・Group</th>
+          <th scope="col" class="text-nowrap" style="min-width: 180px;">クラス/BBOX</th>
+          <th scope="col" class="text-nowrap" style="min-width: 200px;">白線距離</th>
+          <th scope="col" class="text-nowrap" style="min-width: 140px;">離隔距離</th>
+          <th scope="col" class="text-nowrap" style="min-width: 120px;">操作</th>
+        </tr>
+      </thead>
+      <tbody id="manualGroupBody">
+        {% if group_rows %}
+        {% for row in group_rows %}
+        <tr data-group-row="1">
+          <td class="small">
+            <div class="fw-bold">ID {{ row.manual_event_id }}</div>
+            <div class="text-muted">Run {{ row.run_id }} / Frame {{ row.frame_num }}</div>
+            <div class="text-muted">{{ row.video_time_s is not none and "%.2f秒"|format(row.video_time_s) or "動画時間 -" }}
+            </div>
+            <div class="text-muted">道幅: {{ row.lane_width_m is not none and "%.1f m"|format(row.lane_width_m) or '-' }}
+            </div>
+          </td>
+          <td class="small">
+            <div class="fw-bold">{{ row.role }} (Group {{ row.group_id }})</div>
+            <div class="text-muted">相手: Group {{ row.partner_group_id or '-' }}</div>
+            <div class="text-muted">Track {{ row.track_id is not none and row.track_id or '-' }}</div>
+          </td>
+          <td class="small">
+            <div>{{ row.class_name or '-' }}</div>
+            {% set bx1 = row.bbox_x1 %}
+            {% set by1 = row.bbox_y1 %}
+            {% set bx2 = row.bbox_x2 %}
+            {% set by2 = row.bbox_y2 %}
+            <div class="text-muted">BBOX: {% if bx1 is not none or by1 is not none or bx2 is not none or by2 is not none
+              %}({{ bx1 is not none and "%.1f"|format(bx1) or '-' }}, {{ by1 is not none and "%.1f"|format(by1) or '-'
+              }}) → ({{ bx2 is not none and "%.1f"|format(bx2) or '-' }}, {{ by2 is not none and "%.1f"|format(by2) or
+              '-' }}){% else %}-{% endif %}</div>
+            <div class="text-muted">測定点: {{ row.measure_x is not none and "%.1f"|format(row.measure_x) or '-' }}, {{
+              row.measure_y is not none and "%.1f"|format(row.measure_y) or '-' }}</div>
+          </td>
+          <td class="small">
+            <div>白線距離: {{ row.line_distance_m is not none and "%.2f m"|format(row.line_distance_m) or
+              row.line_distance_cm is not none and "%.0f cm"|format(row.line_distance_cm) or '-' }}</div>
+            <div class="text-muted">{{ row.line_distance_px is not none and "%.0f px"|format(row.line_distance_px) or
+              '-' }} {% if row.line_distance_px_ratio is not none %}(比率 {{ "%.1f"|format(row.line_distance_px_ratio)
+              }}%) {% endif %}</div>
+            <div class="text-muted">判定: {{ row.lane_position_flag or '-' }}</div>
+          </td>
+          <td class="small">
+            <div>{{ row.clearance_distance_m is not none and "%.2f m"|format(row.clearance_distance_m) or
+              row.clearance_distance_cm is not none and "%.0f cm"|format(row.clearance_distance_cm) or '-' }}</div>
+            <div class="text-muted">{{ row.clearance_distance_px is not none and "%.0f
+              px"|format(row.clearance_distance_px) or '-' }}</div>
+          </td>
+          <td class="text-end">
+            <button type="button" class="btn btn-outline-success btn-sm"
+              data-snapshot-preview="{{ row.manual_event_id }}">追い越し写真</button>
+          </td>
+        </tr>
+        {% endfor %}
+        <tr class="d-none" data-group-no-match="1">
+          <td colspan="6" class="text-center text-muted py-3">検索条件に一致する行がありません。</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" class="text-center text-muted py-3" data-group-empty="1">グループID別の手動追い越しデータがありません。</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<div data-manual-tab-panel="snapshot" class="d-none">
+  <hr class="my-5">
+  <h2 class="mb-3">5-3. 追い越し写真生成</h2>
+  <p class="text-muted">追い越しイベントを写真付きで確認したいときはここから生成できます。Runやイベントを検索して「追い越し写真」を押してください。</p>
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+    <div class="input-group input-group-sm" style="max-width: 320px;">
+      <span class="input-group-text">イベント検索</span>
+      <input type="search" id="manualSnapshotSearch" class="form-control" placeholder="イベントID / Run / Frame / 距離など">
+    </div>
+    <div class="input-group input-group-sm" style="max-width: 240px;">
+      <span class="input-group-text">グループID</span>
+      <select id="manualSnapshotGroup" class="form-select">
+        <option value="">すべて</option>
+        {% for gid in snapshot_group_options %}
+        <option value="{{ gid }}">Group {{ gid }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="manualSnapshotSearchSummary" class="small text-muted"></div>
+  </div>
+
+  <div class="table-responsive">
+    <table id="manualSnapshotTable" class="table table-hover table-striped table-sm align-middle">
+      <thead class="table-light">
+        <tr>
+          <th scope="col" class="text-nowrap">イベント/時間</th>
+          <th scope="col" class="text-nowrap">距離サマリ</th>
+          <th scope="col" class="text-nowrap">道幅</th>
+          <th scope="col" class="text-nowrap">操作</th>
+        </tr>
+      </thead>
+      <tbody id="manualSnapshotBody">
+        {% if event_rows %}
+        {% for event in event_rows %}
+        <tr data-snapshot-row="1"
+          data-overtaker-group="{{ event.overtaker_group_id if event.overtaker_group_id is not none else '' }}"
+          data-overtaken-group="{{ event.overtaken_group_id if event.overtaken_group_id is not none else '' }}">
+          <td class="small">
+            <div class="fw-bold">ID {{ event.manual_event_id }}</div>
+            <div class="text-muted">Run {{ event.run_id }} / Frame {{ event.frame_num }}</div>
+            <div class="text-muted">{{ event.video_time_s is not none and "%.2f秒"|format(event.video_time_s) or "動画時間 -"
+              }}</div>
+            <div class="text-muted">Groups: {{ event.overtaker_group_id or '-' }} vs {{ event.overtaken_group_id or '-'
+              }}</div>
+          </td>
+          <td class="small">
+            <div>白線距離: {{ event.overtaker_line_distance_cm is not none and "%.0f
+              cm"|format(event.overtaker_line_distance_cm) or event.overtaker_line_distance_m is not none and "%.2f
+              m"|format(event.overtaker_line_distance_m) or '-' }}</div>
+            <div>離隔距離: {% if event.clearance_distance_cm is not none %}{{ "%.0f cm"|format(event.clearance_distance_cm)
+              }}{% elif event.clearance_distance_m is not none %}{{ "%.2f m"|format(event.clearance_distance_m) }}{%
+              else %}-{% endif %}</div>
+            <div class="text-muted small">比率: {{ event.clearance_distance_px_ratio is not none and
+              "%.1f%%"|format(event.clearance_distance_px_ratio) or '-' }}</div>
+          </td>
+          <td class="small">
+            {{ event.lane_width_m is not none and "%.1f m"|format(event.lane_width_m) or '-' }}
+          </td>
+          <td class="text-end text-nowrap">
+            <button type="button" class="btn btn-outline-success btn-sm"
+              data-snapshot-preview="{{ event.manual_event_id }}">追い越し写真</button>
+          </td>
+        </tr>
+        {% endfor %}
+        <tr class="d-none" data-snapshot-no-match="1">
+          <td colspan="4" class="text-center text-muted py-3">検索条件に一致するイベントがありません。</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="text-center text-muted py-3" data-snapshot-empty="1">追い越しイベントがありません。</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="modal fade" id="manualSnapshotModal" tabindex="-1" aria-labelledby="manualSnapshotModalLabel"
+  aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="manualSnapshotModalLabel">追い越し時写真</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div data-snapshot-loading class="text-center py-3">
+          <div class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+          画像を生成しています...
+        </div>
+        <div data-snapshot-error class="alert alert-danger d-none"></div>
+        <div data-snapshot-content class="d-none">
+          <p class="small text-muted mb-2" data-snapshot-description></p>
+          <ul class="small mb-3" data-snapshot-metrics></ul>
+          <div class="mb-3" data-snapshot-image-wrapper>
+            <img data-snapshot-image class="img-fluid border rounded" alt="Manual overtake snapshot">
+            <div class="form-text small" data-snapshot-image-note></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal fade" id="manualScaleModal" tabindex="-1" aria-labelledby="manualScaleModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="manualScaleModalLabel">Lane scale info</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div data-scale-loading class="text-center py-3">
+          <div class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+          Loading...
+        </div>
+        <div data-scale-error class="alert alert-danger d-none"></div>
+        <div data-scale-content class="d-none">
+          <p class="small text-muted mb-2" data-scale-description></p>
+          <div class="mb-3" data-scale-image-wrapper>
+            <img data-scale-image class="img-fluid border rounded" alt="Lane scale preview">
+            <div class="form-text small" data-scale-image-note></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  (function () {
+    const table = document.getElementById('manualViewTable');
+    const tbody = document.getElementById('manualViewBody');
+    const groupTable = document.getElementById('manualGroupTable');
+    const groupTbody = document.getElementById('manualGroupBody');
+    const snapshotTable = document.getElementById('manualSnapshotTable');
+    const snapshotTbody = document.getElementById('manualSnapshotBody');
+    const messageEl = document.getElementById('manualViewMessage');
+    const deleteBase = table ? table.dataset.deleteUrlBase || '' : '';
+    const scaleInfoBase = table ? table.dataset.scaleInfoBase || '' : '';
+    const scaleImageBase = table ? table.dataset.scaleImageBase || '' : '';
+    const snapshotInfoBase = table ? table.dataset.snapshotInfoBase || '' : '';
+    const snapshotImageBase = table ? table.dataset.snapshotImageBase || '' : '';
+    const runSelect = document.getElementById('manualViewRuns');
+    const searchInput = document.getElementById('manualViewSearch');
+    const searchSummary = document.getElementById('manualViewSearchSummary');
+    const groupSearchInput = document.getElementById('manualGroupSearch');
+    const groupSearchSummary = document.getElementById('manualGroupSearchSummary');
+    const snapshotSearchInput = document.getElementById('manualSnapshotSearch');
+    const snapshotSearchSummary = document.getElementById('manualSnapshotSearchSummary');
+    const snapshotGroupSelect = document.getElementById('manualSnapshotGroup');
+    const tabButtons = Array.from(document.querySelectorAll('[data-manual-tab]'));
+    const tabPanels = Array.from(document.querySelectorAll('[data-manual-tab-panel]'));
+    const dbCheckButton = document.getElementById('manualDbCheckButton');
+    const dbCheckSummary = document.getElementById('manualDbCheckSummary');
+    const dbCheckDefaultLabel = dbCheckButton ? (dbCheckButton.dataset.defaultLabel || dbCheckButton.textContent.trim()) : '';
+    const dbCheckUrl = dbCheckButton ? dbCheckButton.dataset.checkUrl || '' : '';
+    const dbCheckSampleLimitRaw = dbCheckButton ? dbCheckButton.dataset.sampleLimit : null;
+    const dbCheckSampleLimit = Number.isFinite(Number(dbCheckSampleLimitRaw)) ? Number(dbCheckSampleLimitRaw) : 5;
+    const laneWidthInput = document.getElementById('manualLaneWidthInput');
+    const calibrationButton = document.getElementById('manualCalibrationButton');
+    const timelineProcessButtons = Array.from(document.querySelectorAll('[data-manual-process-trigger="context"]'));
+    const timelineProcessContainer = document.getElementById('manualTimelineProcessStatus');
+    const timelineProcessBar = timelineProcessContainer ? timelineProcessContainer.querySelector('[data-progress-bar]') : null;
+    const timelineProcessLabel = timelineProcessContainer ? timelineProcessContainer.querySelector('[data-progress-label]') : null;
+    const timelineProcessNote = timelineProcessContainer ? timelineProcessContainer.querySelector('[data-progress-note]') : null;
+    const timelineProcessSpinner = timelineProcessContainer ? timelineProcessContainer.querySelector('[data-progress-spinner]') : null;
+    const timelineProcessNotices = timelineProcessContainer ? timelineProcessContainer.querySelector('[data-progress-notices]') : null;
+    const timelineProcessConfigSource = timelineProcessButtons.find((button) => button.dataset.processUrl || button.dataset.statusUrl) || timelineProcessButtons[0] || null;
+    const timelineProcessDefaultProcessUrl = timelineProcessConfigSource ? (timelineProcessConfigSource.dataset.processUrl || '') : '';
+    const timelineProcessDefaultStatusUrl = timelineProcessConfigSource ? (timelineProcessConfigSource.dataset.statusUrl || '') : '';
+    const timelineProcessDefaultBatchRaw = timelineProcessConfigSource ? Number(timelineProcessConfigSource.dataset.batchSize) : NaN;
+    const timelineProcessDefaultBatchSize = Number.isFinite(timelineProcessDefaultBatchRaw) && timelineProcessDefaultBatchRaw > 0
+      ? Math.floor(timelineProcessDefaultBatchRaw)
+      : 5;
+    let timelineProcessing = false;
+
+    function parseJsonAttribute(element, attribute) {
+      if (!element) {
+        return null;
+      }
+      const raw = element.getAttribute(attribute);
+      if (!raw) {
+        return null;
+      }
+      try {
+        return JSON.parse(raw);
+      } catch (err) {
+        console.warn('Failed to parse JSON attribute', attribute, err);
+        return null;
+      }
+    }
+
+    function storeJsonAttribute(element, attribute, value) {
+      if (!element) {
+        return;
+      }
+      try {
+        element.setAttribute(attribute, JSON.stringify(value || {}));
+      } catch (err) {
+        console.warn('Failed to stringify JSON attribute', attribute, err);
+      }
+    }
+
+    function getBacklogStatusSnapshot() {
+      const status = parseJsonAttribute(timelineProcessContainer, 'data-backlog-status');
+      if (!status || typeof status !== 'object') {
+        return {};
+      }
+      return status;
+    }
+
+    function setBacklogStatusSnapshot(status) {
+      storeJsonAttribute(timelineProcessContainer, 'data-backlog-status', status || {});
+    }
+
+    function getBacklogSummary() {
+      const summary = parseJsonAttribute(timelineProcessContainer, 'data-backlog-summary');
+      if (!summary || typeof summary !== 'object') {
+        return {};
+      }
+      return summary;
+    }
+
+    function getLaneWidthMeters() {
+      if (!laneWidthInput) {
+        return null;
+      }
+      const value = Number(laneWidthInput.value);
+      if (!Number.isFinite(value) || value <= 0) {
+        return null;
+      }
+      return value;
+    }
+
+    function setBacklogSummary(summary) {
+      storeJsonAttribute(timelineProcessContainer, 'data-backlog-summary', summary || {});
+    }
+
+    function buildProgressStateFromStatus(statusSnapshot) {
+      if (!timelineProcessContainer) {
+        return { visible: false, percent: 0, processing: false };
+      }
+
+      const snapshot = statusSnapshot && typeof statusSnapshot === 'object'
+        ? statusSnapshot
+        : {};
+      const totals = snapshot.status_totals && typeof snapshot.status_totals === 'object'
+        ? snapshot.status_totals
+        : {};
+
+      const pendingTotal = Number.isFinite(Number(snapshot.pending_total))
+        ? Number(snapshot.pending_total)
+        : Number(totals.pending || 0);
+      const completedTotal = Number(totals.completed || 0);
+      const failedTotal = Number(totals.failed || 0);
+      const backlogTotal = Number.isFinite(Number(snapshot.backlog_total))
+        ? Number(snapshot.backlog_total)
+        : pendingTotal + completedTotal + failedTotal;
+
+      const total = backlogTotal > 0 ? backlogTotal : pendingTotal;
+      if (!total || total <= 0) {
+        return { visible: false, percent: 0, processing: false };
+      }
+
+      const processed = completedTotal + failedTotal;
+      const percent = total > 0 ? Math.min(100, Math.floor((processed / total) * 100)) : 0;
+      const noteParts = [];
+      if (completedTotal > 0) {
+        noteParts.push(`完了 ${completedTotal} 件`);
+      }
+      if (failedTotal > 0) {
+        noteParts.push(`失敗 ${failedTotal} 件`);
+      }
+      if (pendingTotal > 0) {
+        noteParts.push(`残り ${pendingTotal} 件`);
+      }
+
+      const processing = pendingTotal > 0;
+      const message = processing
+        ? '手動追い越しで後処理の進捗を表示しています...'
+        : '手動追い越し後処理の履歴を表示しています。';
+
+      return {
+        visible: true,
+        percent,
+        message,
+        note: noteParts.join(' ／ '),
+        processing,
+        notices: [],
+      };
+    }
+
+    function getBacklogRunIds() {
+      const summary = getBacklogSummary();
+      return Object.entries(summary)
+        .filter(([, count]) => Number(count) > 0)
+        .map(([key]) => Number(key))
+        .filter((value) => Number.isFinite(value));
+    }
+
+    function getSelectedRunIds() {
+      if (!runSelect) {
+        return [];
+      }
+      return Array.from(runSelect.selectedOptions || [])
+        .map((option) => Number(option.value))
+        .filter((value) => Number.isFinite(value));
+    }
+
+    function evaluateTimelineProcessButton() {
+      if (!timelineProcessButtons.length) {
+        return;
+      }
+      const hasSelection = getSelectedRunIds().length > 0;
+      const hasBacklog = getBacklogRunIds().length > 0;
+      const disabled = !(hasSelection || hasBacklog);
+      timelineProcessButtons.forEach((button) => {
+        button.disabled = disabled;
+      });
+    }
+
+    if (calibrationButton) {
+      calibrationButton.addEventListener('click', async () => {
+        const selectedRuns = getSelectedRunIds();
+        if (!selectedRuns.length) {
+          showMessage('キャリブレーションを適用するRunを選択してください。', 'danger');
+          return;
+        }
+        const targetRun = selectedRuns[0];
+        const url = buildCalibrationUrl(targetRun);
+        if (!url) {
+          showMessage('キャリブレーションAPIが設定されていません。', 'danger');
+          return;
+        }
+
+        calibrationButton.disabled = true;
+        const profileName = window.prompt('新しいキャリブレーション名（空欄なら自動命名）', '') || '';
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify(profileName ? { profile_name: profileName } : {}),
+          });
+          const data = await response.json();
+          if (!response.ok || (data && data.error)) {
+            const errorText = data && data.error ? data.error : `HTTP ${response.status}`;
+            throw new Error(errorText);
+          }
+          const appliedProfile = data && data.profile_name ? data.profile_name : '(unknown)';
+          const notice = data && data.message ? data.message : `Run ${targetRun} にキャリブレーション '${appliedProfile}' を適用しました。`;
+          showMessage(notice, 'success');
+          if (data && data.calibration_url) {
+            window.open(data.calibration_url, '_blank');
+          }
+        } catch (err) {
+          console.error('Failed to recreate calibration', err);
+          showMessage(`キャリブレーションの作成に失敗しました: ${err}`, 'danger');
+        } finally {
+          calibrationButton.disabled = false;
+        }
+      });
+    }
+
+    function setTimelineProgressState(state) {
+      if (!timelineProcessContainer) {
+        return;
+      }
+      const {
+        visible = false,
+        percent = 0,
+        message = '',
+        note = '',
+        processing = false,
+        notices = [],
+      } = state || {};
+
+      timelineProcessContainer.classList.toggle('d-none', !visible);
+
+      if (timelineProcessBar) {
+        const clamped = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+        timelineProcessBar.style.width = `${clamped}%`;
+        timelineProcessBar.setAttribute('aria-valuenow', String(clamped));
+        timelineProcessBar.textContent = `${clamped}%`;
+        timelineProcessBar.classList.toggle('progress-bar-animated', Boolean(processing));
+        timelineProcessBar.classList.toggle('progress-bar-striped', Boolean(processing));
+      }
+
+      if (timelineProcessLabel) {
+        timelineProcessLabel.textContent = message || '';
+      }
+
+      if (timelineProcessNote) {
+        timelineProcessNote.textContent = note || '';
+      }
+
+      if (timelineProcessSpinner) {
+        timelineProcessSpinner.classList.toggle('d-none', !processing);
+      }
+
+      if (timelineProcessNotices) {
+        const text = Array.isArray(notices) ? notices.filter(Boolean).join(' ／ ') : '';
+        timelineProcessNotices.textContent = text;
+        timelineProcessNotices.classList.toggle('d-none', !text);
+      }
+    }
+
+    async function refreshTimelineStatus(statusUrl, options = {}) {
+      const { force = false } = options;
+      if (!statusUrl || (timelineProcessing && !force)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(statusUrl, {
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          cache: 'no-store',
+        });
+        if (!response.ok) {
+          return;
+        }
+        const body = await response.json();
+        if (body && typeof body === 'object') {
+          if (body.pending && typeof body.pending === 'object') {
+            setBacklogSummary(body.pending);
+          }
+          setBacklogStatusSnapshot(body);
+          evaluateTimelineProcessButton();
+
+          const progressState = buildProgressStateFromStatus(body);
+          setTimelineProgressState(progressState);
+        }
+      } catch (err) {
+        console.warn('Failed to refresh manual overtake status', err);
+      }
+    }
+
+    setTimelineProgressState({ visible: false, percent: 0, processing: false });
+
+    const initialStatusSnapshot = getBacklogStatusSnapshot();
+    if (initialStatusSnapshot && Object.keys(initialStatusSnapshot).length) {
+      setTimelineProgressState(buildProgressStateFromStatus(initialStatusSnapshot));
+    }
+
+    const scaleModalEl = document.getElementById('manualScaleModal');
+    const scaleModal = scaleModalEl && window.bootstrap ? new window.bootstrap.Modal(scaleModalEl) : null;
+    const scaleLoading = scaleModalEl ? scaleModalEl.querySelector('[data-scale-loading]') : null;
+    const scaleError = scaleModalEl ? scaleModalEl.querySelector('[data-scale-error]') : null;
+    const scaleContent = scaleModalEl ? scaleModalEl.querySelector('[data-scale-content]') : null;
+    const scaleDescription = scaleModalEl ? scaleModalEl.querySelector('[data-scale-description]') : null;
+    const scaleImageWrapper = scaleModalEl ? scaleModalEl.querySelector('[data-scale-image-wrapper]') : null;
+    const scaleImage = scaleModalEl ? scaleModalEl.querySelector('[data-scale-image]') : null;
+    const scaleImageNote = scaleModalEl ? scaleModalEl.querySelector('[data-scale-image-note]') : null;
+
+    const snapshotModalEl = document.getElementById('manualSnapshotModal');
+    const snapshotModal = snapshotModalEl && window.bootstrap ? new window.bootstrap.Modal(snapshotModalEl) : null;
+    const snapshotLoading = snapshotModalEl ? snapshotModalEl.querySelector('[data-snapshot-loading]') : null;
+    const snapshotError = snapshotModalEl ? snapshotModalEl.querySelector('[data-snapshot-error]') : null;
+    const snapshotContent = snapshotModalEl ? snapshotModalEl.querySelector('[data-snapshot-content]') : null;
+    const snapshotDescription = snapshotModalEl ? snapshotModalEl.querySelector('[data-snapshot-description]') : null;
+    const snapshotMetrics = snapshotModalEl ? snapshotModalEl.querySelector('[data-snapshot-metrics]') : null;
+    const snapshotImageWrapper = snapshotModalEl ? snapshotModalEl.querySelector('[data-snapshot-image-wrapper]') : null;
+    const snapshotImage = snapshotModalEl ? snapshotModalEl.querySelector('[data-snapshot-image]') : null;
+    const snapshotImageNote = snapshotModalEl ? snapshotModalEl.querySelector('[data-snapshot-image-note]') : null;
+
+
+    let currentScaleEventId = null;
+    let currentSnapshotEventId = null;
+
+    function showMessage(text, variant) {
+      if (!messageEl) {
+        return;
+      }
+      if (!text) {
+        messageEl.textContent = '';
+        messageEl.classList.add('d-none');
+        return;
+      }
+      const klass = variant === 'danger'
+        ? 'alert-danger'
+        : variant === 'success'
+          ? 'alert-success'
+          : 'alert-info';
+      messageEl.textContent = text;
+      messageEl.className = `alert ${klass} small`;
+      messageEl.classList.remove('d-none');
+    }
+
+    function setDbCheckSummary(text, variant) {
+      if (!dbCheckSummary) {
+        return;
+      }
+      const baseClass = 'small flex-grow-1';
+      let variantClass = 'text-muted';
+      if (variant === 'danger') {
+        variantClass = 'text-danger';
+      } else if (variant === 'success') {
+        variantClass = 'text-success';
+      }
+      dbCheckSummary.className = `${baseClass} ${variantClass}`.trim();
+      dbCheckSummary.textContent = text || '';
+    }
+
+    function setDbCheckBusy(isBusy) {
+      if (!dbCheckButton) {
+        return;
+      }
+      dbCheckButton.disabled = Boolean(isBusy);
+      if (isBusy) {
+        dbCheckButton.textContent = '確認中...';
+      } else {
+        dbCheckButton.textContent = dbCheckDefaultLabel || '手動追い越しDB連携確認';
+      }
+    }
+
+    function getEventRows() {
+      if (!tbody) {
+        return [];
+      }
+      return Array.from(tbody.querySelectorAll('tr[data-event-row="1"]'));
+    }
+
+    function getGroupRows() {
+      if (!groupTbody) {
+        return [];
+      }
+      return Array.from(groupTbody.querySelectorAll('tr[data-group-row="1"]'));
+    }
+
+    function getSnapshotRows() {
+      if (!snapshotTbody) {
+        return [];
+      }
+      return Array.from(snapshotTbody.querySelectorAll('tr[data-snapshot-row="1"]'));
+    }
+
+    function applySearchFilter() {
+      const rows = getEventRows();
+      const term = searchInput ? searchInput.value.trim().toLowerCase() : '';
+      let visibleCount = 0;
+
+      rows.forEach((row) => {
+        const cached = row.dataset.searchText;
+        const text = cached || row.textContent.toLowerCase();
+        row.dataset.searchText = text;
+        const matched = !term || text.includes(term);
+        row.classList.toggle('d-none', !matched);
+        if (matched) {
+          visibleCount += 1;
+        }
+      });
+
+      const noMatchRow = tbody ? tbody.querySelector('[data-no-match-row]') : null;
+      if (noMatchRow) {
+        const shouldShow = rows.length > 0 && visibleCount === 0;
+        noMatchRow.classList.toggle('d-none', !shouldShow);
+      }
+
+      function buildCalibrationUrl(runId) {
+        if (!calibrationButton) {
+          return '';
+        }
+        const template = calibrationButton.dataset.calibrationUrl || '';
+        if (!template || !runId) {
+          return '';
+        }
+        return template.replace('/0/', `/${runId}/`);
+      }
+
+      if (searchInput) {
+        searchInput.disabled = rows.length === 0;
+        if (rows.length === 0) {
+          searchInput.value = '';
+        }
+      }
+
+      if (searchSummary) {
+        if (!rows.length) {
+          searchSummary.textContent = '表示中のイベントはありません。';
+        } else if (term) {
+          searchSummary.textContent = `検索結果: ${visibleCount} / ${rows.length} 件`;
+        } else {
+          searchSummary.textContent = `表示件数: ${rows.length} 件`;
+        }
+      }
+    }
+
+    function applyGroupSearchFilter() {
+      const rows = getGroupRows();
+      const term = groupSearchInput ? groupSearchInput.value.trim().toLowerCase() : '';
+      let visibleCount = 0;
+
+      rows.forEach((row) => {
+        const cached = row.dataset.searchText;
+        const text = cached || row.textContent.toLowerCase();
+        row.dataset.searchText = text;
+        const matched = !term || text.includes(term);
+        row.classList.toggle('d-none', !matched);
+        if (matched) {
+          visibleCount += 1;
+        }
+      });
+
+      const noRows = groupTbody ? groupTbody.querySelector('[data-group-empty]') : null;
+      const noMatchRow = groupTbody ? groupTbody.querySelector('[data-group-no-match]') : null;
+      if (noRows) {
+        noRows.classList.toggle('d-none', rows.length !== 0);
+      }
+      if (noMatchRow) {
+        const shouldShow = rows.length > 0 && visibleCount === 0;
+        noMatchRow.classList.toggle('d-none', !shouldShow);
+      }
+
+      if (groupSearchSummary) {
+        if (!rows.length) {
+          groupSearchSummary.textContent = '表示中のグループ行はありません。';
+        } else if (term) {
+          groupSearchSummary.textContent = `検索結果: ${visibleCount} / ${rows.length} 行`;
+        } else {
+          groupSearchSummary.textContent = `表示件数: ${rows.length} 行`;
+        }
+      }
+    }
+
+    function applySnapshotSearchFilter() {
+      const rows = getSnapshotRows();
+      const term = snapshotSearchInput ? snapshotSearchInput.value.trim().toLowerCase() : '';
+      const selectedGroup = snapshotGroupSelect ? snapshotGroupSelect.value.trim() : '';
+      let visibleCount = 0;
+
+      rows.forEach((row) => {
+        const cached = row.dataset.searchText;
+        const text = cached || row.textContent.toLowerCase();
+        row.dataset.searchText = text;
+        const groupMatch = !selectedGroup
+          || row.dataset.overtakerGroup === selectedGroup
+          || row.dataset.overtakenGroup === selectedGroup;
+        const matched = (!term || text.includes(term)) && groupMatch;
+        row.classList.toggle('d-none', !matched);
+        if (matched) {
+          visibleCount += 1;
+        }
+      });
+
+      const noRows = snapshotTbody ? snapshotTbody.querySelector('[data-snapshot-empty]') : null;
+      const noMatchRow = snapshotTbody ? snapshotTbody.querySelector('[data-snapshot-no-match]') : null;
+      if (noRows) {
+        noRows.classList.toggle('d-none', rows.length !== 0);
+      }
+      if (noMatchRow) {
+        const shouldShow = rows.length > 0 && visibleCount === 0;
+        noMatchRow.classList.toggle('d-none', !shouldShow);
+      }
+
+      if (snapshotSearchSummary) {
+        if (!rows.length) {
+          snapshotSearchSummary.textContent = '表示中のイベントはありません。';
+        } else if (term) {
+          snapshotSearchSummary.textContent = `検索結果: ${visibleCount} / ${rows.length} 件`;
+        } else {
+          snapshotSearchSummary.textContent = `表示件数: ${rows.length} 件`;
+        }
+      }
+    }
+
+    function setActiveTab(tabKey) {
+      if (!tabKey) {
+        return;
+      }
+      tabButtons.forEach((button) => {
+        const active = button.dataset.manualTab === tabKey;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      tabPanels.forEach((panel) => {
+        const active = panel.dataset.manualTabPanel === tabKey;
+        panel.classList.toggle('d-none', !active);
+      });
+
+      if (tabKey === 'table') {
+        applySearchFilter();
+      } else if (tabKey === 'group') {
+        applyGroupSearchFilter();
+      } else if (tabKey === 'snapshot') {
+        applySnapshotSearchFilter();
+      }
+    }
+
+    function formatNumber(value, options = {}) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return '-';
+      }
+      const { digits, maxDigits } = options;
+      const formatOptions = {};
+      if (typeof digits === 'number') {
+        formatOptions.minimumFractionDigits = digits;
+        formatOptions.maximumFractionDigits = digits;
+      } else if (typeof maxDigits === 'number') {
+        formatOptions.maximumFractionDigits = maxDigits;
+      }
+      return numeric.toLocaleString('ja-JP', formatOptions);
+    }
+
+    function buildDeleteUrl(eventId) {
+      if (deleteBase) {
+        return `${deleteBase}${encodeURIComponent(eventId)}`;
+      }
+      return `/api/manual_overtake/events/${encodeURIComponent(eventId)}`;
+    }
+
+    function buildScaleInfoUrl(eventId) {
+      if (scaleInfoBase) {
+        return `${scaleInfoBase}${encodeURIComponent(eventId)}`;
+      }
+      return `/api/manual_overtake/events/${encodeURIComponent(eventId)}/scale_info`;
+    }
+
+    function buildScaleImageUrl(eventId) {
+      if (scaleImageBase) {
+        return `${scaleImageBase}${encodeURIComponent(eventId)}`;
+      }
+      return `/manual_overtake/events/${encodeURIComponent(eventId)}/scale_image`;
+    }
+
+    function buildSnapshotInfoUrl(eventId) {
+      if (snapshotInfoBase) {
+        return `${snapshotInfoBase}${encodeURIComponent(eventId)}`;
+      }
+      return `/api/manual_overtake/events/${encodeURIComponent(eventId)}/snapshot_info`;
+    }
+
+    function buildSnapshotImageUrl(eventId) {
+      if (snapshotImageBase) {
+        return `${snapshotImageBase}${encodeURIComponent(eventId)}`;
+      }
+      return `/manual_overtake/events/${encodeURIComponent(eventId)}/snapshot_image`;
+    }
+
+    function resetSnapshotModal(state) {
+      if (!snapshotModalEl) {
+        return;
+      }
+      if (snapshotLoading) {
+        snapshotLoading.classList.toggle('d-none', state !== 'loading');
+      }
+      if (snapshotError) {
+        snapshotError.classList.add('d-none');
+        snapshotError.textContent = '';
+      }
+      if (snapshotContent) {
+        snapshotContent.classList.toggle('d-none', state !== 'content');
+      }
+      if (snapshotDescription) {
+        snapshotDescription.textContent = '';
+      }
+      if (snapshotMetrics) {
+        snapshotMetrics.innerHTML = '';
+      }
+      if (snapshotImage) {
+        snapshotImage.src = '';
+      }
+      if (snapshotImageWrapper) {
+        snapshotImageWrapper.classList.remove('d-none');
+      }
+      if (snapshotImageNote) {
+        snapshotImageNote.textContent = '';
+      }
+    }
+
+    function showSnapshotError(message) {
+      if (!snapshotModalEl) {
+        return;
+      }
+      if (snapshotLoading) {
+        snapshotLoading.classList.add('d-none');
+      }
+      if (snapshotContent) {
+        snapshotContent.classList.add('d-none');
+      }
+      if (snapshotError) {
+        snapshotError.textContent = message || '追い越し写真を読み込めませんでした。';
+        snapshotError.classList.remove('d-none');
+      }
+    }
+
+    function populateSnapshotModal(data, eventId) {
+      if (!snapshotModalEl) {
+        return;
+      }
+      if (snapshotLoading) {
+        snapshotLoading.classList.add('d-none');
+      }
+      if (snapshotError) {
+        snapshotError.classList.add('d-none');
+        snapshotError.textContent = '';
+      }
+      if (snapshotContent) {
+        snapshotContent.classList.remove('d-none');
+      }
+
+      if (snapshotDescription) {
+        const parts = [];
+        if (data.run_id !== undefined && data.run_id !== null) {
+          parts.push(`Run ${data.run_id}`);
+        }
+        if (data.frame_num !== undefined && data.frame_num !== null) {
+          parts.push(`Frame ${data.frame_num}`);
+        }
+        if (data.video_filename) {
+          parts.push(data.video_filename);
+        }
+        const laneWidthText = formatNumber(data.lane_width_m, { digits: 1 });
+        if (laneWidthText !== '-') {
+          parts.push(`Lane width ${laneWidthText} m`);
+        }
+        snapshotDescription.textContent = parts.join(' / ');
+      }
+
+      if (snapshotMetrics) {
+        const items = [];
+        const laneDistances = data.lane_distances || {};
+        ['overtaker', 'overtaken'].forEach((key) => {
+          const entry = laneDistances[key];
+          if (!entry) {
+            return;
+          }
+          const label = entry.label || key;
+          const valueText = entry.distance_label || '-';
+          items.push(`${label} 白線距離: ${valueText}`);
+        });
+        const clearance = data.clearance || {};
+        if (clearance.label) {
+          const extra = clearance.ratio ? ` (${formatNumber(clearance.ratio, { maxDigits: 1 })}% of lane)` : '';
+          items.push(`離隔距離: ${clearance.label}${extra}`);
+        }
+
+        if (items.length) {
+          snapshotMetrics.innerHTML = items.map((text) => `<li>${text}</li>`).join('');
+        } else {
+          snapshotMetrics.innerHTML = '<li>距離情報が見つかりませんでした。</li>';
+        }
+      }
+
+      if (snapshotImageWrapper && snapshotImage) {
+        const resolvedId = data.event_id || eventId;
+        if (data.image_url && resolvedId) {
+          const imgUrl = `${buildSnapshotImageUrl(resolvedId)}?t=${Date.now()}&width=1280`;
+          snapshotImage.src = imgUrl;
+          snapshotImageWrapper.classList.remove('d-none');
+          if (snapshotImageNote) {
+            snapshotImageNote.textContent = '追い越しフレームに白線距離と離隔距離を描画しています。';
+          }
+        } else {
+          snapshotImageWrapper.classList.add('d-none');
+          if (snapshotImageNote) {
+            snapshotImageNote.textContent = data.video_available === false
+              ? '動画が見つからないため画像を生成できません。'
+              : '白線情報が不足しているため画像を生成できません。';
+          }
+        }
+      }
+    }
+
+    function openSnapshotModal(eventId) {
+      if (!snapshotModal) {
+        showMessage('追い越し写真を表示できません。', 'danger');
+        return;
+      }
+      currentSnapshotEventId = eventId;
+      resetSnapshotModal('loading');
+      snapshotModal.show();
+
+      fetch(buildSnapshotInfoUrl(eventId), {
+        headers: { 'Accept': 'application/json' },
+      }).then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+      }).then((data) => {
+        populateSnapshotModal(data || {}, eventId);
+      }).catch((error) => {
+        console.error('Failed to load snapshot info', error);
+        showSnapshotError('追い越し写真の取得に失敗しました。時間をおいて再試行してください。');
+      });
+    }
+
+    function resetScaleModal(state) {
+      if (!scaleModalEl) {
+        return;
+      }
+      if (scaleLoading) {
+        scaleLoading.classList.toggle('d-none', state !== 'loading');
+      }
+      if (scaleError) {
+        scaleError.classList.add('d-none');
+        scaleError.textContent = '';
+      }
+      if (scaleContent) {
+        scaleContent.classList.toggle('d-none', state !== 'content');
+      }
+      if (scaleDescription) {
+        scaleDescription.textContent = '';
+      }
+      if (scaleImage) {
+        scaleImage.src = '';
+      }
+      if (scaleImageWrapper) {
+        scaleImageWrapper.classList.remove('d-none');
+      }
+      if (scaleImageNote) {
+        scaleImageNote.textContent = '';
+      }
+    }
+
+    function showScaleError(message) {
+      if (!scaleModalEl) {
+        return;
+      }
+      if (scaleLoading) {
+        scaleLoading.classList.add('d-none');
+      }
+      if (scaleContent) {
+        scaleContent.classList.add('d-none');
+      }
+      if (scaleError) {
+        scaleError.textContent = message || 'Failed to load lane scale info.';
+        scaleError.classList.remove('d-none');
+      }
+    }
+
+    function populateScaleModal(data) {
+      if (!scaleModalEl) {
+        return;
+      }
+      if (scaleLoading) {
+        scaleLoading.classList.add('d-none');
+      }
+      if (scaleError) {
+        scaleError.classList.add('d-none');
+        scaleError.textContent = '';
+      }
+      if (scaleContent) {
+        scaleContent.classList.remove('d-none');
+      }
+
+      const firstSegment = Array.isArray(data.scale_segments) && data.scale_segments.length
+        ? data.scale_segments[0]
+        : null;
+
+      if (scaleDescription) {
+        const parts = [];
+        if (data.run_id !== undefined && data.run_id !== null) {
+          parts.push(`Run ${data.run_id}`);
+        }
+        if (data.frame_num !== undefined && data.frame_num !== null) {
+          parts.push(`Frame ${data.frame_num}`);
+        }
+        if (data.video_filename) {
+          parts.push(data.video_filename);
+        }
+        if (firstSegment) {
+          const laneWidthText = formatNumber(data.lane_width_m, { digits: 1 });
+          const pxText = formatNumber(firstSegment.lane_width_px, { maxDigits: 1 });
+          const cmPerPx = formatNumber(firstSegment.centimeters_per_pixel, { maxDigits: 2 });
+          const segmentParts = [];
+          const laneText = laneWidthText === '-' ? '8.0' : laneWidthText;
+          if (pxText !== '-') {
+            segmentParts.push(`${laneText}m = ${pxText} px`);
+          }
+          if (cmPerPx !== '-') {
+            segmentParts.push(`${cmPerPx} cm/px`);
+          }
+          if (segmentParts.length) {
+            parts.push(segmentParts.join(' / '));
+          }
+        }
+        if (data.calibration_profile) {
+          parts.push(`Profile: ${data.calibration_profile}`);
+        }
+        scaleDescription.textContent = parts.join(' / ');
+      }
+
+      if (scaleImageWrapper && scaleImage) {
+        const eventId = data.event_id || currentScaleEventId;
+        if (data.image_url && eventId) {
+          const imgUrl = `${buildScaleImageUrl(eventId)}?t=${Date.now()}`;
+          scaleImage.src = imgUrl;
+          scaleImageWrapper.classList.remove('d-none');
+          if (scaleImageNote) {
+            scaleImageNote.textContent = 'Scale reference and measurement points are drawn on one overtake frame.';
+          }
+        } else {
+          scaleImageWrapper.classList.add('d-none');
+          if (scaleImageNote) {
+            scaleImageNote.textContent = data.video_available === false
+              ? 'Video file not found; preview image cannot be generated.'
+              : 'Lane information is missing; preview image cannot be generated.';
+          }
+        }
+      }
+    }
+
+    function openScaleModal(eventId) {
+      if (!scaleModal) {
+        showMessage('Failed to show lane scale info.', 'danger');
+        return;
+      }
+      currentScaleEventId = eventId;
+      resetScaleModal('loading');
+      scaleModal.show();
+
+      fetch(buildScaleInfoUrl(eventId), {
+        headers: { 'Accept': 'application/json' },
+      }).then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+      }).then((data) => {
+        populateScaleModal(data || {});
+      }).catch((error) => {
+        console.error('Failed to load scale info', error);
+        showScaleError('Failed to load lane scale info. Please retry later.');
+      });
+    }
+
+    function applyRunStatus(runId, status) {
+      if (!runSelect) {
+        return;
+      }
+      const option = runSelect.querySelector(`option[value="${runId}"]`);
+      if (!option) {
+        return;
+      }
+      const normalized = status || 'new';
+      option.dataset.status = normalized;
+      option.classList.add('manual-run-option');
+      let titleText = '未訪問';
+      if (normalized === 'annotated') {
+        titleText = '手動追い越し付与済み';
+      } else if (normalized === 'visited') {
+        titleText = '観覧済み (付与なし)';
+      }
+      option.title = titleText;
+    }
+
+    function refreshRunStatusFromTable(runId) {
+      if (!runId) {
+        return;
+      }
+      if (!tbody) {
+        applyRunStatus(runId, 'visited');
+        return;
+      }
+      const normalizedId = String(runId).trim();
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const hasRow = rows.some((row) => {
+        const cells = row ? row.cells : null;
+        if (!cells || cells.length < 2) {
+          return false;
+        }
+        const runCell = cells[1];
+        return runCell && runCell.textContent.trim() === normalizedId;
+      });
+      applyRunStatus(runId, hasRow ? 'annotated' : 'visited');
+    }
+
+    if (timelineProcessButtons.length) {
+      const statusUrl = timelineProcessDefaultStatusUrl;
+
+      timelineProcessButtons.forEach((button) => {
+        const processUrl = button.dataset.processUrl || timelineProcessDefaultProcessUrl;
+        const batchSizeRaw = Number(button.dataset.batchSize);
+        const batchSize = Number.isFinite(batchSizeRaw) && batchSizeRaw > 0
+          ? Math.floor(batchSizeRaw)
+          : timelineProcessDefaultBatchSize;
+
+        button.addEventListener('click', async () => {
+          if (!processUrl) {
+            showMessage('手動追い越し後処理APIが設定されていません。', 'danger');
+            setTimelineProgressState({
+              visible: true,
+              percent: 0,
+              message: '手動追い越し後処理APIが設定されていません。',
+              processing: false,
+            });
+            return;
+          }
+
+          const selectedRuns = getSelectedRunIds();
+          const backlogRuns = getBacklogRunIds();
+          const targetRuns = selectedRuns.length ? selectedRuns : backlogRuns;
+          if (!targetRuns.length) {
+            showMessage('後処理対象のRunを選択してください。', 'danger');
+            setTimelineProgressState({
+              visible: true,
+              percent: 0,
+              message: '後処理対象のRunが選択されていません。',
+              processing: false,
+            });
+            return;
+          }
+
+          timelineProcessButtons.forEach((btn) => { btn.disabled = true; });
+          timelineProcessing = true;
+
+          let totalPending = null;
+          let processedTotal = 0;
+          let remainingTotal = 0;
+          const aggregatedNotices = [];
+          let hasError = false;
+          let attempt = 0;
+          const maxAttempts = 25;
+
+          setTimelineProgressState({
+            visible: true,
+            percent: 0,
+            message: '手動追い越し後処理を準備しています...',
+            note: '',
+            processing: true,
+            notices: [],
+          });
+
+          try {
+            while (attempt < maxAttempts) {
+              attempt += 1;
+              let response;
+              try {
+                const requestBody = {
+                  run_ids: targetRuns,
+                  limit: batchSize,
+                  ensure_missing: attempt === 1,
+                };
+                const laneWidthMeters = getLaneWidthMeters();
+                if (laneWidthMeters !== null) {
+                  requestBody.lane_width_m = laneWidthMeters;
+                }
+                response = await fetch(processUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                  },
+                  body: JSON.stringify(requestBody),
+                });
+              } catch (networkError) {
+                throw new Error('後処理APIへの接続に失敗しました。');
+              }
+
+              let body = {};
+              try {
+                body = await response.json();
+              } catch (parseError) {
+                body = {};
+              }
+
+              if (!response.ok || (body && typeof body === 'object' && body.error)) {
+                const errorText = body && typeof body === 'object' && body.error
+                  ? body.error
+                  : `後処理APIの呼び出しに失敗しました (HTTP ${response.status})`;
+                throw new Error(errorText);
+              }
+
+              const processedCount = Number(body.processed || 0);
+              remainingTotal = Number(body.remaining_total || 0);
+              const pendingBefore = Number(body.pending_before || 0);
+
+              if (totalPending === null) {
+                totalPending = Number.isFinite(pendingBefore) && pendingBefore > 0 ? pendingBefore : 0;
+              }
+
+              processedTotal += Number.isFinite(processedCount) && processedCount > 0 ? processedCount : 0;
+
+              if (totalPending !== null) {
+                const totalCandidate = processedTotal + (Number.isFinite(remainingTotal) ? remainingTotal : 0);
+                if (Number.isFinite(totalCandidate) && totalCandidate > totalPending) {
+                  totalPending = totalCandidate;
+                }
+              }
+
+              if (Array.isArray(body.notices)) {
+                aggregatedNotices.push(...body.notices.filter(Boolean));
+              }
+              if (Array.isArray(body.warnings)) {
+                aggregatedNotices.push(...body.warnings.filter(Boolean));
+              }
+              if (Number(body.lane_width_updated || 0) > 0) {
+                const widthText = Number(body.lane_width_m || getLaneWidthMeters() || 0).toFixed(1);
+                aggregatedNotices.push(`道幅 ${widthText}m を更新しました (${body.lane_width_updated} 件)`);
+              }
+              if (body.ensure_error) {
+                aggregatedNotices.push(`キュー追加に失敗しました: ${body.ensure_error}`);
+              }
+
+              if (body.remaining && typeof body.remaining === 'object') {
+                setBacklogSummary(body.remaining);
+              } else if (!remainingTotal) {
+                setBacklogSummary({});
+              }
+
+              const enqueuedCount = Number(body.enqueued || 0);
+              const noteParts = [];
+              if (processedTotal > 0) {
+                noteParts.push(`処理済み ${processedTotal} 件`);
+              }
+              noteParts.push(`残り ${remainingTotal} 件`);
+              if (enqueuedCount > 0) {
+                noteParts.push(`新規キュー投入 ${enqueuedCount} 件`);
+              }
+
+              let percent = 0;
+              if (totalPending && totalPending > 0) {
+                percent = Math.min(100, Math.floor((processedTotal / totalPending) * 100));
+              } else if (processedTotal > 0 && remainingTotal <= 0) {
+                percent = 100;
+              }
+
+              const messageText = remainingTotal > 0
+                ? (body.message || '手動追い越し後処理を実行しています...')
+                : (body.message || '手動追い越し後処理が完了しました。');
+
+              setTimelineProgressState({
+                visible: true,
+                percent,
+                message: messageText,
+                note: noteParts.join(' ／ '),
+                processing: remainingTotal > 0,
+                notices: aggregatedNotices,
+              });
+
+              if (remainingTotal <= 0 || processedCount <= 0) {
+                break;
+              }
+            }
+          } catch (err) {
+            console.error('Failed to process manual context backlog', err);
+            hasError = true;
+            const errorMessage = err && err.message ? err.message : '手動追い越し後処理中にエラーが発生しました。';
+            setTimelineProgressState({
+              visible: true,
+              percent: 0,
+              message: errorMessage,
+              note: '',
+              processing: false,
+              notices: aggregatedNotices,
+            });
+            showMessage('手動追い越し後処理に失敗しました。時間をおいて再試行してください。', 'danger');
+          } finally {
+            timelineProcessButtons.forEach((btn) => { btn.disabled = false; });
+            evaluateTimelineProcessButton();
+            timelineProcessing = false;
+            if (statusUrl) {
+              await refreshTimelineStatus(statusUrl, { force: true });
+            }
+          }
+
+          if (!hasError) {
+            if (processedTotal > 0 && remainingTotal <= 0) {
+              showMessage(`手動追い越し後処理を ${processedTotal} 件完了しました。`, 'success');
+              window.setTimeout(() => {
+                window.location.reload();
+              }, 1500);
+            } else if ((totalPending === null || totalPending === 0) && processedTotal === 0) {
+              showMessage('未処理の手動追い越し後処理対象は見つかりませんでした。', 'info');
+            } else if (processedTotal === 0 && totalPending && totalPending > 0) {
+              showMessage('手動追い越し後処理を実行しましたが処理対象を完了できませんでした。', 'warning');
+            }
+          }
+        });
+      });
+
+      if (statusUrl) {
+        refreshTimelineStatus(statusUrl, { force: true });
+      }
+    }
+
+    if (runSelect) {
+      runSelect.addEventListener('change', () => {
+        evaluateTimelineProcessButton();
+      });
+    }
+
+    evaluateTimelineProcessButton();
+
+    if (table) {
+      table.addEventListener('click', (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) {
+          return;
+        }
+        const snapshotButton = target.closest('[data-snapshot-preview]');
+        if (snapshotButton) {
+          event.preventDefault();
+          const eventId = snapshotButton.getAttribute('data-snapshot-preview');
+          if (eventId) {
+            openSnapshotModal(eventId);
+          }
+          return;
+        }
+        const scaleButton = target.closest('[data-scale-preview]');
+        if (scaleButton) {
+          event.preventDefault();
+          const eventId = scaleButton.getAttribute('data-scale-preview');
+          if (eventId) {
+            openScaleModal(eventId);
+          }
+          return;
+        }
+        const button = target.closest('[data-manual-delete]');
+        if (!button) {
+          return;
+        }
+        event.preventDefault();
+        const eventId = button.getAttribute('data-manual-delete');
+        if (!eventId) {
+          return;
+        }
+        if (!window.confirm(`手動追い越しイベントID ${eventId} を削除しますか？`)) {
+          return;
+        }
+        button.disabled = true;
+        showMessage('', 'info');
+        const row = button.closest('tr');
+        const runCell = row && row.cells ? row.cells[1] : null;
+        const runIdText = runCell ? runCell.textContent.trim() : '';
+
+        fetch(buildDeleteUrl(eventId), {
+          method: 'DELETE',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        }).then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          if (row && row.parentElement) {
+            row.parentElement.removeChild(row);
+          }
+          if (tbody && !tbody.querySelector('tr[data-event-row="1"]')) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">該当する手動追い越しイベントがありません。</td></tr>';
+          }
+          applySearchFilter();
+          if (runIdText) {
+            refreshRunStatusFromTable(runIdText);
+          }
+          showMessage(`イベントID ${eventId} を削除しました。`, 'success');
+        }).catch(err => {
+          console.error('Failed to delete manual overtake event', err);
+          showMessage('削除に失敗しました。時間をおいて再度お試しください。', 'danger');
+          button.disabled = false;
+        });
+      });
+    }
+
+    if (groupTable) {
+      groupTable.addEventListener('click', (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) {
+          return;
+        }
+        const snapshotButton = target.closest('[data-snapshot-preview]');
+        if (snapshotButton) {
+          event.preventDefault();
+          const eventId = snapshotButton.getAttribute('data-snapshot-preview');
+          if (eventId) {
+            openSnapshotModal(eventId);
+          }
+        }
+      });
+    }
+
+    if (dbCheckSummary) {
+      setDbCheckSummary('', 'info');
+    }
+
+    if (dbCheckButton) {
+      if (dbCheckDefaultLabel) {
+        dbCheckButton.textContent = dbCheckDefaultLabel;
+      }
+      dbCheckButton.addEventListener('click', () => {
+        if (!dbCheckUrl) {
+          const message = 'DB連携確認エンドポイントが設定されていません。';
+          setDbCheckSummary(message, 'danger');
+          showMessage(message, 'danger');
+          return;
+        }
+
+        const selectedRuns = runSelect
+          ? Array.from(runSelect.selectedOptions || []).map(option => option.value).filter(Boolean)
+          : [];
+
+        let limitValue = Number.isFinite(dbCheckSampleLimit) ? Math.floor(dbCheckSampleLimit) : 5;
+        if (!Number.isFinite(limitValue) || limitValue <= 0) {
+          limitValue = 5;
+        }
+        limitValue = Math.min(Math.max(limitValue, 1), 20);
+
+        let url;
+        try {
+          url = new URL(dbCheckUrl, window.location.origin);
+        } catch (err) {
+          const message = 'DB連携確認用URLの生成に失敗しました。';
+          setDbCheckSummary(message, 'danger');
+          showMessage(message, 'danger');
+          return;
+        }
+
+        selectedRuns.forEach((runId) => {
+          url.searchParams.append('run_id', runId);
+        });
+        url.searchParams.set('limit', String(limitValue));
+
+        const pendingMessage = '手動追い越しテーブルとの連携を確認しています...';
+        setDbCheckBusy(true);
+        setDbCheckSummary(pendingMessage, 'info');
+        showMessage(pendingMessage, 'info');
+
+        fetch(url.toString(), {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          cache: 'no-store',
+        })
+          .then(resp => resp.json().catch(() => ({})).then(body => ({ ok: resp.ok, body })))
+          .then(result => {
+            if (!result.ok) {
+              const body = result.body || {};
+              const message = body.error || body.message || 'DB連携確認に失敗しました。';
+              setDbCheckSummary(message, 'danger');
+              showMessage(message, 'danger');
+              return;
+            }
+
+            const body = result.body || {};
+            if (Object.prototype.hasOwnProperty.call(body, 'linked') && body.linked === false) {
+              const message = body.error || body.message || '手動追い越しテーブルとの連携を確認できませんでした。';
+              setDbCheckSummary(message, 'danger');
+              showMessage(message, 'danger');
+              return;
+            }
+
+            const totalEvents = Number(body.total_events || 0);
+            const runSummaries = Array.isArray(body.run_summaries) ? body.run_summaries : [];
+            let summaryText = '';
+            if (runSummaries.length) {
+              const parts = runSummaries.map((summary) => {
+                if (!summary || typeof summary !== 'object') {
+                  return '';
+                }
+                const runIdValue = Number(summary.run_id);
+                const runLabel = Number.isFinite(runIdValue) ? `Run ${runIdValue}` : 'Run -';
+                const countValue = Number(summary.event_count);
+                const countLabel = Number.isFinite(countValue) ? `${countValue}件` : '0件';
+                const samples = Array.isArray(summary.samples) ? summary.samples : [];
+                const sampleIds = samples
+                  .map((sample) => {
+                    if (!sample || typeof sample !== 'object') {
+                      return '';
+                    }
+                    const idValue = Number(sample.manual_event_id);
+                    if (!Number.isFinite(idValue)) {
+                      return '';
+                    }
+                    return `#${idValue}`;
+                  })
+                  .filter(Boolean);
+                const detail = sampleIds.length ? ` (サンプル ${sampleIds.slice(0, 5).join(', ')})` : '';
+                return `${runLabel}: ${countLabel}${detail}`;
+              }).filter(Boolean);
+              summaryText = parts.join(' ／ ');
+            }
+
+            if (!summaryText) {
+              summaryText = totalEvents > 0
+                ? `登録件数: ${totalEvents}件`
+                : '登録済みの手動追い越しイベントは見つかりませんでした。';
+            }
+
+            const hasEvents = totalEvents > 0 || runSummaries.some((summary) => {
+              if (!summary || typeof summary !== 'object') {
+                return false;
+              }
+              const countValue = Number(summary.event_count);
+              return Number.isFinite(countValue) && countValue > 0;
+            });
+
+            const message = body.message || (hasEvents
+              ? '手動追い越しテーブルとの連携を確認しました。'
+              : '手動追い越しテーブルは存在しますが、登録済みイベントはありません。');
+
+            setDbCheckSummary(summaryText, hasEvents ? 'success' : 'info');
+            showMessage(message, hasEvents ? 'success' : 'info');
+          })
+          .catch(err => {
+            console.error('Failed to check manual overtake DB link', err);
+            const message = 'DB連携確認中にエラーが発生しました。';
+            setDbCheckSummary(message, 'danger');
+            showMessage(message, 'danger');
+          })
+          .finally(() => {
+            setDbCheckBusy(false);
+          });
+      });
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        applySearchFilter();
+      });
+    }
+
+    if (groupSearchInput) {
+      groupSearchInput.addEventListener('input', () => {
+        applyGroupSearchFilter();
+      });
+    }
+
+    if (snapshotSearchInput) {
+      snapshotSearchInput.addEventListener('input', () => {
+        applySnapshotSearchFilter();
+      });
+    }
+
+    if (snapshotGroupSelect) {
+      snapshotGroupSelect.addEventListener('change', () => {
+        applySnapshotSearchFilter();
+      });
+    }
+
+    if (tabButtons.length && tabPanels.length) {
+      tabButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          setActiveTab(button.dataset.manualTab || '');
+        });
+      });
+    }
+
+    setActiveTab('table');
+    applyGroupSearchFilter();
+    applySnapshotSearchFilter();
+
+    if (scaleModalEl) {
+      scaleModalEl.addEventListener('hidden.bs.modal', () => {
+        currentScaleEventId = null;
+        resetScaleModal('loading');
+      });
+    }
+    if (snapshotModalEl) {
+      snapshotModalEl.addEventListener('hidden.bs.modal', () => {
+        currentSnapshotEventId = null;
+        resetSnapshotModal('loading');
+      });
+    }
+  })();
+</script>
+{% endblock %}

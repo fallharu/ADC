@@ -1,0 +1,1291 @@
+﻿{% extends "base.html" %}
+{% block title %}検出結果閲覧{% endblock %}
+
+{% block content %}
+{% set current_mode = view_mode if view_mode is defined and view_mode else 'auto' %}
+
+<!-- Notification Container (Global) -->
+<div id="notificationContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 9999; pointer-events: none;">
+</div>
+
+<style>
+    #notificationContainer .alert {
+        pointer-events: auto;
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    }
+
+    .sortable {
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+        transition: background-color 0.2s;
+    }
+
+    .sortable:hover {
+        background-color: rgba(0, 0, 0, 0.075);
+    }
+
+    .sort-icon {
+        margin-left: 4px;
+        opacity: 0.3;
+        font-size: 0.85em;
+        display: inline-block;
+        min-width: 20px;
+    }
+
+    .sortable.sort-asc .sort-icon,
+    .sortable.sort-desc .sort-icon {
+        opacity: 1;
+        font-weight: bold;
+    }
+
+    .highlight-column {
+        background-color: #ffe69c !important;
+        transition: background-color 0.5s ease-in-out;
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+        <h2 class="mb-0">4. 検出結果閲覧</h2>
+        <p class="text-muted mb-0">自動検出結果と手動追い越しテーブルを切り替えて確認できます。</p>
+    </div>
+    {% if selected_run_id %}
+    <span class="badge bg-info text-dark">Run #{{ selected_run_id }} を表示中</span>
+    {% endif %}
+</div>
+
+{# --- Toggle URLs: すべてのケースで必ず定義 --- #}
+{% if selected_run_id %}
+{% set auto_toggle_url = url_for('main.detections', mode='auto', run_id=selected_run_id) %}
+{% set manual_toggle_url = url_for('main.detections', mode='manual', run_id=selected_run_id) %}
+{% set runs_toggle_url = url_for('main.detections', mode='runs', run_id=selected_run_id) %}
+{% else %}
+{% set auto_toggle_url = url_for('main.detections', mode='auto') %}
+{% set manual_toggle_url = url_for('main.detections', mode='manual') %}
+{% set runs_toggle_url = url_for('main.detections', mode='runs') %}
+{% endif %}
+
+{% if selected_run_id %}
+<div class="alert alert-light border d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <div class="fw-semibold">後処理の実行</div>
+        <div class="small text-muted">現在表示中のRunに対して後処理を開始します。</div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <form method="post" action="{{ url_for('main.post_process_action') }}" id="postProcessQuickForm" class="mb-0">
+            {% if csrf_token is defined %}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is callable else csrf_token }}">
+            {% endif %}
+            <input type="hidden" name="run_id" value="{{ selected_run_id }}">
+            <input type="hidden" name="target_mode" value="run">
+            <input type="hidden" name="action" value="all_postprocess">
+            <button type="submit" class="btn btn-sm btn-danger">後処理を実行</button>
+        </form>
+        <span class="small text-muted" id="postProcessQuickMessage" role="status" aria-live="polite"></span>
+    </div>
+</div>
+{% endif %}
+
+<div class="btn-group mb-3" role="group" aria-label="DB観覧切り替え">
+    <a href="{{ auto_toggle_url }}"
+        class="btn btn-sm {% if current_mode == 'auto' %}btn-primary{% else %}btn-outline-primary{% endif %}">自動検出</a>
+    <a href="{{ manual_toggle_url }}"
+        class="btn btn-sm {% if current_mode == 'manual' %}btn-primary{% else %}btn-outline-primary{% endif %}">手動追い越し</a>
+    <a href="{{ runs_toggle_url }}"
+        class="btn btn-sm {% if current_mode == 'runs' %}btn-primary{% else %}btn-outline-primary{% endif %}">Run属性編集</a>
+</div>
+
+
+{# =========================
+RUNS MODE
+========================= #}
+{% if current_mode == 'runs' %}
+
+<div class="mb-3">
+    <h5>Run一覧と属性編集</h5>
+    <p class="text-muted small mb-0">チェックボックスで複数選択、Shift+クリックで範囲選択できます</p>
+</div>
+
+<!-- 一括編集コントロール -->
+<form method="POST" action="{{ url_for('main.batch_update_runs_form') }}">
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-end">
+                <!-- 収集年 -->
+                <div class="col-auto">
+                    <label class="form-label small mb-1">収集年</label>
+                    <input type="number" id="batchRunYear" name="collection_year" class="form-control form-control-sm"
+                        placeholder="例: 2024" style="width: 120px;">
+                </div>
+
+                <!-- 道路タイプ -->
+                <div class="col-auto">
+                    <label class="form-label small mb-1">道路タイプ</label>
+                    <select id="batchRunRoadType" name="road_type" class="form-select form-select-sm"
+                        style="width: 160px;">
+                        <option value="">(変更なし)</option>
+                        {% for rt in road_types %}
+                        <option value="{{ rt.value }}">{{ rt.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary btn-sm" id="btnApplyRunBatch" disabled>
+                        選択中の<span id="selectedRunCount">0</span>件に適用
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Run一覧テーブル -->
+    <div class="table-responsive">
+        <table class="table table-sm table-striped table-hover align-middle" id="runsTable">
+            <thead class="table-light">
+                <tr>
+                    <th scope="col" style="width: 40px;">
+                        <div class="form-check d-flex justify-content-center">
+                            <input class="form-check-input" type="checkbox" id="selectAllRuns">
+                        </div>
+                    </th>
+                    <th scope="col">Run ID</th>
+                    <th scope="col">動画ファイル</th>
+                    <th scope="col">検出数</th>
+                    <th scope="col">収集年</th>
+                    <th scope="col">道路タイプ</th>
+                    <th scope="col">処理日時</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in run_list %}
+                <tr data-run-id="{{ run.run_id }}">
+                    <td>
+                        <div class="form-check d-flex justify-content-center">
+                            <input class="form-check-input run-checkbox" type="checkbox" name="run_ids"
+                                value="{{ run.run_id }}" data-index="{{ loop.index0 }}">
+                        </div>
+                    </td>
+                    <td>{{ run.run_id }}</td>
+                    <td>{{ run.filename or '-' }}</td>
+                    <td>{{ run.detection_count }}</td>
+                    <td class="collection-year-cell">{{ run.collection_year or '-' }}</td>
+                    <td class="road-type-cell">
+                        {% if run.road_type == 'widened' %}拡幅
+                        {% elif run.road_type == 'non_widened' %}未拡幅
+                        {% else %}{{ run.road_type or '-' }}
+                        {% endif %}
+                    </td>
+                    <td>{{ run.created_at }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center text-muted">Runが見つかりません</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</form>
+
+{% endif %}
+
+
+{# =========================
+MANUAL MODE
+========================= #}
+{% if current_mode == 'manual' %}
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <input type="hidden" name="mode" value="manual">
+
+    <div class="col-sm-4 col-md-3">
+        <label for="manualDbRunSelect" class="form-label small">表示するRun</label>
+        <select id="manualDbRunSelect" name="run_id" class="form-select form-select-sm">
+            <option value="" {% if not selected_run_id %}selected{% endif %}>全てのRun</option>
+            {% for option in run_options %}
+            <option value="{{ option.run_id }}" {% if selected_run_id==option.run_id %}selected{% endif %}>
+                Run #{{ option.run_id }}{% if option.filename %} - {{ option.filename }}{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="col-sm-3 col-md-2">
+        <label for="manualDbLimit" class="form-label small">最大表示件数</label>
+        <input type="number" id="manualDbLimit" name="limit" class="form-control form-control-sm"
+            value="{{ manual_limit or 500 }}" min="1" max="2000">
+    </div>
+
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">表示を更新</button>
+    </div>
+
+    <div class="col-auto">
+        <button type="button" class="btn btn-outline-info btn-sm" id="btnEditMetadata" {% if not selected_run_id
+            %}disabled{% endif %} data-bs-toggle="modal" data-bs-target="#editMetadataModal">
+            属性編集
+        </button>
+    </div>
+
+    <div class="col-auto">
+        <a href="{{ url_for('main.detections', mode='manual') }}" class="btn btn-outline-secondary btn-sm">リセット</a>
+    </div>
+</form>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+    <div><span class="fw-semibold">表示件数: {{ manual_events|length }}</span></div>
+
+    <div class="btn-group btn-group-sm">
+        <form method="get" action="{{ url_for('main.manual_overtake_export') }}" class="d-inline">
+            <input type="hidden" name="format" value="csv">
+            {% if selected_run_id %}<input type="hidden" name="run_id" value="{{ selected_run_id }}">{% endif %}
+            {% if manual_limit %}<input type="hidden" name="limit" value="{{ manual_limit }}">{% endif %}
+            <button type="submit" class="btn btn-outline-secondary">CSV出力</button>
+        </form>
+
+        <form method="get" action="{{ url_for('main.manual_overtake_export') }}" class="d-inline">
+            <input type="hidden" name="format" value="xlsx">
+            {% if selected_run_id %}<input type="hidden" name="run_id" value="{{ selected_run_id }}">{% endif %}
+            {% if manual_limit %}<input type="hidden" name="limit" value="{{ manual_limit }}">{% endif %}
+            <button type="submit" class="btn btn-outline-secondary">Excel出力</button>
+        </form>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-sm table-striped align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>ID</th>
+                <th>Run</th>
+                <th>動画名</th>
+                <th>フレーム</th>
+                <th>動画時間(s)</th>
+                <th>追い越し側</th>
+                <th>追い越し側 時速(km/h)</th>
+                <th>追い越し側 時速(-30f)</th>
+                <th>追い越し側 時速(+30f)</th>
+                <th>追い越され側</th>
+                <th>追い越され側 時速(km/h)</th>
+                <th>追い越され側 時速(-30f)</th>
+                <th>追い越され側 時速(+30f)</th>
+                <th>接近距離(m)</th>
+                <th>離隔距離</th>
+                <th>追い越し側 白線距離(m)</th>
+                <th>追い越され側 白線距離(m)</th>
+                <th>登録日時</th>
+                <th>メモ</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in manual_events %}
+            <tr>
+                <td>{{ event.manual_event_id }}</td>
+                <td>{{ event.run_id }}</td>
+                <td>{{ event.video_filename or '-' }}</td>
+                <td>{{ event.frame_num }}</td>
+                <td>{{ "%.2f"|format(event.video_time_s) if event.video_time_s is not none else "-" }}</td>
+
+                <td>
+                    <div>Group {{ event.overtaker_group_id }}</div>
+                    <div class="text-muted">{{ event.overtaker_class_name or '-' }}</div>
+                </td>
+                <td>{{ "%.1f"|format(event.overtaker_speed_km_h) ~ " km/h" if event.overtaker_speed_km_h is not none
+                    else "-" }}</td>
+                <td>{{ "%.1f"|format(event.overtaker_speed_km_h_m30) ~ " km/h" if event.overtaker_speed_km_h_m30 is not
+                    none else "-" }}</td>
+                <td>{{ "%.1f"|format(event.overtaker_speed_km_h_p30) ~ " km/h" if event.overtaker_speed_km_h_p30 is not
+                    none else "-" }}</td>
+
+                <td>
+                    <div>Group {{ event.overtaken_group_id }}</div>
+                    <div class="text-muted">{{ event.overtaken_class_name or '-' }}</div>
+                </td>
+                <td>{{ "%.1f"|format(event.overtaken_speed_km_h) ~ " km/h" if event.overtaken_speed_km_h is not none
+                    else "-" }}</td>
+                <td>{{ "%.1f"|format(event.overtaken_speed_km_h_m30) ~ " km/h" if event.overtaken_speed_km_h_m30 is not
+                    none else "-" }}</td>
+                <td>{{ "%.1f"|format(event.overtaken_speed_km_h_p30) ~ " km/h" if event.overtaken_speed_km_h_p30 is not
+                    none else "-" }}</td>
+
+                <td>{{ "%.2f"|format(event.approach_distance_m) if event.approach_distance_m is not none else "-" }}
+                </td>
+                <td>
+                    {% if event.clearance_distance_cm is not none %}
+                    {{ "%.0f"|format(event.clearance_distance_cm) }} cm
+                    {% elif event.clearance_distance_m is not none %}
+                    {{ "%.2f"|format(event.clearance_distance_m) }} m
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>{{ "%.2f"|format(event.overtaker_line_distance_m) if event.overtaker_line_distance_m is not none
+                    else "-" }}</td>
+                <td>{{ "%.2f"|format(event.overtaken_line_distance_m) if event.overtaken_line_distance_m is not none
+                    else "-" }}</td>
+                <td>{{ event.created_at or '-' }}</td>
+                <td>{{ event.notes or '-' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="19" class="text-center text-muted py-3">表示できる手動追い越しイベントがありません。</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endif %}
+
+
+{# =========================
+AUTO MODE
+========================= #}
+{% if current_mode == 'auto' %}
+
+<p class="small text-muted">
+    CSV出力時の列の意味は<a href="{{ url_for('main.download_csv_column_guide') }}" class="link-secondary">こちらの説明CSV</a>から確認できます。
+</p>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <input type="hidden" name="page" value="1">
+    <input type="hidden" name="mode" value="auto">
+
+    <div class="col-sm-4 col-md-3">
+        <label for="detectionsRunSelect" class="form-label small">表示するRun</label>
+        <select id="detectionsRunSelect" name="run_id" class="form-select form-select-sm">
+            <option value="" {% if not selected_run_id %}selected{% endif %}>全てのRun</option>
+            {% for option in run_options %}
+            <option value="{{ option.run_id }}" {% if selected_run_id==option.run_id %}selected{% endif %}>
+                Run #{{ option.run_id }}{% if option.filename %} - {{ option.filename }}{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="col-sm-6 col-md-2">
+        <label for="perPageSelect" class="form-label small">表示件数</label>
+        <select id="perPageSelect" name="per_page" class="form-select form-select-sm">
+            <option value="50" {% if per_page==50 %}selected{% endif %}>50件</option>
+            <option value="100" {% if per_page==100 %}selected{% endif %}>100件</option>
+            <option value="500" {% if per_page==500 %}selected{% endif %}>500件</option>
+            <option value="1000" {% if per_page==1000 %}selected{% endif %}>1000件</option>
+            <option value="5000" {% if per_page==5000 %}selected{% endif %}>5000件</option>
+            <option value="20000" {% if per_page==20000 %}selected{% endif %}>最大 (20000)</option>
+        </select>
+    </div>
+
+    <div class="col-sm-4 col-md-3">
+        <label for="searchField" class="form-label small">検索フィールド</label>
+        <select id="searchField" name="search_field" class="form-select form-select-sm">
+            <option value="">(指定なし)</option>
+            {% for field in search_fields %}
+            <option value="{{ field.key }}" {% if selected_search_field and selected_search_field.key==field.key
+                %}selected{% endif %}>
+                {{ field.label }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="col-sm-4 col-md-4" id="searchInputsContainer">
+        {% if selected_search_field %}
+        <label class="form-label small">検索値</label>
+        {% if selected_search_field.type == 'text' %}
+        <input type="text" name="search_text" class="form-control form-control-sm"
+            value="{{ search_values.text or '' }}">
+        {% elif selected_search_field.type == 'number' %}
+        <div class="input-group input-group-sm">
+            <input type="number" name="search_min" class="form-control" placeholder="Min"
+                value="{{ search_values.min or '' }}" step="any">
+            <span class="input-group-text">~</span>
+            <input type="number" name="search_max" class="form-control" placeholder="Max"
+                value="{{ search_values.max or '' }}" step="any">
+        </div>
+        <div class="form-text">または正確な値:</div>
+        <input type="number" name="search_value" class="form-control form-control-sm"
+            value="{{ search_values.value or '' }}" step="any">
+        {% elif selected_search_field.type == 'enum' %}
+        <select name="search_option" class="form-select form-select-sm">
+            <option value="">(全て)</option>
+            {% for opt in selected_search_field.options %}
+            <option value="{{ opt.value }}" {% if search_values.option==opt.value %}selected{% endif %}>{{ opt.label }}
+            </option>
+            {% endfor %}
+        </select>
+        {% elif selected_search_field.type == 'presence' %}
+        <select name="search_option" class="form-select form-select-sm">
+            <option value="">(全て)</option>
+            <option value="has" {% if search_values.option=='has' %}selected{% endif %}>あり</option>
+            <option value="missing" {% if search_values.option=='missing' %}selected{% endif %}>なし (Null)</option>
+        </select>
+        {% endif %}
+        {% else %}
+        <div class="text-muted small mt-4">フィールドを選択してください</div>
+        {% endif %}
+    </div>
+
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">表示を更新</button>
+    </div>
+
+    <div class="col-auto">
+        <button type="button" class="btn btn-outline-info btn-sm" id="btnEditMetadataAuto" {% if not selected_run_id
+            %}disabled{% endif %} data-bs-toggle="modal" data-bs-target="#editMetadataModal">
+            属性編集
+        </button>
+    </div>
+
+    <div class="col-auto ms-auto">
+        <button type="button" class="btn btn-secondary btn-sm" id="btnBatchEdit" disabled data-bs-toggle="modal"
+            data-bs-target="#batchEditModal">
+            一括編集
+        </button>
+    </div>
+
+    <div class="col-auto">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal"
+            data-bs-target="#usageGuideModal">
+            <i class="bi bi-question-circle"></i> ヘルプ
+        </button>
+    </div>
+
+    <div class="col-auto">
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="columnSelectorBtn"
+                data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-columns-gap"></i> 表示列
+            </button>
+            <div class="dropdown-menu dropdown-menu-end p-3"
+                style="min-width: 350px; max-height: 500px; overflow-y: auto;" onclick="event.stopPropagation();"
+                aria-labelledby="columnSelectorBtn">
+
+                <div class="mb-3">
+                    <small class="text-muted fw-semibold">プリセット:</small>
+                    <div class="btn-group btn-group-sm w-100 mt-1" role="group">
+                        <button type="button" class="btn btn-outline-primary"
+                            onclick="applyColumnPreset('basic')">基本</button>
+                        <button type="button" class="btn btn-outline-primary"
+                            onclick="applyColumnPreset('detailed')">詳細</button>
+                        <button type="button" class="btn btn-outline-primary"
+                            onclick="applyColumnPreset('all')">全て</button>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div id="columnSelectorContent" class="column-selector-categories"
+                    style="max-height: 350px; overflow-y: auto;"></div>
+
+                <hr>
+
+                <div class="d-flex justify-content-between">
+                    <button type="button" class="btn btn-sm btn-secondary"
+                        onclick="resetColumnVisibility()">リセット</button>
+                    <button type="button" class="btn btn-sm btn-primary" onclick="applyColumnVisibility()">適用</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+{% if detections %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div>
+        <span class="fw-semibold">全 {{ total }} 件中 {{ (page - 1) * per_page + 1 }} - {{ [(page * per_page), total]|min
+            }} 件を表示</span>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-sm table-striped table-hover align-middle" id="detectionsTable">
+        <thead class="table-light">
+            <tr>
+                <th scope="col" style="width:40px;" data-column="checkbox">
+                    <div class="form-check d-flex justify-content-center">
+                        <input class="form-check-input" type="checkbox" id="selectAllDetections">
+                    </div>
+                </th>
+
+                <th scope="col" data-column="detection_id">
+                    <a href="{{ url_for('main.detections',
+                      page=page, run_id=run_id, per_page=per_page,
+                      sort_by='detection_id',
+                      sort_order='desc' if sort_by=='detection_id' and sort_order=='asc' else 'asc',
+                      mode='auto',
+                      search_field=request.args.get('search_field'),
+                      search_text=request.args.get('search_text'),
+                      search_option=request.args.get('search_option'),
+                      search_min=request.args.get('search_min'),
+                      search_max=request.args.get('search_max'),
+                      search_value=request.args.get('search_value')) }}" class="text-decoration-none text-dark">
+                        ID {% if sort_by == 'detection_id' %}<span class="text-primary">{{ '↓' if sort_order == 'desc'
+                            else '↑' }}</span>{% endif %}
+                    </a>
+                </th>
+
+                <th scope="col" data-column="bbox">座標(xywh)</th>
+
+                <th scope="col" data-column="run_id">
+                    <a href="{{ url_for('main.detections',
+                      page=page, run_id=run_id, per_page=per_page,
+                      sort_by='run_id',
+                      sort_order='desc' if sort_by=='run_id' and sort_order=='asc' else 'asc',
+                      mode='auto',
+                      search_field=request.args.get('search_field'),
+                      search_text=request.args.get('search_text'),
+                      search_option=request.args.get('search_option'),
+                      search_min=request.args.get('search_min'),
+                      search_max=request.args.get('search_max'),
+                      search_value=request.args.get('search_value')) }}" class="text-decoration-none text-dark">
+                        Run {% if sort_by == 'run_id' %}<span class="text-primary">{{ '↓' if sort_order == 'desc' else
+                            '↑' }}</span>{% endif %}
+                    </a>
+                </th>
+
+                <th scope="col" class="sortable" data-column="class_name" data-type="string">クラス <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="confidence" data-type="number">信頼度 <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="frame_num" data-type="number">フレーム <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="absolute_speed_kmph" data-type="number">絶対速度(km/h) <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="distance_m" data-type="number">車間距離(m) <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="ttc_s" data-type="number">TTC(s) <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="line_distance_m" data-type="number">白線距離(m) <span
+                        class="sort-icon"></span></th>
+                <th scope="col" data-column="acceleration_state">加速状態</th>
+
+                <th scope="col" class="sortable" data-column="acceleration_m_s2" data-type="number">加速度(m/s²) <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="group_id" data-type="number">グループID <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="approach_partner_group_id" data-type="number">アプローチパートナー
+                    <span class="sort-icon"></span>
+                </th>
+                <th scope="col" class="sortable" data-column="approach_distance_m" data-type="number">アプローチ距離(m) <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="clearance_distance_m" data-type="number">クリアランス(m) <span
+                        class="sort-icon"></span></th>
+                <th scope="col" data-column="travel_direction">進行方向</th>
+                <th scope="col" class="sortable" data-column="l_line_distance_m" data-type="number">左線距離(m) <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="r_line_distance_m" data-type="number">右線距離(m) <span
+                        class="sort-icon"></span></th>
+
+                <th scope="col" data-column="overtake">
+                    <a href="{{ url_for('main.detections',
+                      page=page, run_id=run_id, per_page=per_page,
+                      sort_by='overtake',
+                      sort_order='desc' if sort_by=='overtake' and sort_order=='asc' else 'asc',
+                      mode='auto',
+                      search_field=request.args.get('search_field'),
+                      search_text=request.args.get('search_text'),
+                      search_option=request.args.get('search_option'),
+                      search_min=request.args.get('search_min'),
+                      search_max=request.args.get('search_max'),
+                      search_value=request.args.get('search_value')) }}" class="text-decoration-none text-dark">
+                        追い越し {% if sort_by == 'overtake' %}<span class="text-primary">{{ '↓' if sort_order == 'desc'
+                            else '↑' }}</span>{% endif %}
+                    </a>
+                </th>
+
+                <th scope="col" class="sortable" data-column="overtake_after" data-type="number">追い越し後 <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="overtake_by" data-type="string">追い越し者 <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="filename" data-type="string">ファイル名 <span
+                        class="sort-icon"></span></th>
+                <th scope="col" class="sortable" data-column="collection_year" data-type="number">収集年 <span
+                        class="sort-icon"></span></th>
+                <th scope="col" data-column="road_type">道路タイプ</th>
+                <th scope="col" data-column="model_name">モデル名</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for d in detections %}
+            <tr>
+                <td>
+                    <div class="form-check d-flex justify-content-center">
+                        <input class="form-check-input detection-checkbox" type="checkbox" value="{{ d.detection_id }}"
+                            data-run="{{ d.run_id }}">
+                    </div>
+                </td>
+
+                <td data-detection-id="{{ d.detection_id }}">{{ d.detection_id }}</td>
+
+                <td class="small text-muted">
+                    {{ "%.0f"|format(d.x_min) }},{{ "%.0f"|format(d.y_min) }},
+                    {{ "%.0f"|format(d.x_max-d.x_min) }},{{ "%.0f"|format(d.y_max-d.y_min) }}
+                </td>
+
+                <td data-run-id="{{ d.run_id }}">{{ d.run_id }}</td>
+                <td data-class-name="{{ d.class_name }}">{{ d.class_name }}</td>
+                <td data-confidence="{{ d.confidence or 0 }}">{{ d.confidence }}</td>
+                <td data-frame-num="{{ d.frame_num }}">{{ d.frame_num }}</td>
+
+                <td class="fw-bold" data-absolute-speed-kmph="{{ d.absolute_speed_kmph or 0 }}">
+                    {% if d.absolute_speed_kmph %}{{ "%.1f"|format(d.absolute_speed_kmph) }}{% else %}-{% endif %}
+                </td>
+
+                <td data-distance-m="{{ d.distance_m or 0 }}">
+                    {% if d.distance_m %}{{ "%.2f"|format(d.distance_m) }}{% else %}-{% endif %}
+                </td>
+
+                <td data-ttc-s="{{ d.ttc_s or 999999 }}">
+                    {% if d.ttc_s %}
+                    <span
+                        class="{% if d.ttc_s < 2.0 %}text-danger fw-bold{% elif d.ttc_s < 4.0 %}text-warning{% endif %}">
+                        {{ "%.2f"|format(d.ttc_s) }}
+                    </span>
+                    {% else %}-{% endif %}
+                </td>
+
+                <td data-line-distance-m="{{ d.line_distance_m or 0 }}">
+                    {% if d.line_distance_m %}{{ "%.2f"|format(d.line_distance_m) }}{% else %}-{% endif %}
+                </td>
+
+                <td>
+                    {% if d.acceleration_state == '加速' %}
+                    <span class="badge bg-danger">加速</span>
+                    {% elif d.acceleration_state == '減速' %}
+                    <span class="badge bg-primary">減速</span>
+                    {% elif d.acceleration_state == '定速' %}
+                    <span class="badge bg-secondary">定速</span>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+
+                <td data-acceleration-m-s2="{{ d.acceleration_m_s2 or 0 }}">
+                    {% if d.acceleration_m_s2 %}{{ "%.2f"|format(d.acceleration_m_s2) }}{% else %}-{% endif %}
+                </td>
+                <td data-group-id="{{ d.group_id or 0 }}">{{ d.group_id or '-' }}</td>
+                <td data-approach-partner-group-id="{{ d.approach_partner_group_id or 0 }}">{{
+                    d.approach_partner_group_id or '-' }}</td>
+                <td data-approach-distance-m="{{ d.approach_distance_m or 0 }}">
+                    {% if d.approach_distance_m %}{{ "%.2f"|format(d.approach_distance_m) }}{% else %}-{% endif %}
+                </td>
+                <td data-clearance-distance-m="{{ d.clearance_distance_m or 0 }}">
+                    {% if d.clearance_distance_m %}{{ "%.2f"|format(d.clearance_distance_m) }}{% else %}-{% endif %}
+                </td>
+                <td>{{ d.travel_direction or '-' }}</td>
+                <td data-l-line-distance-m="{{ d.l_line_distance_m or 0 }}">
+                    {% if d.l_line_distance_m %}{{ "%.2f"|format(d.l_line_distance_m) }}{% else %}-{% endif %}
+                </td>
+                <td data-r-line-distance-m="{{ d.r_line_distance_m or 0 }}">
+                    {% if d.r_line_distance_m %}{{ "%.2f"|format(d.r_line_distance_m) }}{% else %}-{% endif %}
+                </td>
+
+                <td data-overtake="{{ 1 if d.overtake else 0 }}">
+                    {% if d.overtake %}<span class="badge bg-warning text-dark">Yes</span>{% else %}-{% endif %}
+                </td>
+                <td data-overtake-after="{{ 1 if d.overtake_after else 0 }}">
+                    {% if d.overtake_after %}<span class="badge bg-info text-dark">Yes</span>{% else %}-{% endif %}
+                </td>
+                <td data-overtake-by="{{ d.overtake_by or '' }}">{{ d.overtake_by or '-' }}</td>
+                <td data-filename="{{ d.filename or '' }}" class="small text-muted">{{ d.filename or '-' }}</td>
+
+                <td class="collection-year-cell" data-collection-year="{{ d.collection_year or 0 }}">{{
+                    d.collection_year or '-' }}</td>
+                <td class="road-type-cell">
+                    {% if d.road_type == 'widened' %}拡幅
+                    {% elif d.road_type == 'non_widened' %}未拡幅
+                    {% else %}{{ d.road_type or '-' }}
+                    {% endif %}
+                </td>
+                <td class="small text-muted">{{ d.model_name or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<nav aria-label="Page navigation">
+    <ul class="pagination pagination-sm justify-content-center">
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+            <a class="page-link"
+                href="{{ url_for('main.detections', page=1, run_id=selected_run_id, per_page=per_page, mode='auto') }}">最初</a>
+        </li>
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+            <a class="page-link"
+                href="{{ url_for('main.detections', page=page-1, run_id=selected_run_id, per_page=per_page, mode='auto') }}">前へ</a>
+        </li>
+        <li class="page-item disabled">
+            <span class="page-link">{{ page }} / {{ total_pages }}</span>
+        </li>
+        <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+            <a class="page-link"
+                href="{{ url_for('main.detections', page=page+1, run_id=selected_run_id, per_page=per_page, mode='auto') }}">次へ</a>
+        </li>
+        <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+            <a class="page-link"
+                href="{{ url_for('main.detections', page=total_pages, run_id=selected_run_id, per_page=per_page, mode='auto') }}">最後</a>
+        </li>
+    </ul>
+</nav>
+
+{% else %}
+<div class="alert alert-info">表示できる検出結果がまだありません。推論・後処理を実行するとここに表示されます。</div>
+{% endif %}
+
+{% endif %}
+
+
+{# =========================
+MODALS (共通)
+========================= #}
+
+<!-- Edit Metadata Modal -->
+<div class="modal fade" id="editMetadataModal" tabindex="-1" aria-labelledby="editMetadataModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editMetadataModalLabel">Run メタデータ編集</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editMetadataForm">
+                    <div class="mb-3">
+                        <label for="inputCollectionYear" class="form-label">年度</label>
+                        <input type="number" class="form-control" id="inputCollectionYear">
+                    </div>
+                    <div class="mb-3">
+                        <label for="inputRoadType" class="form-label">道路種別</label>
+                        <select class="form-select" id="inputRoadType">
+                            <option value="">(未設定)</option>
+                            {% for rt in road_types %}
+                            <option value="{{ rt.value }}">{{ rt.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </form>
+                <div class="text-muted small">
+                    ※このモーダルの「保存」はAPIが未実装なら動きません（必要ならエンドポイントも作ります）
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                <button type="button" class="btn btn-primary" id="btnSaveMetadata">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Batch Edit Modal (Auto用) -->
+<div class="modal fade" id="batchEditModal" tabindex="-1" aria-labelledby="batchEditModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="batchEditModalLabel">一括編集</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning small">
+                    選択した全てのRunに対して、以下の値を上書き設定します。<br>
+                    <strong>空欄のまま保存すると、その項目は変更されません。</strong>
+                </div>
+                <form>
+                    <div class="mb-3">
+                        <label for="inputBatchCollectionYear" class="form-label">年度</label>
+                        <input type="number" class="form-control" id="inputBatchCollectionYear"
+                            placeholder="変更しない場合は空欄">
+                    </div>
+                    <div class="mb-3">
+                        <label for="inputBatchRoadType" class="form-label">道路種別</label>
+                        <select id="inputBatchRoadType" class="form-select">
+                            <option value="">(変更なし)</option>
+                            {% for rt in road_types %}
+                            <option value="{{ rt.value }}">{{ rt.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                <button type="button" class="btn btn-primary" id="btnSaveBatch">一括保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Usage Guide Modal -->
+<div class="modal fade" id="usageGuideModal" tabindex="-1" aria-labelledby="usageGuideModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="usageGuideModalLabel">一括編集機能の使い方</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <h6>1. データの選択方法</h6>
+                <ul>
+                    <li><strong>個別選択:</strong> 各行の左端にあるチェックボックスをクリックします。</li>
+                    <li><strong>すべて選択:</strong> 表のヘッダーにあるチェックボックスをクリックすると、全件選択/解除できます。</li>
+                    <li><strong>範囲選択 (Shift+Click):</strong>
+                        <ol>
+                            <li>開始行のチェックボックスをクリックします。</li>
+                            <li><strong>Shiftキーを押しながら</strong>、終了行のチェックボックスをクリックします。</li>
+                            <li>その間のすべての行が一度に選択されます。</li>
+                        </ol>
+                    </li>
+                </ul>
+                <hr>
+                <h6>2. 一括更新の手順</h6>
+                <ol>
+                    <li>1件以上のデータを選択すると、「一括編集」ボタンが有効になります。</li>
+                    <li>ボタンを押すと編集画面が開きます。</li>
+                    <li>変更したい項目（年度、道路種別）を入力してください。
+                        <ul>
+                            <li><strong>空欄（変更しない）:</strong> 何も入力・選択しない場合、その項目は現在の値が維持されます。</li>
+                        </ul>
+                    </li>
+                    <li>「一括保存」を押すと、選択したすべてのRunに対して変更が適用されます。</li>
+                </ol>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+{{ super() }}
+<script>
+    (function () {
+        const quickForm = document.getElementById('postProcessQuickForm');
+        const messageEl = document.getElementById('postProcessQuickMessage');
+        if (!quickForm || !messageEl) {
+            return;
+        }
+
+        const submitButton = quickForm.querySelector('button[type="submit"]');
+
+        quickForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            if (submitButton) {
+                submitButton.disabled = true;
+            }
+            messageEl.textContent = '後処理を開始しています...';
+
+            const formData = new FormData(quickForm);
+            const payload = new URLSearchParams();
+            formData.forEach((value, key) => {
+                if (typeof value === 'string') {
+                    payload.append(key, value);
+                }
+            });
+
+            fetch(quickForm.action, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                },
+                body: payload,
+            })
+                .then(async (res) => {
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || data.status === 'error') {
+                        throw new Error(data.message || '後処理の開始に失敗しました。');
+                    }
+                    if (data.started) {
+                        messageEl.textContent = '後処理を開始しました。進捗は後処理画面で確認できます。';
+                        return;
+                    }
+                    if (typeof data.queue_position === 'number' && data.queue_position > 0) {
+                        messageEl.textContent = `後処理を予約しました。待機順 ${data.queue_position} 件です。`;
+                        return;
+                    }
+                    messageEl.textContent = '後処理を受け付けました。';
+                })
+                .catch((error) => {
+                    messageEl.textContent = error.message || '通信エラーが発生しました。';
+                })
+                .finally(() => {
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                    }
+                });
+        });
+    })();
+</script>
+<script>
+    // ---- Notification ----
+    function showNotification(message, type = 'success') {
+        const container = document.getElementById('notificationContainer');
+        if (!container) return;
+
+        const wrapper = document.createElement('div');
+        wrapper.className = `alert alert-${type} alert-dismissible fade show`;
+        wrapper.role = 'alert';
+        wrapper.innerHTML = `
+      ${message}
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+        container.appendChild(wrapper);
+
+        setTimeout(() => {
+            wrapper.classList.remove('show');
+            setTimeout(() => wrapper.remove(), 150);
+        }, 3000);
+    }
+
+    // 既存コード互換
+    function showAlert(message, type = 'info') {
+        showNotification(message, type);
+    }
+
+    // ---- 即時反映（auto / runs 共通）----
+    function updateTableLocally(runIds, yearVal, roadVal) {
+        // runIds: number[] or string[] -> normalize to string
+        const idSet = new Set(runIds.map(v => String(v)));
+
+        // 収集年セル: .collection-year-cell を runId 行にだけ反映
+        document.querySelectorAll('tr[data-run-id]').forEach(tr => {
+            const rid = tr.getAttribute('data-run-id');
+            if (!rid || !idSet.has(String(rid))) return;
+
+            if (yearVal !== undefined && yearVal !== null && String(yearVal).trim() !== '') {
+                const yCell = tr.querySelector('.collection-year-cell');
+                if (yCell) yCell.textContent = String(yearVal);
+            }
+
+            if (roadVal !== undefined && roadVal !== null && String(roadVal).trim() !== '') {
+                const rCell = tr.querySelector('.road-type-cell');
+                if (rCell) {
+                    // 表示ラベル変換（必要なら拡張）
+                    if (roadVal === 'widened') rCell.textContent = '拡幅';
+                    else if (roadVal === 'non_widened') rCell.textContent = '未拡幅';
+                    else rCell.textContent = String(roadVal);
+                }
+            }
+        });
+
+        // autoテーブル側（detection行に run_id が入ってる）も反映
+        const detRows = document.querySelectorAll('#detectionsTable tbody tr');
+        detRows.forEach(tr => {
+            const runCell = tr.querySelector('[data-run-id]');
+            if (!runCell) return;
+            const rid = runCell.getAttribute('data-run-id');
+            if (!rid || !idSet.has(String(rid))) return;
+
+            if (yearVal !== undefined && yearVal !== null && String(yearVal).trim() !== '') {
+                const yCell = tr.querySelector('.collection-year-cell');
+                if (yCell) yCell.textContent = String(yearVal);
+            }
+            if (roadVal !== undefined && roadVal !== null && String(roadVal).trim() !== '') {
+                const rCell = tr.querySelector('.road-type-cell');
+                if (rCell) {
+                    if (roadVal === 'widened') rCell.textContent = '拡幅';
+                    else if (roadVal === 'non_widened') rCell.textContent = '未拡幅';
+                    else rCell.textContent = String(roadVal);
+                }
+            }
+        });
+    }
+
+    // =========================
+    // Column Visibility (AUTO only)
+    // =========================
+    const COLUMN_DEFINITIONS = {
+        'detection_id': { label: 'ID', category: 'basic', defaultVisible: true, alwaysVisible: true },
+        'bbox': { label: '座標(xywh)', category: 'position', defaultVisible: true },
+        'run_id': { label: 'Run', category: 'basic', defaultVisible: true },
+        'class_name': { label: 'クラス', category: 'basic', defaultVisible: true },
+        'confidence': { label: '信頼度', category: 'basic', defaultVisible: true },
+        'frame_num': { label: 'フレーム', category: 'basic', defaultVisible: true },
+        'absolute_speed_kmph': { label: '絶対速度(km/h)', category: 'metrics', defaultVisible: true },
+        'distance_m': { label: '車間距離(m)', category: 'metrics', defaultVisible: true },
+        'ttc_s': { label: 'TTC(s)', category: 'metrics', defaultVisible: true },
+        'line_distance_m': { label: '白線距離(m)', category: 'metrics', defaultVisible: true },
+        'acceleration_state': { label: '加速状態', category: 'metrics', defaultVisible: true },
+        'acceleration_m_s2': { label: '加速度(m/s²)', category: 'metrics', defaultVisible: false },
+        'group_id': { label: 'グループID', category: 'tracking', defaultVisible: false },
+        'approach_partner_group_id': { label: 'アプローチパートナー', category: 'tracking', defaultVisible: false },
+        'approach_distance_m': { label: 'アプローチ距離(m)', category: 'tracking', defaultVisible: false },
+        'clearance_distance_m': { label: 'クリアランス(m)', category: 'tracking', defaultVisible: false },
+        'travel_direction': { label: '進行方向', category: 'tracking', defaultVisible: false },
+        'l_line_distance_m': { label: '左線距離(m)', category: 'lines', defaultVisible: false },
+        'r_line_distance_m': { label: '右線距離(m)', category: 'lines', defaultVisible: false },
+        'overtake': { label: '追い越し', category: 'overtake', defaultVisible: false },
+        'overtake_after': { label: '追い越し後', category: 'overtake', defaultVisible: false },
+        'overtake_by': { label: '追い越し者', category: 'overtake', defaultVisible: false },
+        'filename': { label: 'ファイル名', category: 'meta', defaultVisible: false },
+        'collection_year': { label: '収集年', category: 'meta', defaultVisible: false },
+        'road_type': { label: '道路タイプ', category: 'meta', defaultVisible: false },
+        'model_name': { label: 'モデル名', category: 'meta', defaultVisible: false }
+    };
+
+    const COLUMN_PRESETS = {
+        'basic': ['detection_id', 'bbox', 'run_id', 'class_name', 'confidence', 'frame_num', 'absolute_speed_kmph', 'distance_m', 'ttc_s', 'line_distance_m', 'acceleration_state'],
+        'detailed': ['detection_id', 'bbox', 'run_id', 'class_name', 'confidence', 'frame_num', 'absolute_speed_kmph', 'distance_m', 'ttc_s', 'line_distance_m', 'acceleration_state', 'acceleration_m_s2', 'group_id', 'approach_distance_m', 'travel_direction'],
+        'all': Object.keys(COLUMN_DEFINITIONS)
+    };
+
+    const COLUMN_VISIBILITY_KEY = 'detections_column_visibility';
+
+    function buildColumnSelector() {
+        const container = document.getElementById('columnSelectorContent');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        const categories = {
+            'basic': '基本情報',
+            'position': '位置',
+            'metrics': '速度・距離',
+            'tracking': '追跡・グループ',
+            'overtake': '追い越し',
+            'lines': '線距離',
+            'meta': 'メタ情報'
+        };
+
+        Object.entries(categories).forEach(([catKey, catLabel]) => {
+            const catDiv = document.createElement('div');
+            catDiv.className = 'mb-3';
+            catDiv.innerHTML = `<strong class="d-block mb-1">${catLabel}</strong>`;
+
+            Object.entries(COLUMN_DEFINITIONS).forEach(([colKey, colDef]) => {
+                if (colDef.category !== catKey) return;
+
+                const isAlwaysVisible = colDef.alwaysVisible === true;
+                const checkDiv = document.createElement('div');
+                checkDiv.className = 'form-check form-check-sm';
+                checkDiv.innerHTML = `
+          <input class="form-check-input column-checkbox" type="checkbox" id="col-${colKey}" value="${colKey}" ${isAlwaysVisible ? 'checked disabled' : ''}>
+          <label class="form-check-label" for="col-${colKey}">${colDef.label}${isAlwaysVisible ? ' (常に表示)' : ''}</label>
+        `;
+                catDiv.appendChild(checkDiv);
+            });
+
+            if (catDiv.childElementCount > 1) container.appendChild(catDiv);
+        });
+    }
+
+    function updateCheckboxes(visibleColumns) {
+        Object.keys(COLUMN_DEFINITIONS).forEach(colKey => {
+            const cb = document.getElementById(`col-${colKey}`);
+            if (cb) cb.checked = visibleColumns.includes(colKey);
+        });
+    }
+
+    function applyVisibility(visibleColumns) {
+        const table = document.getElementById('detectionsTable');
+        if (!table) return;
+
+        const headers = Array.from(table.querySelectorAll('thead th'));
+        const rows = Array.from(table.querySelectorAll('tbody tr'));
+
+        const colIndexMap = {};
+        headers.forEach((th, idx) => {
+            if (th.dataset.column) colIndexMap[th.dataset.column] = idx;
+        });
+
+        // checkbox column always visible
+        if (colIndexMap['checkbox'] !== undefined) {
+            headers[colIndexMap['checkbox']].style.display = '';
+            rows.forEach(r => { if (r.cells[colIndexMap['checkbox']]) r.cells[colIndexMap['checkbox']].style.display = ''; });
+        }
+
+        Object.keys(COLUMN_DEFINITIONS).forEach(colKey => {
+            const idx = colIndexMap[colKey];
+            if (idx === undefined) return;
+
+            const isVisible = visibleColumns.includes(colKey);
+            if (headers[idx]) headers[idx].style.display = isVisible ? '' : 'none';
+            rows.forEach(r => { if (r.cells[idx]) r.cells[idx].style.display = isVisible ? '' : 'none'; });
+        });
+
+        localStorage.setItem(COLUMN_VISIBILITY_KEY, JSON.stringify(visibleColumns));
+        showNotification('表示設定を更新しました', 'info');
+    }
+
+    // グローバル関数（HTML onclick から呼ぶ）
+    window.applyColumnPreset = function (presetName) {
+        const cols = COLUMN_PRESETS[presetName];
+        if (!cols) return;
+        applyVisibility(cols);
+        updateCheckboxes(cols);
+    };
+
+    window.applyColumnVisibility = function () {
+        const cbs = document.querySelectorAll('.column-checkbox');
+        const visible = [];
+        cbs.forEach(cb => { if (cb.checked) visible.push(cb.value); });
+
+        Object.entries(COLUMN_DEFINITIONS).forEach(([key, def]) => {
+            if (def.alwaysVisible && !visible.includes(key)) visible.push(key);
+        });
+
+        applyVisibility(visible);
+        updateCheckboxes(visible);
+    };
+
+    window.resetColumnVisibility = function () {
+        const defaultVisible = Object.keys(COLUMN_DEFINITIONS).filter(k => COLUMN_DEFINITIONS[k].defaultVisible);
+        applyVisibility(defaultVisible);
+        updateCheckboxes(defaultVisible);
+    };
+
+    function initializeColumnVisibility() {
+        if (!document.getElementById('detectionsTable')) return; // AUTOでのみ
+
+        buildColumnSelector();
+
+        const saved = localStorage.getItem(COLUMN_VISIBILITY_KEY);
+        let visible = null;
+        if (saved) {
+            try { visible = JSON.parse(saved); } catch (e) { visible = null; }
+        }
+        if (!visible) visible = COLUMN_PRESETS.all;
+
+        applyVisibility(visible);
+        updateCheckboxes(visible);
+    }
+
+    // =========================
+    // DOM Ready
+    // =========================
+    document.addEventListener('DOMContentLoaded', function () {
+
+        // ---------- AUTO: Select All + Batch button ----------
+        const selectAllDet = document.getElementById('selectAllDetections');
+        const btnBatchEdit = document.getElementById('btnBatchEdit');
+        const btnSaveBatch = document.getElementById('btnSaveBatch');
+
+        function updateAutoBatchBtn() {
+            if (!btnBatchEdit) return;
+            const count = document.querySelectorAll('.detection-checkbox:checked').length;
+            btnBatchEdit.disabled = count === 0;
+            btnBatchEdit.textContent = count > 0 ? `一括編集 (${count}件)` : '一括編集';
+        }
+
+        if (selectAllDet) {
+            selectAllDet.addEventListener('change', function () {
+                document.querySelectorAll('.detection-checkbox').forEach(cb => cb.checked = this.checked);
+                updateAutoBatchBtn();
+            });
+        }
+        document.querySelectorAll('.detection-checkbox').forEach(cb => cb.addEventListener('change', updateAutoBatchBtn));
+
+        if (btnSaveBatch) {
+            btnSaveBatch.addEventListener('click', function () {
+                const year = document.getElementById('inputBatchCollectionYear')?.value ?? '';
+                const road = document.getElementById('inputBatchRoadType')?.value ?? '';
+
+                const checked = document.querySelectorAll('.detection-checkbox:checked');
+                if (checked.length === 0) return;
+
+                const runIds = new Set();
+                checked.forEach(cb => { if (cb.dataset.run) runIds.add(parseInt(cb.dataset.run)); });
+
+                if (runIds.size === 0) { showAlert("Run IDが見つかりません。", "danger"); return; }
+                if (!confirm(`選択した検出に関連する ${runIds.size} 件のRunを一括更新しますか？`)) return;
+
+                const originalText = btnSaveBatch.textContent;
+                btnSaveBatch.disabled = true;
+                btnSaveBatch.textContent = "保存中...";
+
+                fetch('/api/batch_update_run_metadata', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        run_ids: Array.from(runIds),
+                        collection_year: year || null,
+                        road_type: road || null
+                    })
+                })
+                    .then(res => res.ok ? res.json() : res.text().then(t => { throw new Error(t); }))
+                    .then(data => {
+                        if (data.status === 'success') {
+                            showAlert(data.message, "success");
+                            updateTableLocally(Array.from(runIds), year, road);
+
+                            const modalEl = document.getElementById('batchEditModal');
+                            if (modalEl) {
+                                const modal = bootstrap.Modal.getInstance(modalEl);
+                                if (modal) modal.hide();
+                            }
+                        } else {
+                            showAlert("エラー: " + data.message, "danger");
+                        }
+                    })
+                    .catch(err => showAlert("通信エラー: " + err.message, "danger"))
+                    .finally(() => {
+                        btnSaveBatch.disabled = false;
+                        btnSaveBatch.textContent = originalText;
+                        updateAutoBatchBtn();
+                    });
+            });
+        }
+
+        // Search field change submit
+        const searchField = document.getElementById('searchField');
+        if (searchField) {
+            searchField.addEventListener('change', function () {
+                this.closest('form')?.submit();
+            });
+        }
+
+        // ---------- RUNS: selection + shift range + apply ----------
+        const runCheckboxes = document.querySelectorAll('.run-checkbox');
+        const selectAllRuns = document.getElementById('selectAllRuns');
+        const btnApplyRunBatch = document.getElementById('btnApplyRunBatch');
+        const selectedRunCount = document.getElementById('selectedRunCount');
+        let lastIdx = null;
+
+        function getSelectedRunIds() {
+            return Array.from(document.querySelectorAll('.run-checkbox:checked')).map(cb => parseInt(cb.value));
+        }
+
+        function updateRunsCount() {
+            const count = getSelectedRunIds().length;
+            if (selectedRunCount) selectedRunCount.textContent = count;
+            if (btnApplyRunBatch) btnApplyRunBatch.disabled = count === 0;
+        }
+
+        if (selectAllRuns && runCheckboxes.length > 0) {
+            selectAllRuns.addEventListener('change', function () {
+                runCheckboxes.forEach(cb => cb.checked = this.checked);
+                updateRunsCount();
+            });
+        }
+
+        runCheckboxes.forEach((cb, idx) => {
+            cb.addEventListener('click', function (e) {
+                if (e.shiftKey && lastIdx !== null) {
+                    const start = Math.min(lastIdx, idx);
+                    const end = Math.max(lastIdx, idx);
+                    const isChecked = cb.checked;
+                    for (let i = start; i <= end; i++) runCheckboxes[i].checked = isChecked;
+                }
+                lastIdx = idx;
+                updateRunsCount();
+            });
+            cb.addEventListener('change', updateRunsCount);
+        });
+
+
+
+        // init
+        updateAutoBatchBtn();
+        updateRunsCount();
+        initializeColumnVisibility();
+    });
+</script>
+
+{% endblock %}

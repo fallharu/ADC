@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title if title else "ADC System" }}</title>
+  <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/noto-sans-jp.css') }}">
+  <style>
+    body {
+      padding-top: 70px;
+    }
+
+    .card-header {
+      font-weight: bold;
+    }
+
+    .table-sm th,
+    .table-sm td {
+      padding: 0.4rem;
+    }
+  </style>
+</head>
+
+<body>
+  <nav class="navbar navbar-expand-md navbar-dark fixed-top bg-dark">
+    <div class="container-fluid">
+      <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('main.index') }}">
+        <i class="bi bi-speedometer2"></i>
+        ADC System
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarMain">
+        <ul class="navbar-nav me-auto mb-2 mb-md-0">
+          <li class="nav-item">
+            <a href="/global_summary" target="_blank" class="nav-link text-light small d-flex align-items-center gap-2">
+              <i class="bi bi-bar-chart-fill"></i> Global Stats
+            </a>
+          </li>
+        </ul>
+        <ul class="navbar-nav me-auto mb-2 mb-md-0">
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.endpoint == 'main.upload_video' }}"
+              href="{{ url_for('main.upload_video') }}">
+              <i class="bi bi-upload me-1"></i>1. 動画アップロード
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.endpoint == 'main.detect' }}" href="{{ url_for('main.detect') }}">
+              <i class="bi bi-cpu me-1"></i>2. YOLO推論
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.endpoint == 'main.post_process' }}"
+              href="{{ url_for('main.post_process') }}">
+              <i class="bi bi-calculator me-1"></i>3. 後処理
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.endpoint == 'main.detections' }}"
+              href="{{ url_for('main.detections') }}">
+              <i class="bi bi-table me-1"></i>4. 検出結果
+            </a>
+          </li>
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle {{ 'active' if 'manual_overtake' in request.endpoint }}" href="#"
+              role="button" data-bs-toggle="dropdown" aria-expanded="false">
+              <i class="bi bi-pencil-square me-1"></i>5. 手動判定
+            </a>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="{{ url_for('main.manual_overtake') }}"><i
+                    class="bi bi-pencil me-2"></i>付与エディタ</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('main.manual_overtake_view') }}"><i
+                    class="bi bi-eye me-2"></i>イベント観覧</a></li>
+            </ul>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.endpoint == 'main.comparative_report_view' }}"
+              href="{{ url_for('main.comparative_report_view') }}">
+              <i class="bi bi-graph-up-arrow me-1"></i>5.5 比較分析
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if request.endpoint == 'main.statistics_view' }}"
+              href="{{ url_for('main.statistics_view') }}">
+              <i class="bi bi-bar-chart-line me-1"></i>6. 集計
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category, msg in messages %}
+    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+      {{ msg }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+
+  {% block scripts %}{% endblock %}
+</body>
+
+</html>
