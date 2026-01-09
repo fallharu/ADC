@@ -101,7 +101,7 @@ def _load_detection_dataframe(run_ids: Sequence[int]) -> pd.DataFrame:
         JOIN Video v ON d.video_id = v.video_id
         LEFT JOIN Class c ON d.class_id = c.class_id
         WHERE d.run_id IN ({placeholders})
-          AND d.model_name != 'best'
+
     """
 
     with sqlite3.connect(MAIN_DB_PATH) as conn:

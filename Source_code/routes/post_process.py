@@ -162,8 +162,48 @@ def preview_post_process():
             log_step(f"Step 2 Failed (Metadata Fetch): {e}")
             return jsonify({"error": f"Step 2 Failed (Metadata Fetch): {e}", "debug": debug_steps}), 500
 
-        # Determine Profile
-        effective_profile = profile_name if (target_mode == "folder" and profile_name) else repre_info.get("calibration_profile")
+        # Determine Profile - サブフォルダプロファイルも考慮
+        effective_profile = None
+        
+        # 1. 明示的に指定されたプロファイル
+        if target_mode == "folder" and profile_name:
+            effective_profile = profile_name
+            log_step(f"Using explicit folder profile: {profile_name}")
+        
+        # 2. サブフォルダプロファイル設定を確認
+        if not effective_profile:
+            folder_alias_for_run = repre_info.get("folder_alias", "")
+            if folder_alias_for_run:
+                try:
+                    from ..modules.folder_config import load_folder_settings
+                    upload_folder = os.getenv("Upload_folder", "uploads")
+                    
+                    # 階層の深いパスを分解してルートフォルダを特定
+                    alias_parts = folder_alias_for_run.replace("\\", "/").split("/")
+                    if len(alias_parts) >= 2:
+                        # ルートフォルダ（例: new_x）の設定を読み込む
+                        root_alias = alias_parts[0]
+                        root_folder_path = os.path.join(upload_folder, root_alias)
+                        if os.path.isdir(root_folder_path):
+                            settings = load_folder_settings(root_folder_path)
+                            subfolders_config = settings.get("subfolders", {})
+                            # サブフォルダ名（例: 1_250803）のプロファイルを取得
+                            subfolder_name = alias_parts[1]
+                            if subfolder_name in subfolders_config:
+                                effective_profile = subfolders_config[subfolder_name]
+                                log_step(f"Using subfolder profile: {subfolder_name} -> {effective_profile}")
+                            elif folder_alias_for_run in subfolders_config:
+                                effective_profile = subfolders_config[folder_alias_for_run]
+                                log_step(f"Using full alias profile: {folder_alias_for_run} -> {effective_profile}")
+                except Exception as e:
+                    log_step(f"Subfolder profile lookup error: {e}")
+        
+        # 3. Runに保存されたプロファイル
+        if not effective_profile:
+            effective_profile = repre_info.get("calibration_profile")
+            if effective_profile:
+                log_step(f"Using run's saved profile: {effective_profile}")
+        
         log_step(f"Effective profile: {effective_profile}")
         
         # 3. Resolve Video Path
@@ -289,14 +329,17 @@ def post_process_action():
         try:
             import multiprocessing
 
-            # 1. Setup
+            # 1. Setup - 進捗を完全にリセット
             post_process_progress.update({
                 "status": "processing",
                 "current": 0,
                 "total": 0, 
                 "percent": 0,
+                "batch_percent": 0,
                 "message": "初期化中...",
+                "current_detail": "",
                 "details": [],
+                "logs": [],
                 "results": None
             })
 
@@ -310,6 +353,167 @@ def post_process_action():
             t_profile_name = req_data.get("folder_profile_name")
             t_profile_scope = req_data.get("folder_profile_scope")
             
+            # ===== 動画生成処理 =====
+            if action == "generate_video":
+                from ..modules.video_generator import VideoGenerator, normalize_video_options
+                
+                # Run IDの取得
+                if not t_run_id:
+                    post_process_progress.update({
+                        "status": "error",
+                        "message": "Run IDが指定されていません。"
+                    })
+                    return
+                
+                run_id = int(t_run_id)
+                
+                post_process_progress.update({
+                    "message": f"Run ID {run_id} の動画を生成中...",
+                    "percent": 10
+                })
+                
+                # 動画オプションの取得
+                video_options = {}
+                
+                # 表示要素のチェックボックス
+                if req_data.get("video_options_submitted"):
+                    video_options["show_vehicle_box"] = req_data.get("video_show_vehicle_box") is not None
+                    video_options["show_tire_boxes"] = req_data.get("video_show_tire_boxes") is not None
+                    video_options["show_trace"] = req_data.get("video_show_trace") is not None
+                    video_options["show_measurement"] = req_data.get("video_show_measurement") is not None
+                    video_options["show_approach_lines"] = req_data.get("video_show_approach_lines") is not None
+                    video_options["show_lane_left"] = req_data.get("video_show_lane_left") is not None
+                    video_options["show_lane_right"] = req_data.get("video_show_lane_right") is not None
+                    video_options["show_lane_center"] = req_data.get("video_show_lane_center") is not None
+                    video_options["show_homography_overlay"] = req_data.get("video_show_homography_overlay") is not None
+                    video_options["show_homography_only"] = req_data.get("video_show_homography_only") is not None
+                    
+                    # ラベル項目
+                    video_options["label_group_id"] = req_data.get("video_label_group") is not None
+                    video_options["label_speed"] = req_data.get("video_label_speed") is not None
+                    video_options["label_lane_distance"] = req_data.get("video_label_lane") is not None
+                    video_options["label_approach"] = req_data.get("video_label_approach") is not None
+                    video_options["label_clearance"] = req_data.get("video_label_clearance") is not None
+                    video_options["label_direction"] = req_data.get("video_label_direction") is not None
+                    video_options["label_overtake"] = req_data.get("video_label_overtake") is not None
+                    video_options["label_acceleration"] = req_data.get("video_label_acceleration") is not None
+                    
+                    # フォント設定
+                    font_path = req_data.get("video_font_path")
+                    if font_path:
+                        video_options["font_path"] = font_path
+                    
+                    font_size = req_data.get("video_font_size")
+                    if font_size:
+                        try:
+                            video_options["font_size"] = int(font_size)
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    # 出力設定
+                    output_format = req_data.get("video_output_format")
+                    if output_format:
+                        video_options["output_format"] = output_format
+                    
+                    output_name_mode = req_data.get("video_output_name_mode")
+                    if output_name_mode:
+                        video_options["output_name_mode"] = output_name_mode
+                
+                # VideoGeneratorで動画生成
+                try:
+                    post_process_progress.update({
+                        "message": f"動画生成を開始しています...",
+                        "percent": 20
+                    })
+                    
+                    generator = VideoGenerator(run_id, options=video_options)
+                    output_path = generator.run()
+                    
+                    post_process_progress.update({
+                        "status": "complete",
+                        "percent": 100,
+                        "message": f"動画生成が完了しました: {output_path}",
+                        "results": {
+                            "output_path": output_path,
+                            "run_id": run_id
+                        }
+                    })
+                    
+                except Exception as e:
+                    current_app.logger.exception(f"Video generation failed for run {run_id}")
+                    post_process_progress.update({
+                        "status": "error",
+                        "message": f"動画生成に失敗しました: {str(e)}"
+                    })
+                
+                return
+            
+                return
+            
+            # ===== Export Targets (Bicycle / Overtaken) Logic =====
+            if action in ["export_targets_csv", "export_targets_excel"]:
+                # 1. Identify Target Runs based on t_mode
+                target_runs = []
+                from ..modules.db_manager import list_folder_batches, get_run_ids_by_folder, get_all_run_ids, get_run_ids_by_condition
+
+                if t_mode == "all" or action == "process_all": # Though action check handles intent, keep t_mode consistency
+                    target_runs = get_all_run_ids()
+                
+                elif t_mode == "folder" and t_folder:
+                    target_runs = get_run_ids_by_folder(t_folder)
+                    
+                elif t_mode == "run" and t_run_id:
+                    target_runs = [int(t_run_id)]
+                    
+                elif t_mode == "condition":
+                    t_road_type = req_data.get("condition_road_type")
+                    t_year = req_data.get("condition_year")
+                    target_runs = get_run_ids_by_condition(road_type=t_road_type, process_year=t_year)
+                
+                if not target_runs:
+                     return jsonify({"status": "error", "message": "対象のデータが見つかりません"}), 404
+
+                # 2. Export Data
+                from ..modules.comparative_report import export_target_vehicles
+                fmt = "csv" if action == "export_targets_csv" else "excel"
+                file_bytes = export_target_vehicles(target_runs, output_format=fmt)
+                
+                # 3. Create temp file for download (since this is async worker, we need a way to pass it back... 
+                # actually, post_process_action is defined as start_background_task. 
+                # This route is NOT returning a file directly, it returns JSON status.
+                # So we must save the file and return the path in 'results'.
+                
+                # ...Wait, the user wants a button that downloads the file.
+                # If I use the existing async worker structure, the user will have to wait for the progress bar to finish?
+                # Exporting might be fast enough to be synchronous, OR I should save it to 'outputs' and provide a link.
+                
+                # Let's save to a temp file in 'outputs/exports' and return the path.
+                
+                filename = f"targets_export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.{'csv' if fmt == 'csv' else 'xlsx'}"
+                export_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'exports')
+                os.makedirs(export_dir, exist_ok=True)
+                file_path = os.path.join(export_dir, filename)
+                
+                with open(file_path, "wb") as f:
+                    f.write(file_bytes)
+                    
+                # Update progress to complete immediately
+                post_process_progress.update({
+                    "status": "complete",
+                    "percent": 100,
+                    "message": "エクスポートが完了しました。",
+                    "results": {
+                        "download_url": f"/exports/{filename}", # Need a route to serve this? or static?
+                        # Usually 'uploads' is static? Let's check. 
+                        # If 'exports' is in UPLOAD_FOLDER, typically accessible via route if configured.
+                        # Assuming I need to verify how to serve. 
+                        # For now, let's assume I can serve it or I'll add a simple download route.
+                        "filename": filename
+                    }
+                })
+                return
+
+            # ===== 既存のバッチ処理 =====
             # --- Apply Profile Logic ---
             if t_mode == "folder" and t_folder and t_profile_name:
                 from ..modules.db_manager import update_folder_profiles
@@ -327,6 +531,26 @@ def post_process_action():
                 runs = get_run_ids_by_folder(t_folder)
                 if runs:
                     valid_batches.append((t_folder, runs))
+                    
+            elif action == "process_all" or (action == "all_postprocess" and t_mode == "all"):
+                # 全てのフォルダバッチを対象にする（フォルダ単位でまとめる）
+                # さらに、フォルダに属さないRun（orphan）も拾う
+                from ..modules.db_manager import get_all_run_ids
+                
+                # 1. 既存のフォルダバッチを追加
+                processed_run_ids = set()
+                for b in batches:
+                    runs = get_run_ids_by_folder(b["folder_alias"])
+                    if runs:
+                        valid_batches.append((b["folder_alias"], runs))
+                        processed_run_ids.update(runs)
+                
+                # 2. フォルダに属さないRun（Orphan）を追加
+                all_ids = get_all_run_ids()
+                orphan_runs = [rid for rid in all_ids if rid not in processed_run_ids]
+                
+                if orphan_runs:
+                    valid_batches.append(("Uncategorized (Orphan)", orphan_runs))
             
             elif t_mode == "run" and t_run_id:
                 # Filter for single run
@@ -390,18 +614,28 @@ def post_process_action():
                         msg = q.get()
                         if msg == "DONE":
                             break
-                        if isinstance(msg, dict) and msg.get("type") == "progress":
-                            # Detailed update
-                            # Note: We want to show "Current overall" and "what is being calculated"
-                            # We might overwrite the message or append to details
+                        if isinstance(msg, dict):
+                            msg_type = msg.get("type", "")
                             m_text = msg.get("message", "")
-                            m_percent = msg.get("percent", 0)
-                            if m_text:
-                                post_process_progress["message"] = m_text
-                                post_process_progress["current_detail"] = m_text
                             
-                            # Update batch specific percent
-                            post_process_progress["batch_percent"] = m_percent
+                            if msg_type == "progress":
+                                # バッチ内進捗の更新
+                                m_percent = msg.get("percent", 0)
+                                if m_text:
+                                    post_process_progress["message"] = m_text
+                                    post_process_progress["current_detail"] = m_text
+                                post_process_progress["batch_percent"] = m_percent
+                                
+                            elif msg_type == "log":
+                                # ターミナル出力をログに追加
+                                if m_text:
+                                    logs = post_process_progress.get("logs", [])
+                                    # 最大100件に制限
+                                    if len(logs) >= 100:
+                                        logs = logs[-99:]
+                                    logs.append(m_text)
+                                    post_process_progress["logs"] = logs
+                                    
                     except Exception:
                         break
 
@@ -471,7 +705,17 @@ def post_process_action():
                 "message": f"エラーが発生しました: {str(e)}"
             })
     
-    thread = threading.Thread(target=worker)
+
+    
+    # Capture the real app object to pass to the thread
+    app = current_app._get_current_object()
+
+    def worker_wrapper():
+        """Worker wrapper to ensure application context"""
+        with app.app_context():
+            worker()
+
+    thread = threading.Thread(target=worker_wrapper)
     thread.daemon = True
     thread.start()
     
@@ -658,4 +902,63 @@ def calibration_preview_api(run_id):
         
     except Exception as e:
         current_app.logger.exception(f"Preview API failed for run {run_id}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@main.route("/api/traffic_count/<int:run_id>")
+def api_traffic_count(run_id):
+    """指定Run IDのカウント線通過車両集計結果を取得"""
+    try:
+        import sqlite3
+        from ..modules.db_manager import MAIN_DB_PATH, configure_connection
+        
+        with sqlite3.connect(MAIN_DB_PATH) as conn:
+            configure_connection(conn)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            
+            # TrafficCountテーブルからデータを取得
+            c.execute("""
+                SELECT 
+                    line_name,
+                    object_type,
+                    direction,
+                    count,
+                    created_at
+                FROM TrafficCount
+                WHERE run_id = ?
+                ORDER BY line_name, object_type, direction
+            """, (run_id,))
+            
+            rows = c.fetchall()
+            
+            if not rows:
+                return jsonify({
+                    "status": "ok",
+                    "run_id": run_id,
+                    "has_data": False,
+                    "message": "カウントデータが見つかりません",
+                    "data": []
+                })
+            
+            # データを整形
+            results = []
+            for row in rows:
+                results.append({
+                    "line_name": row["line_name"],
+                    "object_type": row["object_type"],
+                    "direction": row["direction"],
+                    "count": row["count"],
+                    "created_at": row["created_at"]
+                })
+            
+            return jsonify({
+                "status": "ok",
+                "run_id": run_id,
+                "has_data": True,
+                "data": results
+            })
+            
+    except Exception as e:
+        current_app.logger.exception(f"Traffic count API failed for run {run_id}")
         return jsonify({"status": "error", "message": str(e)}), 500

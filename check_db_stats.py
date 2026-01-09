@@ -1,45 +1,55 @@
 import sqlite3
-import sys
+import os
 
-db_path = 'db/my_app_data.db'
+db_path = os.path.join("db", "my_app_data.db")
+if not os.path.exists(db_path):
+    print(f"Database not found: {db_path}")
+    exit(1)
 
-def check_db():
-    try:
-        with open('db_check_result.txt', 'w', encoding='utf-8') as f:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            
-            f.write('--- 2025 Overtake Counts ---\n')
-            query = """
-            SELECT 
-                v.road_type, 
-                COUNT(e.overtake_event_id) as total, 
-                SUM(CASE WHEN e.speed_profile_json IS NOT NULL THEN 1 ELSE 0 END) as processed 
-            FROM OvertakeEvents e 
-            JOIN ProcessLog p ON e.run_id = p.run_id 
-            JOIN Video v ON p.video_id = v.video_id 
-            WHERE v.collection_year = 2025 
-            GROUP BY v.road_type
-            """
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            for row in rows:
-                f.write(f"Road Type: {row[0]}, Total Events: {row[1]}, Processed Events: {row[2]}\n")
-                
-            f.write('\n--- OvertakeEvents Columns ---\n')
-            cursor.execute('PRAGMA table_info(OvertakeEvents)')
-            cols = [r[1] for r in cursor.fetchall()]
-            f.write(str(cols) + '\n')
+conn = sqlite3.connect(db_path)
+c = conn.cursor()
 
-            f.write('\n--- Detection Columns ---\n')
-            cursor.execute('PRAGMA table_info(Detection)')
-            cols = [r[1] for r in cursor.fetchall()]
-            f.write(str(cols) + '\n')
-            
-            conn.close()
-        print("Done writing to db_check_result.txt")
-    except Exception as e:
-        print(f"Error: {e}")
+# Get all tables
+c.execute("SELECT name FROM sqlite_master WHERE type='table'")
+tables = [r[0] for r in c.fetchall()]
+print("=== Database Tables ===")
+for t in tables:
+    c.execute(f'SELECT COUNT(*) FROM "{t}"')
+    count = c.fetchone()[0]
+    print(f"  {t}: {count} rows")
 
-if __name__ == "__main__":
-    check_db()
+# Key statistics
+print("\n=== Key Statistics ===")
+
+# Total runs
+c.execute("SELECT COUNT(*) FROM ProcessLog")
+print(f"Total Runs: {c.fetchone()[0]}")
+
+# Total detections
+c.execute("SELECT COUNT(*) FROM Detection")
+print(f"Total Detections: {c.fetchone()[0]}")
+
+# Total overtakes (auto)
+c.execute("SELECT COUNT(*) FROM OvertakeEvents")
+print(f"Automatic Overtakes: {c.fetchone()[0]}")
+
+# Total manual overtakes
+try:
+    c.execute("SELECT COUNT(*) FROM ManualOvertakeEvents")
+    print(f"Manual Overtakes: {c.fetchone()[0]}")
+except:
+    print("Manual Overtakes: 0 (table not exists)")
+
+# Road types
+c.execute("SELECT road_type, COUNT(*) FROM Video WHERE road_type IS NOT NULL GROUP BY road_type")
+print("\n=== Road Types ===")
+for row in c.fetchall():
+    print(f"  {row[0]}: {row[1]} videos")
+
+# Years
+c.execute("SELECT collection_year, COUNT(*) FROM Video WHERE collection_year IS NOT NULL GROUP BY collection_year")
+print("\n=== Collection Years ===")
+for row in c.fetchall():
+    print(f"  {row[0]}: {row[1]} videos")
+
+conn.close()

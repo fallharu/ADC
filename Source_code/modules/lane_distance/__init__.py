@@ -17,7 +17,7 @@ from ..manual_metrics import lane_scale_at_point
 from ..calibration_loader import load_calibration_json
 
 
-LANE_WIDTH_METERS = 8.0
+LANE_WIDTH_METERS = 7.0
 CM_PER_METER = 100.0
 VERTICAL_TOLERANCE_PX = 5.0
 
@@ -214,7 +214,7 @@ def assign_lane_distance(
         df = pd.read_sql_query(
             """
             SELECT d.auto_id, d.frame_num, d.group_id, d.model_name,
-                   d.x1, d.y1, d.x2, d.y2, c.class_name
+                   d.x1, d.y1, d.x2, d.y2, c.class_name, d.travel_direction
             FROM Detection d
             LEFT JOIN Class c ON d.class_id = c.class_id
             WHERE d.run_id = ? AND d.group_id IS NOT NULL

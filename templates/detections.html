@@ -94,6 +94,44 @@
         class="btn btn-sm {% if current_mode == 'manual' %}btn-primary{% else %}btn-outline-primary{% endif %}">手動追い越し</a>
     <a href="{{ runs_toggle_url }}"
         class="btn btn-sm {% if current_mode == 'runs' %}btn-primary{% else %}btn-outline-primary{% endif %}">Run属性編集</a>
+    <button type="button" class="btn btn-sm btn-outline-info" data-bs-toggle="collapse"
+        data-bs-target="#folderSummaryCollapse">
+        <i class="bi bi-bar-chart me-1"></i>概略確認
+    </button>
+</div>
+
+<!-- 概略確認セクション -->
+<div class="collapse mb-3" id="folderSummaryCollapse">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center py-2">
+            <span><i class="bi bi-folder me-1"></i>フォルダ別集計</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshSummaryBtn">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>フォルダ</th>
+                            <th class="text-center">Run数</th>
+                            <th class="text-center"><i class="bi bi-car-front me-1"></i>車</th>
+                            <th class="text-center"><i class="bi bi-bicycle me-1"></i>自転車</th>
+                            <th class="text-center"><i class="bi bi-arrow-left-right me-1"></i>追い越し</th>
+                        </tr>
+                    </thead>
+                    <tbody id="folderSummaryBody">
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-3">読み込み中...</td>
+                        </tr>
+                    </tbody>
+                    <tfoot class="table-secondary" id="folderSummaryTotal">
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 
 
@@ -498,6 +536,43 @@ AUTO MODE
         <span class="fw-semibold">全 {{ total }} 件中 {{ (page - 1) * per_page + 1 }} - {{ [(page * per_page), total]|min
             }} 件を表示</span>
     </div>
+    <div class="btn-group btn-group-sm">
+        <a href="{{ url_for('main.export_all_detections', format='csv', run_id=selected_run_id or '') }}"
+            class="btn btn-outline-success">
+            <i class="bi bi-filetype-csv"></i> CSV出力
+        </a>
+        <a href="{{ url_for('main.export_all_detections', format='xlsx', run_id=selected_run_id or '') }}"
+            class="btn btn-outline-success">
+            <i class="bi bi-file-earmark-excel"></i> Excel出力
+        </a>
+        <a href="{{ url_for('main.export_tracks', run_id=selected_run_id or '') }}" class="btn btn-success ms-2">
+            <i class="bi bi-file-earmark-spreadsheet"></i> 全トラックデータ(詳細)
+        </a>
+        <div class="btn-group ms-2">
+            <button type="button" class="btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown"
+                aria-expanded="false">
+                <i class="bi bi-filter"></i> 自転車・対象車(下り)
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item"
+                        href="{{ url_for('main.export_all_detections', format='csv', run_id=selected_run_id or '', filter='bicycle_overtake_b') }}">CSV出力</a>
+                </li>
+                <li><a class="dropdown-item"
+                        href="{{ url_for('main.export_all_detections', format='xlsx', run_id=selected_run_id or '', filter='bicycle_overtake_b') }}">Excel出力</a>
+                </li>
+            </ul>
+        </div>
+        <div class="btn-group ms-2">
+            <a href="{{ url_for('main.detections', mode='auto', search_field='overtake', search_value='has' if request.args.get('search_value') != 'has' else '') }}"
+                class="btn btn-sm {{ 'btn-warning' if request.args.get('search_field') == 'overtake' and request.args.get('search_value') == 'has' else 'btn-outline-warning' }}">
+                <i class="bi bi-cone-striped"></i> 追い越しのみ
+            </a>
+        </div>
+        <a href="{{ url_for('main.export_db') }}" class="btn btn-outline-secondary ms-2"
+            onclick="return confirm('現在のデータベースをバックアップ・出力しますか？');">
+            <i class="bi bi-database-down"></i> DB出力
+        </a>
+    </div>
 </div>
 
 <div class="table-responsive">
@@ -571,8 +646,22 @@ AUTO MODE
                 </th>
                 <th scope="col" class="sortable" data-column="approach_distance_m" data-type="number">アプローチ距離(m) <span
                         class="sort-icon"></span></th>
-                <th scope="col" class="sortable" data-column="clearance_distance_m" data-type="number">クリアランス(m) <span
-                        class="sort-icon"></span></th>
+                <th scope="col" data-column="clearance_distance_m">
+                    <a href="{{ url_for('main.detections',
+                      page=page, run_id=run_id, per_page=per_page,
+                      sort_by='clearance_distance_m',
+                      sort_order='desc' if sort_by=='clearance_distance_m' and sort_order=='asc' else 'asc',
+                      mode='auto',
+                      search_field=request.args.get('search_field'),
+                      search_text=request.args.get('search_text'),
+                      search_option=request.args.get('search_option'),
+                      search_min=request.args.get('search_min'),
+                      search_max=request.args.get('search_max'),
+                      search_value=request.args.get('search_value')) }}" class="text-decoration-none text-dark">
+                        離隔距離(m) {% if sort_by == 'clearance_distance_m' %}<span class="text-primary">{{ '↓' if
+                            sort_order == 'desc' else '↑' }}</span>{% endif %}
+                    </a>
+                </th>
                 <th scope="col" data-column="travel_direction">進行方向</th>
                 <th scope="col" class="sortable" data-column="l_line_distance_m" data-type="number">左線距離(m) <span
                         class="sort-icon"></span></th>
@@ -619,7 +708,12 @@ AUTO MODE
                     </div>
                 </td>
 
-                <td data-detection-id="{{ d.detection_id }}">{{ d.detection_id }}</td>
+                <td data-detection-id="{{ d.detection_id }}">
+                    <a href="javascript:void(0)" onclick="showPreview({{ d.detection_id }}); return false;"
+                        class="text-decoration-none fw-bold">
+                        {{ d.detection_id }} <i class="bi bi-camera-fill ms-1 text-secondary small"></i>
+                    </a>
+                </td>
 
                 <td class="small text-muted">
                     {{ "%.0f"|format(d.x_min) }},{{ "%.0f"|format(d.y_min) }},
@@ -1281,11 +1375,139 @@ MODALS (共通)
 
 
 
+        // ---------- FOLDER SUMMARY ----------
+        async function loadFolderSummary() {
+            const tbody = document.getElementById('folderSummaryBody');
+            const tfoot = document.getElementById('folderSummaryTotal');
+            if (!tbody) return;
+
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3"><i class="bi bi-hourglass-split me-1"></i>読み込み中...</td></tr>';
+
+            try {
+                const res = await fetch('/api/folder_summary');
+                const data = await res.json();
+
+                if (!data.ok || !data.data || data.data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">データがありません</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                let totalRuns = 0, totalCars = 0, totalBicycles = 0, totalOvertakes = 0;
+
+                for (const row of data.data) {
+                    totalRuns += row.run_count || 0;
+                    totalCars += row.car_count || 0;
+                    totalBicycles += row.bicycle_count || 0;
+                    totalOvertakes += row.overtake_count || 0;
+
+                    html += `<tr>
+                        <td class="text-truncate" style="max-width: 200px;" title="${row.folder}">${row.folder}</td>
+                        <td class="text-center">${row.run_count}</td>
+                        <td class="text-center">${row.car_count || 0}</td>
+                        <td class="text-center">${row.bicycle_count || 0}</td>
+                        <td class="text-center"><span class="badge bg-warning text-dark">${row.overtake_count || 0}</span></td>
+                    </tr>`;
+                }
+                tbody.innerHTML = html;
+
+                // Total row
+                if (tfoot) {
+                    tfoot.innerHTML = `<tr>
+                        <th>合計</th>
+                        <th class="text-center">${totalRuns}</th>
+                        <th class="text-center">${totalCars}</th>
+                        <th class="text-center">${totalBicycles}</th>
+                        <th class="text-center"><span class="badge bg-warning text-dark">${totalOvertakes}</span></th>
+                    </tr>`;
+                }
+            } catch (err) {
+                console.error('Folder summary error:', err);
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-3">エラーが発生しました</td></tr>';
+            }
+        }
+
+        // Load on collapse show
+        const summaryCollapse = document.getElementById('folderSummaryCollapse');
+        if (summaryCollapse) {
+            summaryCollapse.addEventListener('show.bs.collapse', () => loadFolderSummary());
+        }
+
+        // Refresh button
+        const refreshBtn = document.getElementById('refreshSummaryBtn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => loadFolderSummary());
+        }
+
         // init
         updateAutoBatchBtn();
         updateRunsCount();
         initializeColumnVisibility();
     });
+</script>
+
+<!-- Preview Modal -->
+<div class="modal fade" id="previewModal" tabindex="-1" aria-labelledby="previewModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="previewModalLabel">Detection Preview</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center bg-dark">
+                <!-- Initial State: Button -->
+                <div id="previewStartContainer" class="py-5">
+                    <p class="text-light mb-3">プレビュー画像を生成しますか？</p>
+                    <button type="button" class="btn btn-primary" onclick="loadPreviewImage()">
+                        <i class="bi bi-play-fill me-1"></i> 生成して表示
+                    </button>
+                </div>
+
+                <!-- Loading State -->
+                <div id="previewLoading" class="text-light py-5" style="display: none;">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div class="mt-2 small text-muted">画像生成中...</div>
+                </div>
+
+                <!-- Image State -->
+                <img id="previewImage" src="" class="img-fluid" style="display: none;"
+                    onload="document.getElementById('previewLoading').style.display='none'; this.style.display='inline';"
+                    onerror="alert('画像の読み込みに失敗しました'); document.getElementById('previewLoading').style.display='none'; document.getElementById('previewStartContainer').style.display='block';">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentDetectionId = null;
+
+    function showPreview(detectionId) {
+        currentDetectionId = detectionId;
+        var modal = new bootstrap.Modal(document.getElementById('previewModal'));
+
+        // Reset UI State
+        document.getElementById('previewStartContainer').style.display = 'block';
+        document.getElementById('previewLoading').style.display = 'none';
+
+        var img = document.getElementById('previewImage');
+        img.style.display = 'none';
+        img.src = ""; // Clear previous image
+
+        modal.show();
+    }
+
+    function loadPreviewImage() {
+        if (!currentDetectionId) return;
+
+        document.getElementById('previewStartContainer').style.display = 'none';
+        document.getElementById('previewLoading').style.display = 'block';
+
+        var img = document.getElementById('previewImage');
+        // Add timestamp to prevent caching
+        img.src = "/detections/preview_image/" + currentDetectionId + "?t=" + new Date().getTime();
+    }
 </script>
 
 {% endblock %}

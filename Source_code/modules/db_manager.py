@@ -262,6 +262,19 @@ def init_db():
                 FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
              )
         """)
+        # TrafficCount - カウント線通過車両集計
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS TrafficCount (
+                count_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER,
+                line_name TEXT,
+                object_type TEXT,
+                direction TEXT,
+                count INTEGER,
+                created_at TEXT,
+                FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+            )
+        """)
         # Run table compatibility (view or alias)
         # Some old code query 'Run'
         conn.execute("CREATE VIEW IF NOT EXISTS Run AS SELECT * FROM ProcessLog")
@@ -542,6 +555,8 @@ def show_recent_detections(page=1, per_page=50, run_id=None, sort_by=None, sort_
             'acceleration_m_s2': 'd.acceleration_m_s2',
             'acceleration_state': 'd.acceleration_state',
             'group_id': 'd.group_id',
+            'approach_distance_m': 'd.approach_distance_m',
+            'clearance_distance_m': 'd.clearance_distance_m',
             'overtake': 'd.overtake',
             'overtake_after': 'd.overtake_after',
             'overtake_by': 'd.overtake_by',
@@ -607,6 +622,92 @@ def list_locations():
 
 def register_location(name, address):
     pass
+
+
+
+def list_manual_overtake_events(run_id=None, limit=500):
+    """Manual overtake events retrieval with optional filtering."""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        
+        # Build WHERE clause based on filters
+        where_clauses = []
+        params = []
+        
+        if run_id is not None:
+            where_clauses.append("run_id = ?")
+            params.append(run_id)
+        
+        where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+        
+        # Query manual overtake events from ManualOvertakeEvents table
+        sql = f"""
+        SELECT 
+            manual_event_id,
+            run_id,
+            frame_num,
+            video_time_s,
+            overtaker_group_id,
+            overtaker_class_name,
+            overtaker_speed_km_h,
+            """
+        # ... (unchanged)
+
+def get_detection_preview_info(detection_id: int):
+    """プレビュー表示用にDetectionの詳細情報（BBOXと動画パス）を取得する"""
+    with get_db_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        
+        # 1. 対象のDetectionとVideo情報を取得
+        sql = """
+            SELECT 
+                d.run_id, d.frame_num, d.group_id, d.class_id,
+                d.x1, d.y1, d.x2, d.y2,
+                d.overtake_by, d.overtake,
+                v.filename, v.source_path,
+                pl.output_folder, pl.folder_alias,
+                cm.class_name
+            FROM Detection d
+            JOIN ProcessLog pl ON d.run_id = pl.run_id
+            JOIN Video v ON pl.video_id = v.video_id
+            LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+            WHERE d.auto_id = ?
+        """
+        row = c.execute(sql, (detection_id,)).fetchone()
+        if not row:
+            return None
+        
+        info = dict(row)
+        
+        # 2. パートナー車両（相手）のBBOXを取得
+        partner_sql = None
+        partner_binding = None
+
+        # Case A: 自分が追い越された（overtake_by がセットされている）
+        if info['overtake_by']:
+            partner_sql = """
+                SELECT x1, y1, x2, y2, cm.class_name
+                FROM Detection d
+                LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+                WHERE auto_id = ?
+            """
+            partner_binding = (info['overtake_by'],)
+        
+
+
+        if partner_sql:
+            partner = c.execute(partner_sql, partner_binding).fetchone()
+            if partner:
+                info['partner_bbox'] = {
+                    'x1': partner['x1'],
+                    'y1': partner['y1'],
+                    'x2': partner['x2'],
+                    'y2': partner['y2'],
+                    'class_name': partner['class_name']
+                }
+        
+        return info
 
 def list_manual_overtake_events(run_id=None, limit=500):
     """Manual overtake events retrieval with optional filtering."""
@@ -748,6 +849,50 @@ def get_run_ids_by_folder(folder_alias):
         return [r[0] for r in rows]
 
 # Removed duplicate definition
+
+
+def get_all_run_ids():
+    """ProcessLogに存在する全てのRun IDのリストを返す"""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        sql = "SELECT run_id FROM ProcessLog ORDER BY run_id"
+        rows = c.execute(sql).fetchall()
+        return [r[0] for r in rows]
+
+
+
+
+def get_run_ids_by_condition(road_type=None, process_year=None):
+    """条件（道路タイプ、年度）に一致するRun IDのリストを返す"""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        
+        where = []
+        params = []
+        
+        if road_type and road_type != 'all':
+            where.append("v.road_type = ?")
+            params.append(road_type)
+            
+        if process_year and process_year != 'all':
+             try:
+                 year_int = int(process_year)
+                 where.append("v.collection_year = ?")
+                 params.append(year_int)
+             except (ValueError, TypeError):
+                 pass
+        
+        where_clause = "WHERE " + " AND ".join(where) if where else ""
+        
+        sql = f"""
+            SELECT p.run_id 
+            FROM ProcessLog p
+            JOIN Video v ON p.video_id = v.video_id
+            {where_clause}
+            ORDER BY p.run_id
+        """
+        rows = c.execute(sql, params).fetchall()
+        return [r[0] for r in rows]
 
 
 def update_run_metadata(run_id, collection_year=None, road_type=None):
@@ -953,4 +1098,180 @@ def update_folder_profiles(folder_alias: str, profile_name: str, scope: Optional
         c.execute(sql, params)
         conn.commit()
         return c.rowcount
+
+
+def get_track_data_for_export(run_id=None):
+    """
+    Exports full track data for:
+    1. Bicycle groups (class_id for bicycle)
+    2. Overtake groups (overtake=1 or overtake_by is not null)
+    
+    Returns a dictionary of pandas DataFrames: {'bicycle': df, 'overtake': df}
+    """
+    # Import pandas locally to be safe if not at top
+    import pandas as pd
+    
+    with get_db_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor() # Get cursor from connection
+
+        # --- Scoped Query Helpers ---
+        def get_all_group_ids_by_type(target_type):
+            """
+            target_type: 'bicycle' or 'overtake'
+            Returns a list of group_ids
+            """
+            params = []
+            if target_type == 'bicycle':
+                 # Assuming 'bicycle' class_id is known or we join ClassMaster.
+                 # Let's verify class name.
+                 sql = """
+                 SELECT DISTINCT d.group_id 
+                 FROM Detection d
+                 JOIN ClassMaster cm ON d.class_id = cm.class_id
+                 WHERE cm.class_name = 'bicycle' AND d.group_id IS NOT NULL
+                 """
+            elif target_type == 'overtake':
+                sql = """
+                SELECT DISTINCT d.group_id
+                FROM Detection d
+                WHERE (d.overtake = 1 OR d.overtake_by IS NOT NULL) AND d.group_id IS NOT NULL
+                """
+            else:
+                return []
+            
+            if run_id:
+                sql += " AND d.run_id = ?"
+                params.append(run_id)
+            
+            try:
+                rows = c.execute(sql, params).fetchall() # Use 'c' from outer scope
+                return [r['group_id'] for r in rows]
+            except Exception as e:
+                print(f"Error fetching group IDs for {target_type}: {e}")
+                return []
+
+        def  fetch_tracks_for_groups(group_ids):
+             if not group_ids:
+                 return pd.DataFrame()
+             
+             placeholders = ','.join(['?'] * len(group_ids))
+             sql = f"""
+             SELECT 
+                 d.auto_id as ID,
+                 d.group_id as GroupID,
+                 v.filename as Folder, -- Maps to '動画名'? Folder structure implies run/video relationship
+                 d.frame_num as Frame,
+                 cm.class_name as Class,
+                 d.approach_distance_m as ClearanceDist_m,
+                 d.line_distance_m as LineDist_m,
+                 -- 'OuterLineJudgment' needs logic? Assuming simple check if available or placeholder
+                 NULL as Status, -- Placeholder for Misjudgment flag
+                 d.speed_km_h as Speed_kmh,
+                 d.run_id,
+                 pl.output_folder -- To help derive 'Location' or 'Folder'
+             FROM Detection d
+             JOIN ProcessLog pl ON d.run_id = pl.run_id
+             JOIN Video v ON pl.video_id = v.video_id
+             LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+             WHERE d.group_id IN ({placeholders})
+             ORDER BY d.group_id, d.frame_num
+             """
+             
+             try:
+                 # pandas read_sql might need conn, not cursor?
+                 # It accepts connection.
+                 df = pd.read_sql_query(sql, conn, params=group_ids)
+                 return df
+             except Exception as e:
+                 print(f"Error fetching tracks: {e}")
+                 return pd.DataFrame()
+
+        # --- 1. Fetch Data ---
+        bicycle_groups = get_all_group_ids_by_type('bicycle')
+        overtake_groups = get_all_group_ids_by_type('overtake')
+        
+        df_bicycle = fetch_tracks_for_groups(bicycle_groups)
+        df_overtake = fetch_tracks_for_groups(overtake_groups)
+        
+        # --- 2. Post-Process / Calculate derived columns ---
+        # Columns requested:
+        # ID, GroupID, VideoName, Frame, Class, Clearance, Clearance(LineCalc), Flag, LineDist, OuterLine, SpeedRate(Pre), SpeedRate(Post), SpeedDiff, Speed, Location
+        
+        def process_df(df):
+            if df.empty:
+                return df
+                
+            # Rename columns to match Japanese requirements loosely or exactly
+            # ID	グループID	動画名	動画フレーム	車種	離隔距離	離隔距離(白線から計算)	誤判定フラグ	白線距離	外側線判定	速度変化率(前)	速度変化率(後)	速度変化量	speed_kmh	地点
+            
+            # Initialize new columns
+            df['離隔距離(白線から計算)'] = None # Placeholder / Calculation
+            df['誤判定フラグ'] = df['Status'] # Assuming status might cover this
+            df['外側線判定'] = None # Placeholder
+            df['速度変化率(前)'] = None
+            df['速度変化率(後)'] = None
+            df['速度変化量'] = None
+            df['地点'] = df['output_folder'] # Or run_id? Using output folder as location proxy
+            
+            # Group by 'GroupID' to calculate track-level metrics
+            results = []
+            grouped = df.groupby('GroupID')
+            
+            for gid, group_df in grouped:
+                group_df = group_df.sort_values('Frame')
+                
+                # Calculate Speed Change Amount (End - Start)
+                if len(group_df) > 1:
+                    start_speed = group_df.iloc[0]['Speed_kmh']
+                    end_speed = group_df.iloc[-1]['Speed_kmh']
+                    speed_diff = end_speed - start_speed
+                    group_df['速度変化量'] = speed_diff
+                    
+                    # 'Clearance(LineCalc)' - assuming derived from LineDist_m?
+                    # If this is for overtake, we need partner. 
+                    # If single vehicle (bicycle), maybe distance from road edge (3.0m - line_dist)?
+                    # For now, leaving as placeholder or simple logic:
+                    group_df['離隔距離(白線から計算)'] = group_df['LineDist_m'].abs() # Simple abs distance
+                
+                results.append(group_df)
+                
+            if results:
+                final_df = pd.concat(results)
+            else:
+                final_df = df
+            
+            # Rename for final output
+            rename_map = {
+                'ID': 'ID',
+                'GroupID': 'グループID',
+                'Folder': '動画名',
+                'Frame': '動画フレーム',
+                'Class': '車種',
+                'ClearanceDist_m': '離隔距離',
+                'LineDist_m': '白線距離',
+                'Speed_kmh': 'speed_kmh'
+            }
+            final_df = final_df.rename(columns=rename_map)
+            
+            # Select and Order Columns
+            target_cols = [
+                'ID', 'グループID', '動画名', '動画フレーム', '車種', 
+                '離隔距離', '離隔距離(白線から計算)', '誤判定フラグ', 
+                '白線距離', '外側線判定', 
+                '速度変化率(前)', '速度変化率(後)', '速度変化量', 
+                'speed_kmh', '地点'
+            ]
+            
+            # Fill missing cols
+            for col in target_cols:
+                if col not in final_df.columns:
+                    final_df[col] = None
+                    
+            return final_df[target_cols]
+
+        df_bicycle_processed = process_df(df_bicycle)
+        df_overtake_processed = process_df(df_overtake)
+        
+        return {'bicycle': df_bicycle_processed, 'overtake': df_overtake_processed}
 

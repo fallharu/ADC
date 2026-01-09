@@ -129,7 +129,7 @@ def _build_detection_rows(cursor: sqlite3.Cursor, run_id: int) -> list[sqlite3.R
         FROM Detection d
         LEFT JOIN Video v ON d.video_id = v.video_id
         LEFT JOIN Class c ON d.class_id = c.class_id
-        WHERE d.run_id = ? AND d.model_name != 'best'
+        WHERE d.run_id = ?
         ORDER BY d.frame_num, d.auto_id
     """
     cursor.execute(query, (run_id,))

@@ -24,7 +24,7 @@ class LaneLineSet:
         yield self.center
 
 
-LANE_WIDTH_METERS = 8.0
+LANE_WIDTH_METERS = 7.0
 VERTICAL_TOLERANCE_PX = 5.0
 LANE_CONFIRMATION_HALF_SPAN_PX = 15.0
 

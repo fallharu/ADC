@@ -129,6 +129,19 @@ def collect_video_candidates(
     alias_fragment = _sanitize_fragment(folder_alias)
     if alias_fragment:
         base_name = os.path.basename(filename_fragment) if filename_fragment else ""
+        
+        # 階層の深いエイリアス（例: "new_x/1_250803"）を分解して候補を追加
+        alias_parts = alias_fragment.replace("\\", "/").split("/")
+        for i in range(len(alias_parts)):
+            partial_alias = os.path.join(*alias_parts[:i+1])
+            if base_name:
+                alias_combo = os.path.join(partial_alias, base_name)
+                register(alias_combo, front=True)
+                if upload_fragment:
+                    register(os.path.join(upload_fragment, alias_combo), front=True)
+                expand_across_bases(alias_combo, front=True)
+        
+        # フルパスでも試行
         if base_name:
             alias_combo = os.path.join(alias_fragment, base_name)
             register(alias_combo, front=True)

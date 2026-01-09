@@ -116,6 +116,112 @@ def assign_group_ids(run_id: int):
                 "個別の group_id を新規採番しました。"
             )
 
+        # --- 途切れたトラックの再接続ロジック ---
+        RECONNECT_FRAME_GAP = 10  # フレーム以内なら再接続を試みる
+        RECONNECT_DISTANCE_PX = 150  # ピクセル以内なら同一物体とみなす
+
+        df_for_reconnect = pd.read_sql_query(
+            """
+            SELECT d.auto_id, d.frame_num, d.group_id,
+                   d.x1, d.y1, d.x2, d.y2,
+                   c.class_name
+            FROM Detection d
+            JOIN Class c ON d.class_id = c.class_id
+            WHERE d.run_id = ? AND d.group_id IS NOT NULL AND LOWER(d.model_name) != 'best'
+            ORDER BY d.frame_num
+            """,
+            conn,
+            params=(run_id,),
+        )
+
+        if not df_for_reconnect.empty:
+            df_for_reconnect['center_x'] = (df_for_reconnect['x1'] + df_for_reconnect['x2']) / 2
+            df_for_reconnect['center_y'] = (df_for_reconnect['y1'] + df_for_reconnect['y2']) / 2
+            df_for_reconnect['class_lower'] = df_for_reconnect['class_name'].str.lower()
+
+            # グループごとの最終フレーム情報を取得
+            group_last_frame: Dict[int, dict] = {}
+            group_merge_map: Dict[int, int] = {}  # old_group_id -> new_group_id
+
+            for _, row in df_for_reconnect.iterrows():
+                gid = int(row['group_id'])
+                frame = int(row['frame_num'])
+                cx, cy = row['center_x'], row['center_y']
+                cls = row['class_lower']
+
+                # このグループの最終情報を更新
+                if gid not in group_last_frame:
+                    group_last_frame[gid] = {
+                        'last_frame': frame,
+                        'center_x': cx,
+                        'center_y': cy,
+                        'class': cls,
+                    }
+                else:
+                    group_last_frame[gid]['last_frame'] = frame
+                    group_last_frame[gid]['center_x'] = cx
+                    group_last_frame[gid]['center_y'] = cy
+
+            # 2回目のパス: 再接続候補を探す
+            for _, row in df_for_reconnect.iterrows():
+                gid = int(row['group_id'])
+                frame = int(row['frame_num'])
+                cx, cy = row['center_x'], row['center_y']
+                cls = row['class_lower']
+
+                # 現在のグループがマージ対象なら実際のグループIDを取得
+                actual_gid = group_merge_map.get(gid, gid)
+
+                # 他のグループの「最終フレーム」と比較
+                for other_gid, info in group_last_frame.items():
+                    if other_gid == actual_gid:
+                        continue
+                    actual_other_gid = group_merge_map.get(other_gid, other_gid)
+                    if actual_other_gid == actual_gid:
+                        continue
+
+                    # クラスが一致するか
+                    if info['class'] != cls:
+                        continue
+
+                    # フレーム差がしきい値以内か
+                    frame_gap = frame - info['last_frame']
+                    if frame_gap <= 0 or frame_gap > RECONNECT_FRAME_GAP:
+                        continue
+
+                    # 位置が近いか
+                    dist = math.sqrt((cx - info['center_x'])**2 + (cy - info['center_y'])**2)
+                    if dist > RECONNECT_DISTANCE_PX:
+                        continue
+
+                    # 再接続: 古いグループを新しいグループにマージ
+                    # gid を other_gid にマージ
+                    group_merge_map[gid] = actual_other_gid
+                    break
+
+            # マージマップを適用
+            if group_merge_map:
+                # 推移的なマージを解決
+                def resolve_merge(gid: int) -> int:
+                    visited = set()
+                    while gid in group_merge_map and gid not in visited:
+                        visited.add(gid)
+                        gid = group_merge_map[gid]
+                    return gid
+
+                reconnect_updates: List[Tuple[int, int]] = []
+                for _, row in df_for_reconnect.iterrows():
+                    old_gid = int(row['group_id'])
+                    new_gid = resolve_merge(old_gid)
+                    if new_gid != old_gid:
+                        reconnect_updates.append((new_gid, int(row['auto_id'])))
+
+                if reconnect_updates:
+                    c.executemany("UPDATE Detection SET group_id = ? WHERE auto_id = ?", reconnect_updates)
+                    conn.commit()
+                    merged_count = len(set(group_merge_map.keys()))
+                    print(f"Run ID {run_id}: {merged_count} 個のグループを再接続（マージ）しました。")
+
         df_vehicles = pd.read_sql_query(
             """
             SELECT auto_id, frame_num, x1, y1, x2, y2, group_id

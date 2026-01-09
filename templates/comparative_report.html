@@ -88,86 +88,129 @@
                         </div>
                     </div>
                 </div>
+            </div>
 
+            <!-- 分析対象選択セクション -->
+            <div class="row g-3 mt-2">
                 <div class="col-12">
-                    <label class="form-label fw-bold">分析指標</label>
+                    <label class="form-label fw-bold">分析対象</label>
                     <div class="border rounded p-3">
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input metric-checkbox" type="checkbox"
-                                        value="line_distances" id="metric_line" checked>
-                                    <label class="form-check-label" for="metric_line">
-                                        <i class="bi bi-rulers me-1"></i>白線距離
+                        <div class="row align-items-center">
+                            <div class="col-md-7">
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="includeManual" id="include_both"
+                                        value="both" checked>
+                                    <label class="form-check-label" for="include_both">
+                                        <i class="bi bi-collection me-1"></i>統合（推奨）
+                                    </label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="includeManual" id="include_auto"
+                                        value="auto">
+                                    <label class="form-check-label" for="include_auto">
+                                        <i class="bi bi-robot me-1"></i>自動検出のみ
+                                    </label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="includeManual"
+                                        id="include_manual" value="manual">
+                                    <label class="form-check-label" for="include_manual">
+                                        <i class="bi bi-hand-index me-1"></i>手動追加のみ
                                     </label>
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input metric-checkbox" type="checkbox"
-                                        value="clearance_distances" id="metric_clearance" checked>
-                                    <label class="form-check-label" for="metric_clearance">
-                                        <i class="bi bi-arrow-left-right me-1"></i>離隔距離
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input metric-checkbox" type="checkbox"
-                                        value="overtake_speeds" id="metric_speed" checked>
-                                    <label class="form-check-label" for="metric_speed">
-                                        <i class="bi bi-speedometer me-1"></i>追い越し速度
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mt-2">
-                                <div class="form-check">
-                                    <input class="form-check-input metric-checkbox" type="checkbox"
-                                        value="accelerations_before" id="metric_acc_before">
-                                    <label class="form-check-label" for="metric_acc_before">
-                                        <i class="bi bi-graph-up me-1"></i>加速度（追い越し前）
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mt-2">
-                                <div class="form-check">
-                                    <input class="form-check-input metric-checkbox" type="checkbox"
-                                        value="accelerations_after" id="metric_acc_after">
-                                    <label class="form-check-label" for="metric_acc_after">
-                                        <i class="bi bi-graph-down me-1"></i>加速度（追い越し後）
-                                    </label>
-                                </div>
+                            <div class="col-md-5 text-end">
+                                <span class="badge bg-primary me-2">自動検出: {{ auto_count }}件</span>
+                                <span class="badge bg-success me-2">手動追加: {{ manual_count }}件</span>
+                                <span class="badge bg-info">合計: {{ total_count }}件</span>
                             </div>
                         </div>
+                        <small class="text-muted d-block mt-2">
+                            「統合」を選択すると、自動検出と手動追加の追い越しイベントを合わせて分析します。
+                        </small>
                     </div>
                 </div>
             </div>
 
             <div class="row g-3 mt-2">
-                <div class="col-12">
-                    <label class="form-label fw-bold">オプション</label>
-                    <div class="border rounded p-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="excludeOutliers" value="1">
-                            <label class="form-check-label" for="excludeOutliers">
-                                <i class="bi bi-filter-circle me-1"></i>外れ値を除去する (IQR法)
-                                <small class="text-muted d-block">四分位範囲(IQR)を用いて、極端な値を除外して分析・検定を行います。</small>
-                            </label>
+                <label class="form-label fw-bold">分析指標</label>
+                <div class="border rounded p-3">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input metric-checkbox" type="checkbox" value="line_distances"
+                                    id="metric_line" checked>
+                                <label class="form-check-label" for="metric_line">
+                                    <i class="bi bi-rulers me-1"></i>白線距離
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input metric-checkbox" type="checkbox"
+                                    value="clearance_distances" id="metric_clearance" checked>
+                                <label class="form-check-label" for="metric_clearance">
+                                    <i class="bi bi-arrow-left-right me-1"></i>離隔距離
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input metric-checkbox" type="checkbox" value="overtake_speeds"
+                                    id="metric_speed" checked>
+                                <label class="form-check-label" for="metric_speed">
+                                    <i class="bi bi-speedometer me-1"></i>追い越し速度
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 mt-2">
+                            <div class="form-check">
+                                <input class="form-check-input metric-checkbox" type="checkbox"
+                                    value="accelerations_before" id="metric_acc_before">
+                                <label class="form-check-label" for="metric_acc_before">
+                                    <i class="bi bi-graph-up me-1"></i>加速度（追い越し前）
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 mt-2">
+                            <div class="form-check">
+                                <input class="form-check-input metric-checkbox" type="checkbox"
+                                    value="accelerations_after" id="metric_acc_after">
+                                <label class="form-check-label" for="metric_acc_after">
+                                    <i class="bi bi-graph-down me-1"></i>加速度（追い越し後）
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <div class="mt-4">
-                <button type="submit" class="btn btn-primary btn-lg">
-                    <i class="bi bi-play-circle me-2"></i>分析を実行
-                </button>
-                <button type="button" class="btn btn-outline-secondary btn-lg ms-2" id="resetBtn">
-                    <i class="bi bi-arrow-counterclockwise me-2"></i>リセット
-                </button>
-            </div>
-        </form>
     </div>
+
+    <div class="row g-3 mt-2">
+        <div class="col-12">
+            <label class="form-label fw-bold">オプション</label>
+            <div class="border rounded p-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="excludeOutliers" value="1">
+                    <label class="form-check-label" for="excludeOutliers">
+                        <i class="bi bi-filter-circle me-1"></i>外れ値を除去する (IQR法)
+                        <small class="text-muted d-block">四分位範囲(IQR)を用いて、極端な値を除外して分析・検定を行います。</small>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <button type="submit" class="btn btn-primary btn-lg">
+            <i class="bi bi-play-circle me-2"></i>分析を実行
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-lg ms-2" id="resetBtn">
+            <i class="bi bi-arrow-counterclockwise me-2"></i>リセット
+        </button>
+    </div>
+    </form>
+</div>
 </div>
 
 <div id="resultsArea" class="d-none">
@@ -259,6 +302,7 @@
                 .map(cb => cb.value);
             const metrics = Array.from(document.querySelectorAll('.metric-checkbox:checked'))
                 .map(cb => cb.value);
+            const includeManual = document.querySelector('input[name="includeManual"]:checked').value;
 
             if (years.length === 0 || roadTypes.length === 0 || metrics.length === 0) {
                 showError('年度、道路タイプ、分析指標を少なくとも1つずつ選択してください。');
@@ -281,7 +325,8 @@
                         road_types: roadTypes,
                         directions: directions,
                         metrics: metrics,
-                        exclude_outliers: document.getElementById('excludeOutliers').checked
+                        exclude_outliers: document.getElementById('excludeOutliers').checked,
+                        include_manual: includeManual
                     }),
                 });
 
@@ -315,6 +360,8 @@
             document.querySelectorAll('.metric-checkbox').forEach(cb => {
                 cb.checked = ['line_distances', 'clearance_distances', 'overtake_speeds'].includes(cb.value);
             });
+            // デフォルトで「統合」を選択
+            document.getElementById('include_both').checked = true;
             resultsArea.classList.add('d-none');
             errorAlert.classList.add('d-none');
         });
@@ -407,6 +454,7 @@
                 const years = Array.from(document.querySelectorAll('.year-checkbox:checked')).map(cb => parseInt(cb.value));
                 const roadTypes = Array.from(document.querySelectorAll('.road-type-checkbox:checked')).map(cb => cb.value);
                 const metrics = Array.from(document.querySelectorAll('.metric-checkbox:checked')).map(cb => cb.value);
+                const includeManual = document.querySelector('input[name="includeManual"]:checked').value;
 
                 const response = await fetch('/api/comparative_report/download', {
                     method: 'POST',
@@ -418,6 +466,7 @@
                         road_types: roadTypes,
                         directions: Array.from(document.querySelectorAll('.direction-checkbox:checked')).map(cb => cb.value),
                         metrics: metrics,
+                        include_manual: includeManual,
                     }),
                 });
 

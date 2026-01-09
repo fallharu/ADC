@@ -184,43 +184,103 @@ def compute_front_right_tire_points(
         group = float(row.group_id)
         key = (frame, group)
 
+        # 進行方向を取得 (ない場合はNone)
+        direction = getattr(row, "travel_direction", None)
+        if hasattr(direction, "strip"):
+            direction = direction.strip()
+
         y2_val = _as_float(row.y2)
         if y2_val is None:
             continue
 
-        candidates: list[tuple[float, float, float]] = []
-        for raw_x in (row.x1, row.x2):
+        best_x = None
+        best_y = None
+        best_rank_val = float("inf") # 小さいほど良い
+
+        # B (Top-to-Bottom) => 車の右側 => 右タイヤ => x2
+        # F (Bottom-to-Top) => 車の左側 => 左タイヤ => x1
+        
+        target_side = None
+        if direction == "B":
+            target_side = "right" # x2
+        elif direction == "F":
+            target_side = "left"  # x1
+
+        candidates: list[tuple[float, float, float]] = [] # (metric, x, y)
+        
+        # タイヤの両端 (x1, x2) を候補にするか、ターゲット側だけにするか
+        # 既存ロジックは両端から「白線に近い方」を選んでいたが、
+        # 要件は「白線に近い方」ではなく「車の右側/左側」を指定している。
+        # 車の右側にあるタイヤの座標は x2, 左側は x1 と仮定できる。
+        
+        check_x_list = []
+        if target_side == "right":
+             check_x_list = [row.x2]
+        elif target_side == "left":
+             check_x_list = [row.x1]
+        else:
+             # 方向不明の場合は両方見て白線に近い方（既存ロジック）
+             check_x_list = [row.x1, row.x2]
+
+        for raw_x in check_x_list:
             x_val = _as_float(raw_x)
             if x_val is None:
                 continue
-            distance = _distance_to_white_lines((x_val, y2_val), left_line, right_line)
-            candidates.append((distance, x_val, y2_val))
+            
+            # 評価値の計算
+            if target_side:
+                # 方向指定がある場合
+                # 複数のタイヤが見つかった場合（例えば前輪と後輪）、
+                # 右側(B)なら、より右にあるもの(xが大きい)を優先したい?
+                # 左側(F)なら、より左にあるもの(xが小さい)を優先したい?
+                # 一旦、タイヤごとの座標採用は決まったので、
+                # ここでは「そのタイヤの採用座標」が決まる。
+                # タイヤ間の競合（前後輪）は後段の selections で解決される。
+                
+                # metricは selections の比較に使われる
+                if target_side == "right":
+                    # 右側優先: xが大きいほうが優先 (rankは小さいほうが勝ちなので -x)
+                    metric = -x_val
+                else: 
+                     # 左側優先: xが小さいほうが優先
+                    metric = x_val
+            else:
+                 # 既存: 白線距離
+                 metric = _distance_to_white_lines((x_val, y2_val), left_line, right_line)
+            
+            candidates.append((metric, x_val, y2_val))
 
         if candidates:
-            best_distance, best_x, best_y = min(
-                candidates,
-                key=lambda item: (
-                    item[0],
-                    -(item[2] if np.isfinite(item[2]) else float("-inf")),
-                    -(item[1] if np.isfinite(item[1]) else float("-inf")),
-                ),
-            )
+            # 最も良い候補を選択
+            # metricが小さい順
+            best_cand = min(candidates, key=lambda item: item[0])
+            best_rank_val = best_cand[0]
+            best_x = best_cand[1]
+            best_y = best_cand[2]
         else:
-            best_x = _as_float(row.x2)
-            best_y = y2_val
-            best_distance = float("inf")
+            # 候補なし (x1, x2ともに無効など)
+            continue
 
         if best_x is None or best_y is None:
             continue
 
         current = selections.get(key)
-        candidate_rank = (
-            best_distance,
+        # selectionの比較:
+        # rank (metric) が小さい方を採用
+        # 同着なら y (下にある方=手前?) を優先 (既存実装: -y, -x で比較していた)
+        # ここではシンプルに metric で比較する
+        
+        # 既存実装の rank のタプル構造:
+        # (distance, -y, -x) => 距離最小、y最大、x最大
+        
+        candidate_full_rank = (
+            best_rank_val,
             -(best_y if np.isfinite(best_y) else float("-inf")),
             -(best_x if np.isfinite(best_x) else float("-inf")),
         )
-        if current is None or candidate_rank < current[2:]:
-            selections[key] = (best_x, best_y, *candidate_rank)
+        
+        if current is None or candidate_full_rank < current[2:]:
+            selections[key] = (best_x, best_y, *candidate_full_rank)
 
     if not selections:
         return tyres.iloc[0:0][["frame_num", "group_id"]].assign(
@@ -254,7 +314,14 @@ def _fallback_measure_point(
     left_line: Optional[Sequence[Sequence[object]]],
     right_line: Optional[Sequence[Sequence[object]]],
 ) -> tuple[Optional[float], Optional[float]]:
-    """BBOX から白線に最も近い右下角を推定する。"""
+    """BBOX から、進行方向に応じた測定点（進行方向左側または右側）を推定する。
+    
+    travel_direction:
+      - 'B' (Top-to-Bottom, Downward): 右側通行の対向車線(奥から手前)想定 -> 右側(x2)
+      - 'F' (Bottom-to-Top, Upward): 左側通行(手前から奥)想定 -> 左側(x1)
+      
+      ※要件: 「上から下の場合車（右側の車のタイヤ）は右側、下から上の場合は（左側車のタイヤ）は左側」
+    """
 
     if not left_line and not right_line:
         return None, None
@@ -268,14 +335,53 @@ def _fallback_measure_point(
     if y_val is None:
         return None, None
 
+    # 進行方向を取得
+    direction = getattr(row, "travel_direction", None)
+    if not isinstance(direction, str):
+        # Seriesから取る場合、getattrで取れるか？ 
+        # rowはpd.Seriesなので row.get("travel_direction")
+        direction = row.get("travel_direction")
+    
+    if hasattr(direction, "strip"):
+        direction = direction.strip()
+
+    target_side = None
+    if direction == "B":
+        target_side = "right" # x2
+    elif direction == "F":
+        target_side = "left"  # x1
+
     best: Optional[tuple[float, float]] = None
-    for key in ("x1", "x2"):
+    
+    # チェックする座標リスト
+    check_keys = []
+    if target_side == "right":
+        check_keys = ["x2"]
+    elif target_side == "left":
+        check_keys = ["x1"]
+    else:
+        # 方向不明なら従来通り両方チェック
+        check_keys = ["x1", "x2"]
+
+    for key in check_keys:
         x_val = _as_float(row.get(key))
         if x_val is None:
             continue
-        distance = _distance_to_white_lines((x_val, y_val), left_line, right_line)
+        
+        # 評価値 (rank)
+        if target_side == "right":
+             # 右側優先: xが大きいほうが優先 (rankは小さいほうが勝ちなので -x)
+             # fallbackの場合、候補は1つ(x2)しかないが、一貫性のため
+             rank_metric = -x_val
+        elif target_side == "left":
+             # 左側優先: xが小さいほうが優先
+             rank_metric = x_val
+        else:
+             # 従来: 白線距離
+             rank_metric = _distance_to_white_lines((x_val, y_val), left_line, right_line)
+
         rank = (
-            distance,
+            rank_metric,
             -(y_val if np.isfinite(y_val) else float("-inf")),
             -(x_val if np.isfinite(x_val) else float("-inf")),
         )

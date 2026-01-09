@@ -10,6 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from .db_manager import (
     MAIN_DB_PATH,
@@ -77,6 +78,80 @@ def _safe_float(value) -> Optional[float]:
     if not np.isfinite(numeric):
         return None
     return numeric
+
+
+# ローカルフォントパスの候補
+# プロジェクトルートからの相対パスを解決
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_LOCAL_FONT_PATHS = [
+    os.path.join(_PROJECT_ROOT, "fonts", "Noto_Sans_JP", "NotoSansJP-VariableFont_wght.ttf"),
+    "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/msgothic.ttc",
+    "C:/Windows/Fonts/YuGothM.ttc",
+    "C:/Windows/Fonts/arial.ttf",
+]
+
+_cached_font: dict = {}
+
+
+def _get_font(size: int) -> ImageFont.FreeTypeFont:
+    """ローカルフォントを取得（キャッシュ付き）。"""
+    if size in _cached_font:
+        return _cached_font[size]
+    
+    for font_path in _LOCAL_FONT_PATHS:
+        if os.path.exists(font_path):
+            try:
+                font = ImageFont.truetype(font_path, size)
+                _cached_font[size] = font
+                print(f"[overtake] フォント読み込み成功: {font_path}")
+                return font
+            except Exception as e:
+                print(f"[overtake] フォント読み込み失敗: {font_path} - {e}")
+                continue
+    
+    # フォールバック: デフォルトフォント
+    print("[overtake] 警告: 日本語フォントが見つかりません。デフォルトフォントを使用します。")
+    font = ImageFont.load_default()
+    _cached_font[size] = font
+    return font
+
+
+def _put_text_pil(
+    img: np.ndarray,
+    text: str,
+    position: Tuple[int, int],
+    font_size: int = 32,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    bg_color: Optional[Tuple[int, int, int]] = None,
+) -> np.ndarray:
+    """PILを使ってOpenCV画像にテキストを描画する。"""
+    # OpenCV (BGR) -> PIL (RGB)
+    img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(img_pil)
+    font = _get_font(font_size)
+    
+    # テキストサイズを取得
+    try:
+        bbox = draw.textbbox(position, text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+    except AttributeError:
+        # 旧バージョンのPillow
+        text_width, text_height = draw.textsize(text, font=font)
+        bbox = (position[0], position[1], position[0] + text_width, position[1] + text_height)
+    
+    # 背景を描画
+    if bg_color:
+        padding = 4
+        bg_bbox = (bbox[0] - padding, bbox[1] - padding, bbox[2] + padding, bbox[3] + padding)
+        draw.rectangle(bg_bbox, fill=bg_color)
+    
+    # テキストを描画 (RGB)
+    draw.text(position, text, font=font, fill=color)
+    
+    # PIL (RGB) -> OpenCV (BGR)
+    return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
 def _export_overtake_snapshots(
@@ -248,28 +323,24 @@ def _export_overtake_snapshots(
             x1, y1, x2, y2 = [int(round(float(v))) for v in car_box]
             cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 3)
             label = f"CAR G{request.get('car_group')}"
-            cv2.putText(
+            annotated = _put_text_pil(
                 annotated,
                 label,
-                (x1, max(y1 - 10, 0)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 255, 255),
-                2,
+                (x1, max(y1 - 60, 0)),
+                font_size=48,
+                color=(0, 255, 255),
             )
 
         if bike_box and all(v is not None and not pd.isna(v) for v in bike_box):
             x1, y1, x2, y2 = [int(round(float(v))) for v in bike_box]
             cv2.rectangle(annotated, (x1, y1), (x2, y2), (255, 255, 0), 3)
             label = f"BIKE G{request.get('bike_group')}"
-            cv2.putText(
+            annotated = _put_text_pil(
                 annotated,
                 label,
-                (x1, max(y1 - 10, 0)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (255, 255, 0),
-                2,
+                (x1, max(y1 - 60, 0)),
+                font_size=48,
+                color=(255, 255, 0),
             )
 
         if car_measure and bike_measure:
@@ -278,20 +349,14 @@ def _export_overtake_snapshots(
             mid_y = int(round((bike_measure[1] + car_measure[1]) / 2))
             label = _format_clearance_label(request)
             if label:
-                (text_w, text_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                pad = 6
-                top_left = (max(0, mid_x - text_w // 2 - pad), max(0, mid_y - text_h - baseline - pad))
-                bottom_right = (min(annotated.shape[1] - 1, mid_x + text_w // 2 + pad), min(annotated.shape[0] - 1, mid_y + baseline + pad))
-                cv2.rectangle(annotated, top_left, bottom_right, (0, 0, 0), -1)
-                cv2.putText(
+                # フォントサイズを拡大し、PILで描画
+                annotated = _put_text_pil(
                     annotated,
                     label,
-                    (top_left[0] + pad, bottom_right[1] - baseline - 1),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (255, 255, 255),
-                    2,
-                    cv2.LINE_AA,
+                    (mid_x - 120, mid_y - 40),
+                    font_size=56,
+                    color=(255, 255, 255),
+                    bg_color=(0, 0, 0),
                 )
 
         if bike_measure:
@@ -326,22 +391,15 @@ def _export_overtake_snapshots(
 
                 lane_label = _format_lane_label(nearest_side, lane_value if lane_value is not None else nearest[2])
                 if lane_label:
-                    (text_w, text_h), baseline = cv2.getTextSize(lane_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                    pad = 5
                     text_x = min(bike_measure[0], lane_point[0])
-                    text_y = max(0, bike_measure[1] - 12)
-                    bg_tl = (max(0, text_x - pad), max(0, text_y - text_h - pad))
-                    bg_br = (min(annotated.shape[1] - 1, text_x + text_w + pad), min(annotated.shape[0] - 1, text_y + baseline + pad))
-                    cv2.rectangle(annotated, bg_tl, bg_br, (0, 0, 0), -1)
-                    cv2.putText(
+                    text_y = max(0, bike_measure[1] - 60)
+                    annotated = _put_text_pil(
                         annotated,
                         lane_label,
-                        (bg_tl[0] + pad, bg_br[1] - baseline - 1),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255),
-                        1,
-                        cv2.LINE_AA,
+                        (text_x, text_y),
+                        font_size=40,
+                        color=(255, 255, 255),
+                        bg_color=(0, 0, 0),
                     )
 
         filename = (
@@ -443,7 +501,7 @@ def assign_overtake(run_id: int) -> int:
             JOIN Class AS c ON d.class_id = c.class_id
             WHERE d.run_id = ?
               AND d.group_id IS NOT NULL
-              AND d.model_name != 'best'
+              AND d.group_id IS NOT NULL
             ORDER BY d.group_id, d.frame_num
             """,
             conn,
@@ -548,7 +606,8 @@ def assign_overtake(run_id: int) -> int:
             traj_b = df[df['group_id'] == id_b].set_index('frame_num')
 
             common_frames = traj_a.index.intersection(traj_b.index)
-            if len(common_frames) < 2:
+            # 緩和: 1フレームでも追い越し判定を試みる (元: < 2)
+            if len(common_frames) < 1:
                 continue
 
             class_a = group_class_map.get(id_a)
@@ -618,8 +677,10 @@ def assign_overtake(run_id: int) -> int:
             y_diff = aligned_traj[(car_key, 'relative_y')] - aligned_traj[(bike_key, 'relative_y')]
             prev_diff = y_diff.shift(1)
             dirs = aligned_traj[(car_key, 'direction_norm')]
-            mask_f = (dirs == 'F') & (prev_diff > 0) & (y_diff <= 0)
-            mask_b = (dirs == 'B') & (prev_diff < 0) & (y_diff >= 0)
+            # 緩和: Y座標逆転のマージンを追加 (ノイズ吸収)
+            Y_REVERSAL_MARGIN = 10  # pixels
+            mask_f = (dirs == 'F') & (prev_diff > Y_REVERSAL_MARGIN) & (y_diff <= Y_REVERSAL_MARGIN)
+            mask_b = (dirs == 'B') & (prev_diff < -Y_REVERSAL_MARGIN) & (y_diff >= -Y_REVERSAL_MARGIN)
             car_overtake_mask = mask_f | mask_b
             overtake_frames = y_diff[car_overtake_mask].index
 

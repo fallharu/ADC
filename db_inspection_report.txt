@@ -1,0 +1,31 @@
+--- Table Counts ---
+Video: 115
+ProcessLog: 116
+OvertakeEvents: 12
+ManualOvertakeEvents: 45
+Detection: 915550
+
+--- OvertakeEvents Linkage Check ---
+Total OvertakeEvents: 12
+Linked OvertakeEvents (Joined with ProcessLog & Video): 12
+Unlinked/Orphaned Events: 0
+
+--- Video Metadata Check (All Videos) ---
+Total Videos: 115
+  Road Type NULL: 115
+  Collection Year NULL: 115
+
+--- Null Field Analysis (Linked Events) ---
+Linked Events: 12
+  Road Type NULL: 12
+  Collection Year NULL: 12
+
+--- Sample Missing Attributes ---
+{'video_id': 47, 'filename': '2_20250720_000G1575_bike_clips.mp4', 'road_type': None, 'collection_year': None, 'event_count': 1}
+{'video_id': 49, 'filename': '2_20250720_000G1593_bike_clips.mp4', 'road_type': None, 'collection_year': None, 'event_count': 1}
+{'video_id': 62, 'filename': '2_20250803_000G1877_bike_clips.mp4', 'road_type': None, 'collection_year': None, 'event_count': 1}
+{'video_id': 66, 'filename': '2_20250803_000G1883_bike_clips.mp4', 'road_type': None, 'collection_year': None, 'event_count': 3}
+{'video_id': 68, 'filename': '000G6013_bike_clips.mp4', 'road_type': None, 'collection_year': None, 'event_count': 1}
+{'video_id': 69, 'filename': '000G6027_bike_clips.mp4', 'road_type': None, 'collection_year': None, 'event_count': 2}
+{'video_id': 70, 'filename': '000G6033_bike_clips.mp4', 'road_type': None, 'collection_year': None, 'event_count': 1}
+{'video_id': 72, 'filename': '000G6041_bike_clips.mp4', 'road_type': None, 'collection_year': None, 'event_count': 2}

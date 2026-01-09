@@ -33,6 +33,26 @@
     <p class="small text-muted mb-0 mt-2" id="postProcessStatusMeta"></p>
     <div id="postProcessColumnSummary" class="mt-3"></div>
     <div id="postProcessErrorSummary" class="mt-3"></div>
+
+    <!-- 処理ログ表示エリア -->
+    <div id="postProcessLogsArea" class="mt-3" style="display: none;">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <label class="small text-muted mb-0"><i class="bi bi-terminal me-1"></i>処理ログ</label>
+        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1"
+          onclick="document.getElementById('postProcessLogs').innerHTML=''">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+      <pre id="postProcessLogs" class="bg-dark text-light p-2 rounded small"
+        style="max-height: 200px; overflow-y: auto; font-size: 0.75rem;"></pre>
+    </div>
+
+    <!-- 追い越し写真一覧ボタン (処理完了後に表示) -->
+    <div id="overtakePhotosButtonArea" class="mt-3" style="display: none;">
+      <a href="{{ url_for('main.overtake_gallery') }}" class="btn btn-success w-100" target="_blank">
+        <i class="bi bi-images me-2"></i>追い越し写真一覧を表示
+      </a>
+    </div>
   </div>
 </div>
 
@@ -214,6 +234,8 @@
               <label class="btn btn-outline-primary btn-sm" for="targetModeFolder">フォルダ一括</label>
               <input type="radio" class="btn-check" name="target_mode" id="targetModeCondition" value="condition">
               <label class="btn btn-outline-primary btn-sm" for="targetModeCondition">条件指定</label>
+              <input type="radio" class="btn-check" name="target_mode" id="targetModeAll" value="all">
+              <label class="btn btn-outline-primary btn-sm" for="targetModeAll">全てのRunID</label>
             </div>
           </div>
           <div class="mb-3" id="runSelectionGroup">
@@ -581,7 +603,13 @@
               <button type="submit" name="action" value="all_postprocess"
                 class="btn btn-danger w-100 h-100 py-3 btn-post-process-action shadow-sm">
                 <div class="fs-5 mb-1"><i class="bi bi-collection-play"></i></div>
-                <div>全て実行</div>
+                <div>選択分実行</div>
+              </button>
+            </div>
+            <div class="col-12">
+              <button type="submit" name="action" value="process_all" formnovalidate
+                class="btn btn-warning w-100 py-2 btn-post-process-action shadow-sm text-dark fw-bold">
+                <i class="bi bi-database-fill-gear me-2"></i>全データ処理実行
               </button>
             </div>
             <div class="col-6">
@@ -594,6 +622,19 @@
                 class="btn btn-secondary w-100 btn-post-process-action">
                 <i class="bi bi-file-earmark-spreadsheet me-1"></i> Excel出力
               </button>
+            </div>
+            <!-- New Buttons for Bicycle/Overtaken Import -->
+            <div class="col-12 mt-2">
+              <div class="d-flex gap-2">
+                <button type="submit" name="action" value="export_targets_csv"
+                  class="btn btn-outline-dark w-50 btn-post-process-action" title="自転車と追い越し対象車の全データをCSV出力します">
+                  <i class="bi bi-bicycle me-1"></i> 自転車・対象車 CSV
+                </button>
+                <button type="submit" name="action" value="export_targets_excel"
+                  class="btn btn-outline-success w-50 btn-post-process-action" title="自転車と追い越し対象車の全データをExcel出力します">
+                  <i class="bi bi-bicycle me-1"></i> 自転車・対象車 Excel
+                </button>
+              </div>
             </div>
           </div>
           <p class="form-text mt-2">Excel出力は検出結果閲覧画面と同じ日本語カラム名・クラス名で保存します。</p>
@@ -1110,6 +1151,9 @@
         } else {
           inlinePreviewSection.style.display = 'none';
         }
+      } else {
+        // 'condition' or 'all' mode -> hide inline preview
+        inlinePreviewSection.style.display = 'none';
       }
     }
 
@@ -1148,6 +1192,7 @@
     // Update on target mode change
     targetModeInputs.forEach((input) => {
       input.addEventListener('change', updateInlinePreviewVisibility);
+      input.addEventListener('change', (e) => setTargetMode(e.target.value));
     });
 
     function getCsrfToken() {
@@ -1811,10 +1856,9 @@
     let currentStatus = initialProgress?.status || 'idle';
     let lastStatus = currentStatus;
     let currentTargetMode = 'run';
-    if (folderModeRadio && folderModeRadio.checked) {
-      currentTargetMode = 'folder';
-    } else if (runModeRadio && runModeRadio.checked) {
-      currentTargetMode = 'run';
+    const checkedRadio = document.querySelector('input[name="target_mode"]:checked');
+    if (checkedRadio) {
+      currentTargetMode = checkedRadio.value;
     }
     let controlsLocked = false;
     let lastKnownResult = initialProgress?.last_result || null;
@@ -1839,6 +1883,8 @@
       if (folderSelectionGroup) {
         folderSelectionGroup.style.display = currentTargetMode === 'folder' ? '' : 'none';
       }
+      // 'all' mode hides both groups
+
       if (actionRunSelect) {
         actionRunSelect.required = currentTargetMode === 'run';
         actionRunSelect.disabled = controlsLocked || currentTargetMode !== 'run';
@@ -1863,7 +1909,8 @@
     }
 
     function setTargetMode(mode) {
-      currentTargetMode = mode === 'folder' ? 'folder' : 'run';
+      // Allow 'run', 'folder', 'condition', 'all'
+      currentTargetMode = mode;
       updateActionButtonStates();
       updateTargetInputs();
       updateFolderProfileManagerState();
@@ -3286,10 +3333,16 @@
         formData.set('target_mode', targetMode);
 
         // Validation based on mode
-        if (targetMode === 'run') {
+        console.log(`[DEBUG] Validation check. Mode: ${targetMode}, Action: ${actionValue}`);
+
+        // Allow 'process_all' action or 'all' target mode to proceed without selection
+        // Also allow export actions for 'all' mode
+        if (actionValue === 'process_all' || ((actionValue.startsWith('export_') || actionValue === 'all_save') && targetMode === 'all')) {
+          // No specific selection needed
+        } else if (targetMode === 'run') {
           if (!formData.get('run_id')) return alert('処理対象のRunを選択してください');
           formData.delete('folder_alias');
-        } else {
+        } else if (targetMode === 'folder') {
           if (!formData.get('folder_alias')) return alert('処理対象のフォルダを選択してください');
           if (actionValue === 'generate_video') return alert('フォルダ処理では動画生成を利用できません');
           formData.delete('run_id');
@@ -3330,6 +3383,18 @@
           }
 
           console.log('[DEBUG] Execution started:', data);
+
+          // Check for download URL (for export actions)
+          if (data.results && data.results.download_url) {
+            const link = document.createElement('a');
+            link.href = data.results.download_url;
+            link.download = data.results.filename || 'export.csv';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            alert(data.message || 'エクスポートが完了しました。');
+            return; // Stop further UI updates for simple download
+          }
 
           // Show progress area and scroll to it
           const progressArea = document.getElementById('postProcessProgressArea');
@@ -3585,6 +3650,86 @@
           ui.noImage.textContent = 'エラー: ' + err.message;
         }
       }
+    }
+
+    // === 追い越し写真ボタン表示: 処理完了時にボタンを表示する ===
+    const overtakePhotosButtonArea = document.getElementById('overtakePhotosButtonArea');
+    const progressStatusBadge = document.getElementById('postProcessStatusBadge');
+    if (overtakePhotosButtonArea && progressStatusBadge) {
+      // MutationObserver で badge の class 変化を監視
+      const badgeObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+            // bg-success があれば処理完了とみなす
+            if (progressStatusBadge.classList.contains('bg-success')) {
+              overtakePhotosButtonArea.style.display = 'block';
+            }
+          }
+        }
+      });
+      badgeObserver.observe(progressStatusBadge, { attributes: true });
+    }
+
+    // === 進捗ポーリング: ログ表示と全体進捗の更新 ===
+    const postProcessLogsArea = document.getElementById('postProcessLogsArea');
+    const postProcessLogs = document.getElementById('postProcessLogs');
+    const batchProgressContainer = document.getElementById('batchProgressContainer');
+    const batchProgressBar = document.getElementById('batchProgressBar');
+    const batchPercentLabel = document.getElementById('batchPercentLabel');
+    const batchDetailText = document.getElementById('batchDetailText');
+    let progressPollingTimer = null;
+    let lastLogCount = 0;
+
+    async function pollProgressStatus() {
+      try {
+        const res = await fetch('/post_process/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // ログ表示エリアの更新
+        if (data.logs && data.logs.length > 0) {
+          if (postProcessLogsArea) postProcessLogsArea.style.display = 'block';
+          if (postProcessLogs && data.logs.length !== lastLogCount) {
+            postProcessLogs.textContent = data.logs.join('\n');
+            // 自動スクロール
+            postProcessLogs.scrollTop = postProcessLogs.scrollHeight;
+            lastLogCount = data.logs.length;
+          }
+        }
+
+        // バッチ進捗の更新
+        if (batchProgressContainer && data.batch_percent !== undefined) {
+          const percent = data.batch_percent || 0;
+          batchProgressContainer.style.display = percent > 0 ? 'block' : 'none';
+          if (batchProgressBar) {
+            batchProgressBar.style.width = `${percent}%`;
+            batchProgressBar.setAttribute('aria-valuenow', percent);
+          }
+          if (batchPercentLabel) batchPercentLabel.textContent = `${percent}%`;
+          if (batchDetailText && data.current_detail) {
+            batchDetailText.textContent = data.current_detail;
+          }
+        }
+
+        // 処理中ならポーリング継続
+        if (data.status === 'processing' || data.status === 'running') {
+          progressPollingTimer = setTimeout(pollProgressStatus, 1000);
+        } else {
+          // 完了時はバッチ進捗を非表示に
+          if (batchProgressContainer) batchProgressContainer.style.display = 'none';
+        }
+      } catch (err) {
+        console.error('Progress polling error:', err);
+      }
+    }
+
+    // フォーム送信時にポーリング開始
+    if (actionForm) {
+      actionForm.addEventListener('submit', () => {
+        lastLogCount = 0;
+        if (postProcessLogs) postProcessLogs.textContent = '';
+        setTimeout(pollProgressStatus, 500);
+      });
     }
 
   });

@@ -342,3 +342,405 @@ def batch_update_runs():
     except Exception as e:
         current_app.logger.exception('Batch update runs failed')
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@main.route('/export_all_detections')
+def export_all_detections():
+    """Export all detection data as CSV or Excel."""
+    import io
+    import sqlite3
+    import pandas as pd
+    from flask import Response
+    from datetime import datetime
+    
+    file_format = request.args.get('format', 'csv').lower()
+    filter_type = request.args.get('filter', 'all')
+    run_id = request.args.get('run_id', type=int)
+    
+    try:
+        conn = sqlite3.connect(dbm.MAIN_DB_PATH)
+        
+        # Base Query
+        if filter_type == 'bicycle_overtake_b':
+            query = """
+            SELECT 
+                d.auto_id as detection_id,
+                d.run_id,
+                d.frame_num,
+                cm.class_name,
+                d.confidence,
+                d.speed_km_h,
+                d.line_distance_m,
+                d.ttc_s,
+                d.lane_position_flag,
+                d.travel_direction,
+                d.overtake,
+                d.overtake_by,
+                d.group_id,
+                v.filename as video_name,
+                v.collection_year,
+                v.road_type,
+                CASE 
+                    WHEN cm.class_name = 'bicycle' THEN 'Bicycle'
+                    WHEN oe.overtaken_auto_id IS NOT NULL THEN 'Overtaken Car'
+                    ELSE 'Linked Frame'
+                END as target_type
+            FROM Detection d
+            JOIN ProcessLog p ON d.run_id = p.run_id
+            JOIN Video v ON p.video_id = v.video_id
+            LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+            LEFT JOIN OvertakeEvents oe ON d.run_id = oe.run_id 
+                AND d.frame_num = oe.event_frame_num 
+                AND d.auto_id = oe.overtaken_auto_id
+            JOIN (
+                SELECT DISTINCT d2.run_id, d2.group_id
+                FROM Detection d2
+                LEFT JOIN ClassMaster cm2 ON d2.class_id = cm2.class_id
+                LEFT JOIN OvertakeEvents oe2 ON d2.run_id = oe2.run_id 
+                    AND d2.frame_num = oe2.event_frame_num 
+                    AND d2.auto_id = oe2.overtaken_auto_id
+                WHERE 
+                    d2.travel_direction = 'B'
+                    AND (
+                        (cm2.class_name = 'bicycle') 
+                        OR 
+                        (oe2.overtaken_auto_id IS NOT NULL)
+                    )
+                    AND d2.group_id IS NOT NULL
+            ) tgt ON d.run_id = tgt.run_id AND d.group_id = tgt.group_id
+            """
+        else:
+            query = """
+            SELECT 
+                d.auto_id as detection_id,
+                d.run_id,
+                d.frame_num,
+                cm.class_name,
+                d.confidence,
+                d.speed_km_h,
+                d.line_distance_m,
+                d.ttc_s,
+                d.lane_position_flag,
+                d.travel_direction,
+                d.overtake,
+                d.overtake_by,
+                d.group_id,
+                d.approach_distance_m,
+                d.clearance_distance_m,
+                d.acceleration_m_s2,
+                v.filename as video_name,
+                v.collection_year,
+                v.road_type
+            FROM Detection d
+            JOIN ProcessLog p ON d.run_id = p.run_id
+            JOIN Video v ON p.video_id = v.video_id
+            LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+            WHERE 1=1
+            """
+        
+        params = []
+        if run_id:
+            query += " AND d.run_id = ?"
+            params.append(run_id)
+            
+        query += " ORDER BY d.run_id, d.frame_num"
+        
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+        
+        # Prepare Output directory
+        output_dir = os.path.join(current_app.root_path, '..', 'OutPut')
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+            
+        # Generate filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        if run_id:
+            base_filename = f"detections_run{run_id}_{timestamp}"
+        else:
+            base_filename = f"all_detections_{timestamp}"
+            
+        output = io.BytesIO()
+        
+        if file_format == 'xlsx':
+            # Check for size and split if necessary
+            MAX_ROWS = 1000000
+            total_rows = len(df)
+            
+            if total_rows > MAX_ROWS:
+                current_app.logger.info(f"Data too large for single Excel file ({total_rows} rows). Splitting by Run ID...")
+                import zipfile
+                import math
+                
+                # Get unique runs and their row counts
+                run_counts = df['run_id'].value_counts()
+                all_runs = run_counts.index.tolist()
+                
+                # Determine how to split
+                # Simple greedy assignment or just chunking. 
+                # Let's try to bundle runs until we hit the limit.
+                chunks = []
+                current_chunk = []
+                current_count = 0
+                
+                for rid in all_runs:
+                    count = run_counts[rid]
+                    if current_count + count > MAX_ROWS and current_chunk:
+                        # Finalize current chunk
+                        chunks.append(current_chunk)
+                        current_chunk = []
+                        current_count = 0
+                    
+                    current_chunk.append(rid)
+                    current_count += count
+                    
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    
+                current_app.logger.info(f"Split into {len(chunks)} files.")
+                
+                # Create ZIP output
+                zip_output = io.BytesIO()
+                with zipfile.ZipFile(zip_output, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    for i, chunk_runs in enumerate(chunks):
+                        part_num = i + 1
+                        part_filename = f"{base_filename}_part{part_num}.xlsx"
+                        part_filepath = os.path.join(output_dir, part_filename)
+                        
+                        # Filter DF
+                        chunk_df = df[df['run_id'].isin(chunk_runs)]
+                        
+                        # Write to Excel in memory first
+                        part_excel_io = io.BytesIO()
+                        with pd.ExcelWriter(part_excel_io, engine='openpyxl') as writer:
+                            chunk_df.to_excel(writer, index=False, sheet_name='Detections')
+                        
+                        # Save to OutPut
+                        with open(part_filepath, 'wb') as f:
+                            f.write(part_excel_io.getvalue())
+                            
+                        # Add to ZIP
+                        part_excel_io.seek(0)
+                        zf.writestr(part_filename, part_excel_io.getvalue())
+                        
+                        current_app.logger.info(f"Saved part {part_num}: {part_filepath} ({len(chunk_df)} rows)")
+                
+                zip_output.seek(0)
+                zip_filename = f"{base_filename}.zip"
+                zip_filepath = os.path.join(output_dir, zip_filename)
+                
+                # Save ZIP to OutPut
+                with open(zip_filepath, 'wb') as f:
+                    f.write(zip_output.getvalue())
+                current_app.logger.info(f"Export saved to: {zip_filepath}")
+                
+                zip_output.seek(0)
+                return Response(
+                    zip_output.getvalue(),
+                    mimetype='application/zip',
+                    headers={'Content-Disposition': f'attachment; filename={zip_filename}'}
+                )
+            else:
+                # Normal small enough file
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False)
+                
+                output.seek(0)
+                file_path = os.path.join(output_dir, f"{base_filename}.xlsx")
+                with open(file_path, 'wb') as f:
+                    f.write(output.getvalue())
+                current_app.logger.info(f"Export saved to: {file_path}")
+                
+                output.seek(0)
+                return Response(
+                    output.getvalue(),
+                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    headers={'Content-Disposition': f'attachment; filename={base_filename}.xlsx'}
+                )
+    
+        else:
+            # CSV
+            df.to_csv(output, index=False, encoding='utf-8-sig')
+            output.seek(0)
+            
+            file_path = os.path.join(output_dir, f"{base_filename}.csv")
+            with open(file_path, 'wb') as f:
+                f.write(output.getvalue())
+            current_app.logger.info(f"Export saved to: {file_path}")
+            
+            output.seek(0)
+            return Response(
+                output.getvalue(),
+                mimetype='text/csv',
+                headers={'Content-Disposition': f'attachment; filename={base_filename}.csv'}
+            )
+            
+    except Exception as e:
+        current_app.logger.error(f"Export error: {e}")
+        return str(e), 500
+
+@main.route('/export_db')
+def export_db():
+    """Export the current database file with a safe online backup."""
+    import sqlite3
+    import shutil
+    from datetime import datetime
+    from flask import send_file
+    
+    try:
+        # Prepare Output directory
+        output_dir = os.path.join(current_app.root_path, '..', 'OutPut')
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+            
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_filename = f"backup_{timestamp}.db"
+        backup_filepath = os.path.join(output_dir, backup_filename)
+        
+        # Connect to existing DB
+        src_conn = sqlite3.connect(dbm.MAIN_DB_PATH)
+        
+        # Create new DB file for backup
+        dst_conn = sqlite3.connect(backup_filepath)
+        
+        # Perform backup
+        with dst_conn:
+            src_conn.backup(dst_conn)
+            
+        dst_conn.close()
+        src_conn.close()
+        
+        current_app.logger.info(f"Database backup saved to: {backup_filepath}")
+        
+        return send_file(
+            backup_filepath,
+            as_attachment=True,
+            download_name=backup_filename,
+            mimetype='application/x-sqlite3'
+        )
+        
+    except Exception as e:
+        current_app.logger.error(f"DB Export error: {e}")
+        return str(e), 500
+
+import cv2
+import numpy as np
+import io
+from flask import Response
+
+@main.route("/detections/preview_image/<int:detection_id>")
+def detection_preview_image(detection_id: int):
+    # 1. DBから情報を取得
+    info = dbm.get_detection_preview_info(detection_id)
+    if not info:
+        return Response("Detection not found", status=404)
+        
+    video_path = info.get('source_path')
+    print(f"DEBUG: Preview Request ID={detection_id}, Path={video_path}")
+    
+    if not video_path:
+        print("DEBUG: Source path is missing in DB info")
+        return Response("Video path not found in DB", status=404)
+        
+    if not os.path.exists(video_path):
+         print(f"DEBUG: File does not exist at path: {video_path}")
+         return Response(f"Video file not found: {video_path}", status=404)
+         
+    # 2. 動画フレームを取得
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"DEBUG: Failed to open video with cv2: {video_path}")
+        return Response("Failed to open video", status=500)
+        
+    try:
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        target_frame = info['frame_num']
+        print(f"DEBUG: Video opened. Total frames: {total_frames}, Target frame: {target_frame}")
+        
+        if target_frame >= total_frames:
+             print(f"DEBUG: Target frame {target_frame} is out of bounds (Total: {total_frames})")
+        
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+        ret, frame = cap.read()
+        if not ret:
+             print(f"DEBUG: Failed to read frame {target_frame}")
+             return Response("Failed to read frame", status=500)
+    finally:
+        cap.release()
+        
+    # 3. 描画
+    # Target (Cyan)
+    x1, y1 = int(info['x1']), int(info['y1'])
+    x2, y2 = int(info['x2']), int(info['y2'])
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
+    label = f"Target: {info.get('class_name', 'Unknown')}"
+    cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+    
+    # Partner (Yellow) if exists
+    if info.get('partner_bbox'):
+        p = info['partner_bbox']
+        px1, py1 = int(p['x1']), int(p['y1'])
+        px2, py2 = int(p['x2']), int(p['y2'])
+        cv2.rectangle(frame, (px1, py1), (px2, py2), (0, 255, 255), 2)
+        p_label = f"Partner: {p.get('class_name', 'Unknown')}"
+        cv2.putText(frame, p_label, (px1, py1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        
+    # Overtake Status
+    if info.get('overtake'):
+         cv2.putText(frame, "OVERTAKE OCCURRING", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+         
+    # 4. エンコードして返却
+    ret, buffer = cv2.imencode('.jpg', frame)
+    if not ret:
+        return Response("Failed to encode image", status=500)
+    
+    resp = Response(io.BytesIO(buffer.tobytes()), mimetype='image/jpeg')
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
+
+
+@main.route('/export_tracks')
+def export_tracks():
+    try:
+        run_id = request.args.get('run_id', type=int)
+        
+        # Fetch data
+        print(f"DEBUG: Starting full track export. RunID={run_id}")
+        data = dbm.get_track_data_for_export(run_id)
+        
+        # Create Excel
+        output = io.BytesIO()
+        # local import pandas if needed, but dbm handles logic. 
+        # Here we need pandas for ExcelWriter
+        import pandas as pd
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Bicycle Sheet
+            df_bicycle = data.get('bicycle')
+            if df_bicycle is not None and not df_bicycle.empty:
+                df_bicycle.to_excel(writer, sheet_name='自転車', index=False)
+            else:
+                 pd.DataFrame({'Info': ['データがありません']}).to_excel(writer, sheet_name='自転車', index=False)
+
+            # Overtake Sheet
+            df_overtake = data.get('overtake')
+            if df_overtake is not None and not df_overtake.empty:
+                df_overtake.to_excel(writer, sheet_name='追い越し', index=False)
+            else:
+                 pd.DataFrame({'Info': ['データがありません']}).to_excel(writer, sheet_name='追い越し', index=False)
+            
+        output.seek(0)
+        
+        filename = f"track_data_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        print(f"Export Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return Response(f"Export failed: {str(e)}", status=500)

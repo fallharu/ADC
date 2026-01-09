@@ -1,0 +1,7 @@
+Testing GET /statistics...
+Status Code: 200
+SUCCESS: 'No Run registered' message NOT found.
+SUCCESS: Run selection list found.
+Testing POST /statistics with run_id=100177...
+Status Code: 200
+SUCCESS: Preview section found.

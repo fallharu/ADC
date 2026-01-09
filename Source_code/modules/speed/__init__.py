@@ -298,7 +298,7 @@ def assign_kinematics(run_id: int):
                         return "F" if diffs.mean() >= 0 else "B"
                 return "F"
 
-            preferred = direction_subset.groupby("group_id").apply(_choose_direction)
+            preferred = direction_subset.groupby("group_id").apply(_choose_direction, include_groups=False)
             for gid, direction in preferred.items():
                 mask = (df["group_id"] == gid) & df["travel_direction"].isin(["F", "B"])
                 df.loc[mask, "travel_direction"] = direction

@@ -2,7 +2,7 @@
 比較分析レポート生成モジュール
 
 年度別・道路タイプ別の追い越しイベントを比較分析し、
-統計検定とグラフを含むレポートを生成する。
+統計検定とグラフを含むレポートを生成する.
 """
 from __future__ import annotations
 
@@ -115,14 +115,17 @@ class ComparativeAnalyzer:
         collection_years: Optional[Sequence[int]] = None,
         road_types: Optional[Sequence[str]] = None,
         directions: Optional[Sequence[str]] = None,
+        include_manual: str = "both",  # "auto", "manual", or "both"
     ) -> None:
         """
         追い越しイベントデータをロードし、道路タイプと年度でグループ化
         
         Args:
-            run_ids: 分析対象のRun ID（Noneの場合は全て）
-            collection_years: 収集年度のリスト（Noneの場合は全て）
-            road_types: 道路タイプのリスト（Noneの場合は全て）
+            run_ids: 分析対象のRun ID(Noneの場合は全て)
+            collection_years: 収集年度のリスト(Noneの場合は全て)
+            road_types: 道路タイプのリスト(Noneの場合は全て)
+            directions: 走行方向のリスト(Noneの場合は全て)
+            include_manual: "auto"=自動検出のみ, "manual"=手動追加のみ, "both"=統合
         """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -160,125 +163,100 @@ class ComparativeAnalyzer:
             
             where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
             
-            query = f"""
-            SELECT 
-                v.road_type,
-                v.collection_year,
-                v.video_id,
-                p.run_id,
-                e.overtake_event_id,
-                e.event_frame_num,
-                e.line_distance_m,
-                e.clearance_distance_m,
-                e.speed_profile_json,
-                e.l_line_distance_m,
-                e.r_line_distance_m
-            FROM OvertakeEvents e
-            JOIN ProcessLog p ON e.run_id = p.run_id
-            JOIN Video v ON p.video_id = v.video_id
-            JOIN Detection d ON e.run_id = d.run_id 
-                 AND e.event_frame_num = d.frame_num 
-                 AND e.overtaker_auto_id = d.auto_id
-            {where_sql}
-            ORDER BY v.collection_year, v.road_type, e.run_id, e.event_frame_num
-            """
-            
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            
             # グループごとにメトリクスを集計
             grouped_data: Dict[Tuple[str, int], OvertakeMetrics] = defaultdict(OvertakeMetrics)
             video_counts: Dict[Tuple[str, int], set] = defaultdict(set)
             self.raw_records = []
             self.loaded_run_ids = set()
             
+            # 自動検出データをロード
+            if include_manual in ("auto", "both"):
+                query = f"""
+                SELECT 
+                    v.road_type,
+                    v.collection_year,
+                    v.video_id,
+                    p.run_id,
+                    e.overtake_event_id,
+                    e.event_frame_num,
+                    e.line_distance_m,
+                    e.clearance_distance_m,
+                    e.speed_profile_json,
+                    e.l_line_distance_m,
+                    e.r_line_distance_m,
+                    'auto' as source_type
+                FROM OvertakeEvents e
+                JOIN ProcessLog p ON e.run_id = p.run_id
+                JOIN Video v ON p.video_id = v.video_id
+                JOIN Detection d ON e.run_id = d.run_id 
+                     AND e.event_frame_num = d.frame_num 
+                     AND e.overtaker_auto_id = d.auto_id
+                {where_sql}
+                ORDER BY v.collection_year, v.road_type, e.run_id, e.event_frame_num
+                """
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                for row in rows:
+                    self._process_overtake_row(row, grouped_data, video_counts)
             
-            for row in rows:
-                # 離隔距離が10m以上の場合は外れ値（追い越しなし）として除外
-                if row["clearance_distance_m"] is not None and row["clearance_distance_m"] >= 10.0:
-                    continue
-
-                road_type = row["road_type"]
-                year = row["collection_year"]
-                key = (road_type, year)
+            # 手動追い越しデータをロード
+            if include_manual in ("manual", "both"):
+                # 手動追い越し用のWHERE句を構築
+                manual_where = []
+                manual_params = []
                 
-                metrics = grouped_data[key]
-                metrics.total_events += 1
+                if run_ids:
+                    placeholders = ",".join("?" * len(run_ids))
+                    manual_where.append(f"p.run_id IN ({placeholders})")
+                    manual_params.extend(run_ids)
                 
-                # Run IDを記録
-                self.loaded_run_ids.add(row["run_id"])
-
-                # 動画をカウント
-                video_counts[key].add(row["video_id"])
+                if collection_years:
+                    placeholders = ",".join("?" * len(collection_years))
+                    manual_where.append(f"v.collection_year IN ({placeholders})")
+                    manual_params.extend(collection_years)
                 
-                # 白線距離
-                if row["line_distance_m"] is not None:
-                    metrics.line_distances.append(row["line_distance_m"])
+                if road_types:
+                    placeholders = ",".join("?" * len(road_types))
+                    manual_where.append(f"v.road_type IN ({placeholders})")
+                    manual_params.extend(road_types)
                 
-                # 左右の白線距離から内側・外側を判定
-                l_dist = row["l_line_distance_m"]
-                r_dist = row["r_line_distance_m"]
-                if l_dist is not None and r_dist is not None:
-                    if l_dist < r_dist:
-                        metrics.inner_overtakes += 1
-                    else:
-                        metrics.outer_overtakes += 1
+                manual_where.append("v.road_type IS NOT NULL")
+                manual_where.append("v.collection_year IS NOT NULL")
                 
-                # 離隔距離
-                if row["clearance_distance_m"] is not None:
-                    metrics.clearance_distances.append(row["clearance_distance_m"])
+                manual_where_sql = "WHERE " + " AND ".join(manual_where) if manual_where else ""
                 
-                # 速度プロファイルから追い越し時の速度と加速度を抽出
-                if row["speed_profile_json"]:
-                    try:
-                        speed_profile = json.loads(row["speed_profile_json"])
-                        
-                        # 追い越し瞬間（offset=0）の速度
-                        if "0.0" in speed_profile and speed_profile["0.0"] is not None:
-                            metrics.overtake_speeds.append(speed_profile["0.0"])
-                        
-                        # 加速度計算（前後1秒の速度差）
-                        # 前: -1.0秒, 後: +1.0秒
-                        speed_before = speed_profile.get("-1.0")
-                        speed_at = speed_profile.get("0.0")
-                        speed_after = speed_profile.get("1.0")
-                        
-                        if speed_before is not None and speed_at is not None:
-                            # km/h -> m/s に変換してから加速度計算
-                            v_before = speed_before / 3.6
-                            v_at = speed_at / 3.6
-                            acc_before = (v_at - v_before) / 1.0  # m/s²
-                            metrics.accelerations_before.append(acc_before)
-                        
-                        if speed_at is not None and speed_after is not None:
-                            v_at = speed_at / 3.6
-                            v_after = speed_after / 3.6
-                            acc_after = (v_after - v_at) / 1.0  # m/s²
-                            metrics.accelerations_after.append(acc_after)
-                        
-                    except (json.JSONDecodeError, KeyError, TypeError):
-                        pass
-
-                # Raw Record 追加
-                self.raw_records.append({
-                    "Video_ID": row["video_id"],
-                    "Run_ID": row["run_id"],
-                    "Event_ID": row["overtake_event_id"],
-                    "Year": year,
-                    "Road_Type": "Widened" if road_type == "widened" else "Non-Widened" if road_type == "non_widened" else road_type,
-                    "Line_Distance_m": row["line_distance_m"],
-                    "Clearance_Distance_m": row["clearance_distance_m"],
-                    "Overtake_Speed_kmh": speed_at if 'speed_at' in locals() and speed_at is not None else None,
-                    "Accel_Before_ms2": acc_before if 'acc_before' in locals() and acc_before is not None else None,
-                    "Accel_After_ms2": acc_after if 'acc_after' in locals() and acc_after is not None else None,
-                    "Inner_Overtake": 1 if l_dist is not None and r_dist is not None and l_dist < r_dist else 0,
-                    "Outer_Overtake": 1 if l_dist is not None and r_dist is not None and l_dist >= r_dist else 0,
-                })
-                
-                # ローカル変数のクリーンアップ (ループ内での誤用防止)
-                if 'speed_at' in locals(): del speed_at
-                if 'acc_before' in locals(): del acc_before
-                if 'acc_after' in locals(): del acc_after
+                try:
+                    manual_query = f"""
+                    SELECT 
+                        v.road_type,
+                        v.collection_year,
+                        v.video_id,
+                        p.run_id,
+                        m.manual_event_id as overtake_event_id,
+                        m.frame_num as event_frame_num,
+                        m.overtaker_line_distance_m as line_distance_m,
+                        m.clearance_distance_m,
+                        NULL as speed_profile_json,
+                        m.overtaker_line_distance_m as l_line_distance_m,
+                        m.overtaken_line_distance_m as r_line_distance_m,
+                        'manual' as source_type
+                    FROM ManualOvertakeEvents m
+                    JOIN ProcessLog p ON m.run_id = p.run_id
+                    JOIN Video v ON p.video_id = v.video_id
+                    {manual_where_sql}
+                    ORDER BY v.collection_year, v.road_type, m.run_id, m.frame_num
+                    """
+                    
+                    cursor.execute(manual_query, manual_params)
+                    manual_rows = cursor.fetchall()
+                    
+                    for row in manual_rows:
+                        self._process_overtake_row(row, grouped_data, video_counts)
+                except sqlite3.OperationalError:
+                    # ManualOvertakeEvents table may not exist
+                    pass
             
             # 動画数をカウント
             for key, metrics in grouped_data.items():
@@ -297,11 +275,103 @@ class ComparativeAnalyzer:
                 "road_types": all_road_types,
                 "groups": len(self.data),
                 "run_ids": sorted(list(self.loaded_run_ids)),
+                "include_manual": include_manual,
             }
             
         finally:
             cursor.close()
             conn.close()
+    
+    def _process_overtake_row(
+        self,
+        row: sqlite3.Row,
+        grouped_data: Dict[Tuple[str, int], OvertakeMetrics],
+        video_counts: Dict[Tuple[str, int], set],
+    ) -> None:
+        """追い越しデータの1行を処理してメトリクスに追加"""
+        # 離隔距離が10m以上の場合は外れ値（追い越しなし）として除外
+        if row["clearance_distance_m"] is not None and row["clearance_distance_m"] >= 10.0:
+            return
+
+        road_type = row["road_type"]
+        year = row["collection_year"]
+        key = (road_type, year)
+        
+        metrics = grouped_data[key]
+        metrics.total_events += 1
+        
+        # Run IDを記録
+        self.loaded_run_ids.add(row["run_id"])
+
+        # 動画をカウント
+        video_counts[key].add(row["video_id"])
+        
+        # 白線距離
+        if row["line_distance_m"] is not None:
+            metrics.line_distances.append(row["line_distance_m"])
+        
+        # 左右の白線距離から内側・外側を判定
+        l_dist = row["l_line_distance_m"]
+        r_dist = row["r_line_distance_m"]
+        if l_dist is not None and r_dist is not None:
+            if l_dist < r_dist:
+                metrics.inner_overtakes += 1
+            else:
+                metrics.outer_overtakes += 1
+        
+        # 離隔距離
+        if row["clearance_distance_m"] is not None:
+            metrics.clearance_distances.append(row["clearance_distance_m"])
+        
+        # 速度プロファイルから追い越し時の速度と加速度を抽出
+        speed_at = None
+        acc_before = None
+        acc_after = None
+        if row["speed_profile_json"]:
+            try:
+                speed_profile = json.loads(row["speed_profile_json"])
+                
+                # 追い越し瞬間（offset=0）の速度
+                if "0.0" in speed_profile and speed_profile["0.0"] is not None:
+                    speed_at = speed_profile["0.0"]
+                    metrics.overtake_speeds.append(speed_at)
+                
+                # 加速度計算（前後1秒の速度差）
+                speed_before = speed_profile.get("-1.0")
+                speed_after = speed_profile.get("1.0")
+                
+                if speed_before is not None and speed_at is not None:
+                    v_before = speed_before / 3.6
+                    v_at = speed_at / 3.6
+                    acc_before = (v_at - v_before) / 1.0
+                    metrics.accelerations_before.append(acc_before)
+                
+                if speed_at is not None and speed_after is not None:
+                    v_at = speed_at / 3.6
+                    v_after = speed_after / 3.6
+                    acc_after = (v_after - v_at) / 1.0
+                    metrics.accelerations_after.append(acc_after)
+                    
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+
+        # Raw Record 追加
+        source_type = row["source_type"] if "source_type" in row.keys() else "auto"
+        self.raw_records.append({
+            "Video_ID": row["video_id"],
+            "Run_ID": row["run_id"],
+            "Event_ID": row["overtake_event_id"],
+            "Year": year,
+            "Road_Type": "Widened" if road_type == "widened" else "Non-Widened" if road_type == "non_widened" else road_type,
+            "Line_Distance_m": row["line_distance_m"],
+            "Clearance_Distance_m": row["clearance_distance_m"],
+            "Overtake_Speed_kmh": speed_at,
+            "Accel_Before_ms2": acc_before,
+            "Accel_After_ms2": acc_after,
+            "Inner_Overtake": 1 if l_dist is not None and r_dist is not None and l_dist < r_dist else 0,
+            "Outer_Overtake": 1 if l_dist is not None and r_dist is not None and l_dist >= r_dist else 0,
+            "Source": "手動" if source_type == "manual" else "自動",
+        })
     
 
 
@@ -313,8 +383,8 @@ class ComparativeAnalyzer:
         指定した指標の統計量を計算
         
         Args:
-            metric_name: 指標名（line_distances, clearance_distances, overtake_speeds等）
-            exclude_outliers: Trueの場合、IQR法で外れ値を除去してから統計量を計算
+            metric_name: 指標名(line_distances, clearance_distances, overtake_speeds等)
+            exclude_outliers: Trueの場合, IQR法で外れ値を除去してから統計量を計算
         
         Returns:
             グループごとの統計量
@@ -359,7 +429,7 @@ class ComparativeAnalyzer:
 
     def generate_excel_bytes(self, metrics: List[str]) -> bytes:
         """
-        現在の分析結果、統計、RawデータをExcelファイル(bytes)として生成する
+        現在の分析結果, 統計, RawデータをExcelファイル(bytes)として生成する
         """
         output = io.BytesIO()
         
@@ -583,12 +653,27 @@ def get_available_years_and_road_types() -> Dict[str, Any]:
                 "videos": row["video_count"],
             }
         
+        # 自動検出の合計数
+        cursor.execute("SELECT COUNT(*) FROM OvertakeEvents")
+        auto_count = cursor.fetchone()[0] or 0
+        
+        # 手動追い越しの合計数
+        manual_count = 0
+        try:
+            cursor.execute("SELECT COUNT(*) FROM ManualOvertakeEvents")
+            manual_count = cursor.fetchone()[0] or 0
+        except sqlite3.OperationalError:
+            pass  # Table may not exist
+        
         return {
             "years": sorted(years),
             "road_types": sorted(road_types),
             "combinations": combinations,
             "counts": counts,
-            "direction_counts": direction_counts
+            "direction_counts": direction_counts,
+            "auto_count": auto_count,
+            "manual_count": manual_count,
+            "total_count": auto_count + manual_count,
         }
     
     finally:
@@ -634,11 +719,7 @@ def test_normality(data: Sequence[float], alpha: float = 0.05) -> Tuple[bool, fl
 
 
 def cohens_d(group1: Sequence[float], group2: Sequence[float]) -> float:
-    """
-    Cohen's d（効果量）を計算
-    
-    小: 0.2, 中: 0.5, 大: 0.8
-    """
+
     arr1 = np.array(group1)
     arr2 = np.array(group2)
     
@@ -655,11 +736,7 @@ def cohens_d(group1: Sequence[float], group2: Sequence[float]) -> float:
 
 
 def eta_squared(groups: List[Sequence[float]]) -> float:
-    """
-    η² (eta squared)を計算（ANOVA用の効果量）
-    
-    小: 0.01, 中: 0.06, 大: 0.14
-    """
+
     all_data = np.concatenate([np.array(g) for g in groups])
     grand_mean = np.mean(all_data)
     
@@ -683,7 +760,7 @@ def compare_two_groups(
     alpha: float = 0.05,
 ) -> StatisticalTestResult:
     """
-    2群の比較検定を実行（正規性に基づいてt検定またはMann-Whitney U検定を選択）
+    2群の比較検定を実行(正規性に基づいてt検定またはMann-Whitney U検定を選択)
     
     Args:
         group1: グループ1のデータ
@@ -720,9 +797,9 @@ def compare_two_groups(
         
         if p_value < alpha:
             direction = "大きい" if mean1 > mean2 else "小さい"
-            interpretation = f"{group1_name}は{group2_name}よりも有意に{direction}（p={p_value:.4f}, Cohen's d={effect:.2f}）"
+            interpretation = f"{group1_name} is significantly {direction} than {group2_name} (p={p_value:.4f}, Cohens d={effect:.2f})"
         else:
-            interpretation = f"{group1_name}と{group2_name}に有意な差は認められません（p={p_value:.4f}）"
+            interpretation = f"No significant difference between {group1_name} and {group2_name} (p={p_value:.4f})"
     else:
         # どちらかが非正規 → Mann-Whitney U検定
         stat, p_value = stats.mannwhitneyu(group1, group2, alternative="two-sided")
@@ -731,9 +808,9 @@ def compare_two_groups(
         
         if p_value < alpha:
             direction = "大きい" if np.median(group1) > np.median(group2) else "小さい"
-            interpretation = f"{group1_name}は{group2_name}よりも有意に{direction}（p={p_value:.4f}, Mann-Whitney U）"
+            interpretation = f"{group1_name} is significantly {direction} than {group2_name} (p={p_value:.4f}, Mann-Whitney U)"
         else:
-            interpretation = f"{group1_name}と{group2_name}に有意な差は認められません（p={p_value:.4f}）"
+            interpretation = f"No significant difference between {group1_name} and {group2_name} (p={p_value:.4f})"
     
     return StatisticalTestResult(
         test_type=test_type,
@@ -752,7 +829,7 @@ def compare_multiple_groups(
     alpha: float = 0.05,
 ) -> StatisticalTestResult:
     """
-    3群以上の比較検定を実行（正規性に基づいてANOVAまたはKruskal-Wallis検定を選択）
+    3群以上の比較検定を実行(正規性に基づいてANOVAまたはKruskal-Wallis検定を選択)
     
     Args:
         groups: {グループ名: データ}の辞書
@@ -787,9 +864,9 @@ def compare_multiple_groups(
         effect = eta_squared(group_data)
         
         if p_value < alpha:
-            interpretation = f"グループ間に有意な差があります（p={p_value:.4f}, η²={effect:.3f}）"
+            interpretation = f"Significant difference between groups (p={p_value:.4f}, eta2={effect:.3f})"
         else:
-            interpretation = f"グループ間に有意な差は認められません（p={p_value:.4f}）"
+            interpretation = f"No significant difference between groups (p={p_value:.4f})"
     else:
         # Kruskal-Wallis検定
         stat, p_value = stats.kruskal(*group_data)
@@ -797,9 +874,9 @@ def compare_multiple_groups(
         effect = None
         
         if p_value < alpha:
-            interpretation = f"グループ間に有意な差があります（p={p_value:.4f}, Kruskal-Wallis）"
+            interpretation = f"Significant difference between groups (p={p_value:.4f}, Kruskal-Wallis)"
         else:
-            interpretation = f"グループ間に有意な差は認められません（p={p_value:.4f}）"
+            interpretation = f"No significant difference between groups (p={p_value:.4f})"
     
     return StatisticalTestResult(
         test_type=test_type,
@@ -811,4 +888,101 @@ def compare_multiple_groups(
         groups_compared=group_names,
         sample_sizes={name: len(groups[name]) for name in group_names},
     )
+
+
+
+def export_target_vehicles(
+    run_ids: Optional[Sequence[int]] = None,
+    output_format: str = "csv"
+) -> bytes:
+    """
+    Extract and export bicycle and overtaken vehicle detection data.
+    
+    Args:
+        run_ids: List of Run IDs to process (None for all)
+        output_format: 'csv' or 'excel'
+    
+    Returns:
+        bytes: File content
+    """
+    conn = sqlite3.connect(MAIN_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    try:
+        # Build query using class_id joined with ClassMaster
+        query = """
+        SELECT 
+            d.auto_id as detection_id,
+            p.run_id,
+            v.filename as video_name,
+            v.collection_year,
+            v.road_type,
+            d.frame_num,
+            cm.class_name,
+            d.confidence as score,
+            d.speed_km_h,
+            d.line_distance_m as distance_m,
+            d.ttc_s,
+            d.lane_position_flag,
+            d.track_id,
+            oe.overtake_event_id AS overtake_event_id,
+            CASE 
+                WHEN cm.class_name = 'bicycle' THEN 'Bicycle'
+                WHEN oe.overtaken_auto_id IS NOT NULL THEN 'Overtaken Car'
+                ELSE 'Unknown'
+            END as target_type
+        FROM Detection d
+        JOIN ProcessLog p ON d.run_id = p.run_id
+        JOIN Video v ON p.video_id = v.video_id
+        LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+        LEFT JOIN OvertakeEvents oe ON d.run_id = oe.run_id 
+            AND d.frame_num = oe.event_frame_num 
+            AND d.auto_id = oe.overtaken_auto_id
+        WHERE 
+            (cm.class_name = 'bicycle') 
+            OR 
+            (oe.overtaken_auto_id IS NOT NULL)
+        """
+        
+        params = []
+        if run_ids:
+            placeholders = ",".join("?" * len(run_ids))
+            query += f" AND p.run_id IN ({placeholders})"
+            params.extend(run_ids)
+            
+        query += " ORDER BY p.run_id, d.frame_num"
+        
+        df = pd.read_sql_query(query, conn, params=params)
+        
+        column_map = {
+            "detection_id": "Detection ID",
+            "run_id": "Run ID",
+            "video_name": "Video/Folder Name",
+            "collection_year": "Year",
+            "road_type": "Road Type",
+            "frame_num": "Frame Number",
+            "class_name": "Class Name",
+            "score": "Confidence Score",
+            "speed_km_h": "Speed (km/h)",
+            "distance_m": "Distance (m)",
+            "ttc_s": "TTC (s)",
+            "lane_position_flag": "Lane Position",
+            "track_id": "Track ID",
+            "overtake_event_id": "Overtake Event ID",
+            "target_type": "Target Type"
+        }
+        df.rename(columns=column_map, inplace=True)
+        
+        output = io.BytesIO()
+        if output_format == "excel":
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Target Vehicles')
+        else:
+            df.to_csv(output, index=False, encoding='utf-8-sig')
+            
+        return output.getvalue()
+        
+    finally:
+        conn.close()
+
 

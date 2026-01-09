@@ -47,7 +47,7 @@ mark_manual_overtake_timeline_processed = getattr(dbm, "mark_manual_overtake_tim
 summarize_manual_overtake_events = getattr(dbm, "summarize_manual_overtake_events", None)
 
 if get_run_video_info is None:
-    def get_run_video_info(run_id, upload_folder): return None
+    def get_run_video_info(run_id): return None
 
 # Import db_manager_helpers functions
 from ..modules import db_manager_helpers
@@ -103,6 +103,7 @@ from ..modules.manual_metrics import (
     LANE_WIDTH_METERS,
     lane_scale_details_at_y,
 )
+from ..modules.overtake import _export_overtake_snapshots
 import os
 import csv
 
@@ -1932,12 +1933,69 @@ def manual_overtake_events_api(run_id: int):
         current_app.logger.exception("Failed to record manual overtake timeline entry")
         notices.append(f"タイムラインの更新に失敗しました: {exc}")
 
+    # Generate overtake snapshot photo
+    snapshot_generated = 0
+    try:
+        run_info = get_run_video_info(run_id)
+        if run_info:
+            video_path = run_info.get('path') or run_info.get('file_path')
+            output_folder = run_info.get('output_folder')
+            calibration_profile = run_info.get('profile_name') or run_info.get('calibration_profile')
+            
+            # Build snapshot request for this manual overtake event
+            snapshot_request = {
+                "frame": frame_num,
+                "car_group": overtaker_group_id,
+                "bike_group": overtaken_group_id,
+            }
+            
+            # Try to get bbox and measurement points from Detection table
+            if saved_event:
+                for prefix in ("overtaker", "overtaken"):
+                    x1 = saved_event.get(f"{prefix}_x1")
+                    y1 = saved_event.get(f"{prefix}_y1")
+                    x2 = saved_event.get(f"{prefix}_x2")
+                    y2 = saved_event.get(f"{prefix}_y2")
+                    mx = saved_event.get(f"{prefix}_measure_x")
+                    my = saved_event.get(f"{prefix}_measure_y")
+                    if prefix == "overtaker":
+                        if all(v is not None for v in (x1, y1, x2, y2)):
+                            snapshot_request["car_box"] = (float(x1), float(y1), float(x2), float(y2))
+                        if mx is not None and my is not None:
+                            snapshot_request["car_measure"] = (float(mx), float(my))
+                    else:
+                        if all(v is not None for v in (x1, y1, x2, y2)):
+                            snapshot_request["bike_box"] = (float(x1), float(y1), float(x2), float(y2))
+                        if mx is not None and my is not None:
+                            snapshot_request["bike_measure"] = (float(mx), float(my))
+                
+                # Add distance info for labeling
+                snapshot_request["clearance_cm"] = saved_event.get("clearance_distance_cm")
+                snapshot_request["clearance_m"] = saved_event.get("clearance_distance_m")
+                snapshot_request["approach_m"] = saved_event.get("approach_distance_m")
+            
+            snapshot_generated = _export_overtake_snapshots(
+                run_id=run_id,
+                snapshot_requests=[snapshot_request],
+                output_folder=output_folder,
+                video_filename=run_info.get('filename'),
+                source_path=video_path,
+                folder_alias=run_info.get('folder_alias'),
+                calibration_profile=calibration_profile,
+            )
+            if snapshot_generated:
+                notices.append(f"追い越しスナップショットを{snapshot_generated}枚生成しました。")
+    except Exception as exc:  # pragma: no cover - runtime safeguard
+        current_app.logger.exception("Failed to generate manual overtake snapshot")
+        notices.append(f"スナップショット生成に失敗しました: {exc}")
+
     response_payload: dict[str, object] = {
         "event_id": event_id,
         "event": saved_event,
         "database_verified": database_verified,
         "context_saved": context_saved,
         "context_queued": context_enqueued,
+        "snapshot_generated": snapshot_generated,
     }
 
     remaining_notices = [msg for msg in notices if msg]

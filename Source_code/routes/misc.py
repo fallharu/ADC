@@ -25,6 +25,16 @@ def results_file_serve(filename):
     return send_from_directory(directory, filename)
 
 
+@main.route("/exports/<path:filename>")
+def exports_file_serve(filename):
+    """エクスポートされたファイルをダウンロードするルート"""
+    upload_folder = current_app.config.get("UPLOAD_FOLDER", "uploads")
+    export_dir = os.path.join(upload_folder, "exports")
+    if not os.path.isabs(export_dir):
+        export_dir = os.path.abspath(export_dir)
+    return send_from_directory(export_dir, filename, as_attachment=True)
+
+
 @main.route("/reset_runs", methods=["POST"])
 def reset_runs():
     """Runデータを全てリセットする。"""

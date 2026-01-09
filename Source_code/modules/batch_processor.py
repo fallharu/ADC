@@ -45,6 +45,9 @@ def process_single_batch(
 
         # 0. Run Traffic Counting
         counter = TrafficCounter()
+        total_car = 0
+        total_bicycle = 0
+        
         for i, run_id in enumerate(run_ids):
             if progress_queue:
                 progress_queue.put({
@@ -57,10 +60,26 @@ def process_single_batch(
                 })
 
             try:
-                counter.count(run_id)
+                count_result = counter.count(run_id)
+                total_car += count_result.get("car", 0)
+                total_bicycle += count_result.get("bicycle", 0)
+                
+                # 結果をログに送信
+                if progress_queue and (count_result.get("car", 0) > 0 or count_result.get("bicycle", 0) > 0):
+                    progress_queue.put({
+                        "type": "log",
+                        "message": f"[Run {run_id}] 交通量: 車 {count_result.get('car', 0)}台, 自転車 {count_result.get('bicycle', 0)}台"
+                    })
             except Exception as e:
                 logger.error(f"Traffic counting failed for run_id {run_id}: {e}")
             current_step_count += 1
+        
+        # 交通量カウント完了後の集計報告
+        if progress_queue and (total_car > 0 or total_bicycle > 0):
+            progress_queue.put({
+                "type": "log",
+                "message": f"📊 交通量合計: 車 {total_car}台, 自転車 {total_bicycle}台"
+            })
         
         # 1. Apply Calibration Profiles before Pipeline
         from .inference import run_postprocess_pipeline_sync, apply_calibration_profile
@@ -105,6 +124,14 @@ def process_single_batch(
                 if overtake_info:
                     pipeline_details.append(f"Run {run_id}: {overtake_info}")
                 
+                # ログメッセージを送信
+                if progress_queue:
+                    for step in completed_steps:
+                        progress_queue.put({
+                            "type": "log",
+                            "message": f"[Run {run_id}] {step}"
+                        })
+                
                 # Collect Overtake Stats
                 ov_summary = summarize_run_overtakes(run_id)
                 if ov_summary:
@@ -113,6 +140,11 @@ def process_single_batch(
 
             except Exception as e:
                  logger.error(f"Pipeline failed for run_id {run_id}: {e}")
+                 if progress_queue:
+                     progress_queue.put({
+                         "type": "log",
+                         "message": f"[Run {run_id}] エラー: {str(e)}"
+                     })
             current_step_count += 1
 
         # 2. Create Combined CSV
