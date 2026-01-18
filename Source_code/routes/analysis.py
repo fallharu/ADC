@@ -1009,6 +1009,12 @@ def overtake_photo_detail():
         with sqlite3.connect(MAIN_DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             configure_connection(conn, mode="read")
+
+            detection_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(Detection)").fetchall()
+            }
+            has_center_status = "center_line_overtake_status" in detection_columns
+            has_white_status = "white_line_overtake_status" in detection_columns
             
             # ファイルパスからrun_idを特定するため、output_folderを推測
             # ファイルパスの親フォルダからrun_idを探す
@@ -1053,36 +1059,62 @@ def overtake_photo_detail():
             # 追い越し車（車）のDetectionデータを取得
             car_detection = None
             if event_row and event_row["overtaker_auto_id"]:
+                car_center_col = (
+                    "d.center_line_overtake_status"
+                    if has_center_status
+                    else "NULL AS center_line_overtake_status"
+                )
+                car_white_col = (
+                    "d.white_line_overtake_status"
+                    if has_white_status
+                    else "NULL AS white_line_overtake_status"
+                )
                 car_sql = """
                     SELECT 
                         d.auto_id, d.frame_num, d.group_id, 
                         cm.class_name, d.speed_km_h, d.confidence,
                         d.front_distance_m, d.clearance_distance_m,
                         d.line_distance_m, d.travel_direction, d.lane_position_flag,
-                        d.center_line_overtake_status, d.white_line_overtake_status
+                        {center_col}, {white_col}
                     FROM Detection d
                     LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
                     WHERE d.auto_id = ?
                 """
-                car_row = conn.execute(car_sql, (event_row["overtaker_auto_id"],)).fetchone()
+                car_row = conn.execute(
+                    car_sql.format(center_col=car_center_col, white_col=car_white_col),
+                    (event_row["overtaker_auto_id"],),
+                ).fetchone()
                 if car_row:
                     car_detection = dict(car_row)
             
             # 被追い越し車（自転車）のDetectionデータを取得
             bike_detection = None
             if event_row and event_row["overtaken_auto_id"]:
+                bike_center_col = (
+                    "d.center_line_overtake_status"
+                    if has_center_status
+                    else "NULL AS center_line_overtake_status"
+                )
+                bike_white_col = (
+                    "d.white_line_overtake_status"
+                    if has_white_status
+                    else "NULL AS white_line_overtake_status"
+                )
                 bike_sql = """
                     SELECT 
                         d.auto_id, d.frame_num, d.group_id,
                         cm.class_name, d.speed_km_h, d.confidence,
                         d.front_distance_m, d.clearance_distance_m,
                         d.line_distance_m, d.travel_direction, d.lane_position_flag,
-                        d.center_line_overtake_status, d.white_line_overtake_status
+                        {center_col}, {white_col}
                     FROM Detection d
                     LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
                     WHERE d.auto_id = ?
                 """
-                bike_row = conn.execute(bike_sql, (event_row["overtaken_auto_id"],)).fetchone()
+                bike_row = conn.execute(
+                    bike_sql.format(center_col=bike_center_col, white_col=bike_white_col),
+                    (event_row["overtaken_auto_id"],),
+                ).fetchone()
                 if bike_row:
                     bike_detection = dict(bike_row)
             
@@ -1129,6 +1161,20 @@ def overtake_photo_group_data():
         with sqlite3.connect(MAIN_DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             configure_connection(conn, mode="read")
+
+            detection_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(Detection)").fetchall()
+            }
+            center_col = (
+                "d.center_line_overtake_status"
+                if "center_line_overtake_status" in detection_columns
+                else "NULL AS center_line_overtake_status"
+            )
+            white_col = (
+                "d.white_line_overtake_status"
+                if "white_line_overtake_status" in detection_columns
+                else "NULL AS white_line_overtake_status"
+            )
             
             sql = """
                 SELECT 
@@ -1138,14 +1184,17 @@ def overtake_photo_group_data():
                     d.line_distance_m, d.l_line_distance_m, d.r_line_distance_m,
                     d.travel_direction, d.acceleration_state, d.acceleration_m_s2,
                     d.x1, d.y1, d.x2, d.y2,
-                    d.center_line_overtake_status, d.white_line_overtake_status,
+                    {center_col}, {white_col},
                     d.overtake, d.overtake_after
                 FROM Detection d
                 LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
                 WHERE d.run_id = ? AND d.group_id = ?
                 ORDER BY d.frame_num ASC
             """
-            rows = conn.execute(sql, (run_id, group_id)).fetchall()
+            rows = conn.execute(
+                sql.format(center_col=center_col, white_col=white_col),
+                (run_id, group_id),
+            ).fetchall()
             
             detections = [dict(row) for row in rows]
             
