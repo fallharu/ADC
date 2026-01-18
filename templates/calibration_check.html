@@ -894,13 +894,11 @@
                 </button>
             </td>
             <td>
-                <div class="position-relative d-inline-block">
-                    <img src="${thumbUrl}" 
-                         class="rounded ${hasProfile && hasLines ? 'border-success' : hasProfile ? 'border-warning' : 'border-secondary'}" 
-                         style="width: 40px; height: 40px; object-fit: cover; cursor: zoom-in; border-width: 2px !important;"
-                         onclick="openImageModal(this.src)" 
-                         onerror="this.style.opacity=0.3">
-                    ${hasProfile && hasLines ? '<span class="position-absolute top-0 end-0 badge bg-success rounded-circle" style="width: 12px; height: 12px; padding: 0;" title="適用済み"></span>' : ''}
+                <div class="position-relative d-inline-block text-center" style="width: 60px;">
+                    <button class="btn btn-sm btn-outline-secondary" style="font-size: 10px;"
+                        onclick="loadThumbnailImg(this, '${encodedPath}', '${hasProfile && hasLines}')">
+                        <i class="bi bi-image"></i> Load
+                    </button>
                 </div>
             </td>
             <td><div class="fw-bold text-truncate" style="max-width: 200px;" title="${nameVal}">${icon}${nameVal}</div></td>
@@ -1065,11 +1063,12 @@
             html += `
                 <tr>
                     <td class="text-center">
-                         <img src="${thumbUrl}" 
-                              class="rounded border" style="width: 50px; height: 35px; object-fit: cover; cursor: zoom-in;"
-                              onclick="showFilePreview('${safePath}', '${folderProfile}')"
-                              onerror="this.style.opacity=0.3; this.title='サムネイル取得失敗'"
-                              title="クリックでキャリブレーションプレビュー">
+                         <div style="width: 60px;" class="mx-auto">
+                            <button class="btn btn-sm btn-outline-secondary py-0" style="font-size: 10px;"
+                                onclick="loadFileThumbnail(this, '${encodedSourcePath}', '${safePath}', '${folderProfile}')">
+                                View
+                            </button>
+                         </div>
                     </td>
                     <td>
                         <span class="small">${f.filename}</span>
@@ -1596,7 +1595,59 @@
         const applyBtn = document.getElementById('batchApplyBtn');
         const helpText = document.getElementById('batchApplyHelp');
 
-        // Prevent double-click: disable button
+
+        // Helper to load thumbnail on click (Folder)
+        function loadThumbnailImg(btn, encodedPath, statusFlag) {
+            const parent = btn.parentNode;
+            const hasSuccess = statusFlag === 'true';
+
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            btn.disabled = true;
+
+            const thumbUrl = `${API_BASE}/thumbnail?folder=${encodedPath}`;
+
+            const img = new Image();
+            img.src = thumbUrl;
+            img.className = `rounded ${hasSuccess ? 'border-success' : 'border-secondary'}`;
+            img.style.cssText = "width: 40px; height: 40px; object-fit: cover; cursor: zoom-in; border-width: 2px !important;";
+            img.onclick = () => openImageModal(thumbUrl);
+            img.onerror = () => {
+                parent.innerHTML = '<span class="text-muted" style="font-size:10px;">No Img</span>';
+            };
+            img.onload = () => {
+                parent.innerHTML = '';
+                parent.appendChild(img);
+                if (hasSuccess) {
+                    const badge = document.createElement('span');
+                    badge.className = "position-absolute top-0 end-0 badge bg-success rounded-circle";
+                    badge.style.cssText = "width: 12px; height: 12px; padding: 0;";
+                    parent.appendChild(badge);
+                }
+            };
+        }
+
+        // Helper to load file thumbnail on click
+        function loadFileThumbnail(btn, encodedSource, safePath, profile) {
+            const parent = btn.parentNode;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            btn.disabled = true;
+
+            const thumbUrl = `${API_BASE}/file_thumbnail?video_path=${encodedSource}`;
+
+            const img = new Image();
+            img.src = thumbUrl;
+            img.className = "rounded border";
+            img.style.cssText = "width: 50px; height: 35px; object-fit: cover; cursor: zoom-in;";
+            img.onclick = () => showFilePreview(safePath, profile);
+            img.onerror = () => {
+                parent.innerHTML = '<span class="text-muted" style="font-size:10px;">Err</span>';
+            };
+            img.onload = () => {
+                parent.innerHTML = '';
+                parent.appendChild(img);
+            };
+        }
+
         applyBtn.disabled = true;
         const originalBtnHtml = applyBtn.innerHTML;
 

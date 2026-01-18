@@ -132,6 +132,7 @@ def compute_front_right_tire_points(
     df_tires: pd.DataFrame,
     left_line: Optional[Sequence[Sequence[object]]] = None,
     right_line: Optional[Sequence[Sequence[object]]] = None,
+    group_centers: Optional[dict[tuple[float, float], float]] = None,
 ) -> pd.DataFrame:
     """Return the canonical measurement point per (frame, group).
 
@@ -140,6 +141,9 @@ def compute_front_right_tire_points(
     df_tires:
         DataFrame containing tyre detections.  The frame number, group ID and
         bounding box coordinates ``x2``/``y2`` must be present.
+    group_centers:
+        Optional dictionary mapping (frame_num, group_id) to the vehicle's center X coordinate.
+        Used to filter tires that are on the wrong side (e.g., exclude Left Tire when looking for Right).
 
     Returns
     -------
@@ -169,6 +173,10 @@ def compute_front_right_tire_points(
     tyres["x1"] = tyres["x1"].apply(_as_float)
     tyres["x2"] = tyres["x2"].apply(_as_float)
     tyres["y2"] = tyres["y2"].apply(_as_float)
+    
+    # x1_val, x2_val for internal calculation to avoid .apply overhead in loop
+    x1_vals = tyres["x1"].values
+    x2_vals = tyres["x2"].values
 
     tyres = tyres.dropna(subset=["frame_num", "group_id", "x2", "y2"])
     if tyres.empty:
@@ -197,14 +205,68 @@ def compute_front_right_tire_points(
         best_y = None
         best_rank_val = float("inf") # 小さいほど良い
 
+        # Row index to access numpy arrays
+        x1_val = row.x1
+        x2_val = row.x2
+        if x1_val is None or x2_val is None:
+             continue
+
+        # Row index to access numpy arrays
+        # itertuples index is not reliable if index was reset or filtered?
+        # row uses original index.
+        # Let's just use row.x1, row.x2 safely (they are patched to float above if valid)
+        
+        x1_val = row.x1
+        x2_val = row.x2
+        if x1_val is None or x2_val is None:
+             continue
+
         # B (Top-to-Bottom) => 車の右側 => 右タイヤ => x2
         # F (Bottom-to-Top) => 車の左側 => 左タイヤ => x1
         
         target_side = None
-        if direction == "B":
+        
+        # クラスによる判定 (自転車タイヤ)
+        class_name = getattr(row, "class_name", "")
+        if not isinstance(class_name, str):
+            class_name = ""
+        class_lower = class_name.lower()
+        
+        # 自転車を含む場合 (bicycle_tire, bicycle, bike etc) -> 中心
+        
+        # クラスによる判定 (自転車タイヤ)
+        class_name = getattr(row, "class_name", "")
+        if not isinstance(class_name, str):
+            class_name = ""
+        class_lower = class_name.lower()
+        
+        # クラスによる判定 (自転車タイヤ)
+        class_name = getattr(row, "class_name", "")
+        if not isinstance(class_name, str):
+            class_name = ""
+        class_lower = class_name.lower()
+        
+        # 自転車を含む場合 (bicycle_tire, bicycle, bike etc) -> 中心
+        if "bicycle" in class_lower or "bike" in class_lower:
+            target_side = "center"
+        elif direction == "B":
             target_side = "right" # x2
         elif direction == "F":
             target_side = "left"  # x1
+
+        # ユーザー要望対応:
+        # 左側のタイヤを使ってしまう問題を解消するため、
+        # グループ中心座標がある場合は、対象サイド以外のタイヤを除外する。
+        if group_centers is not None and target_side is not None and target_side != "center":
+            center_x = group_centers.get(key)
+            if center_x is not None:
+                tire_center = (row.x1 + row.x2) / 2.0
+                if target_side == "right" and tire_center < center_x:
+                    # 右側がターゲットなのに、中心より左にあるタイヤ -> 除外
+                    continue
+                if target_side == "left" and tire_center > center_x:
+                    # 左側がターゲットなのに、中心より右にあるタイヤ -> 除外
+                    continue
 
         candidates: list[tuple[float, float, float]] = [] # (metric, x, y)
         
@@ -218,6 +280,10 @@ def compute_front_right_tire_points(
              check_x_list = [row.x2]
         elif target_side == "left":
              check_x_list = [row.x1]
+        elif target_side == "center":
+             # 自転車など: 中心を使用
+             center_x = (x1_val + x2_val) / 2.0
+             check_x_list = [center_x]
         else:
              # 方向不明の場合は両方見て白線に近い方（既存ロジック）
              check_x_list = [row.x1, row.x2]
@@ -265,17 +331,28 @@ def compute_front_right_tire_points(
             continue
 
         current = selections.get(key)
+        
         # selectionの比較:
         # rank (metric) が小さい方を採用
-        # 同着なら y (下にある方=手前?) を優先 (既存実装: -y, -x で比較していた)
-        # ここではシンプルに metric で比較する
+        # 同着なら y を優先して決める
         
-        # 既存実装の rank のタプル構造:
-        # (distance, -y, -x) => 距離最小、y最大、x最大
+        # ユーザー要望: "前のタイヤを選択できるように"
+        # F (Bottom-to-Top): Front = Top (Small Y). Prefer Small Y. => Rank uses +y
+        # B (Top-to-Bottom): Front = Bottom (Large Y). Prefer Large Y. => Rank uses -y
+        # Unknown: Default to -y (Bottom/Front priority logic for standard view?) 
+        # But usually Bottom is Front for Downward, Top is Front for Upward.
         
+        y_score = float("inf")
+        if direction == "F":
+             # Prefers Small Y
+             y_score = best_y if np.isfinite(best_y) else float("inf")
+        else:
+             # Prefers Large Y (B or Unknown default)
+             y_score = -(best_y if np.isfinite(best_y) else float("-inf"))
+
         candidate_full_rank = (
             best_rank_val,
-            -(best_y if np.isfinite(best_y) else float("-inf")),
+            y_score,
             -(best_x if np.isfinite(best_x) else float("-inf")),
         )
         
@@ -346,7 +423,18 @@ def _fallback_measure_point(
         direction = direction.strip()
 
     target_side = None
-    if direction == "B":
+    
+    # 自転車判定
+    class_name = row.get("class_name", "")
+    if not isinstance(class_name, str):
+        class_name = ""
+    class_lower = class_name.lower()
+
+    if "bicycle" in class_lower or "bike" in class_lower or "cyclist" in class_lower:
+        target_side = "center"
+    if "bicycle" in class_lower or "bike" in class_lower or "cyclist" in class_lower:
+        target_side = "center"
+    elif direction == "B":
         target_side = "right" # x2
     elif direction == "F":
         target_side = "left"  # x1
@@ -359,12 +447,33 @@ def _fallback_measure_point(
         check_keys = ["x2"]
     elif target_side == "left":
         check_keys = ["x1"]
+    elif target_side == "center":
+        # BBox中心
+        x1 = _as_float(row.get("x1"))
+        x2 = _as_float(row.get("x2"))
+        if x1 is not None and x2 is not None:
+             # fallback logic simulates getting "key" -> we need a single value.
+             # We can just pre-calculate center and put it in a temporary key or handle it.
+             # Easier: Just handle calculation here and use a dummy key loop or modify loop.
+             # Let's modify the loop to iterate over values instead of keys?
+             # Or just insert a special handling.
+             pass
+        else:
+             return None, None
+        check_keys = ["center"] # Custom key
     else:
         # 方向不明なら従来通り両方チェック
         check_keys = ["x1", "x2"]
 
     for key in check_keys:
-        x_val = _as_float(row.get(key))
+        if key == "center":
+             x1 = _as_float(row.get("x1"))
+             x2 = _as_float(row.get("x2"))
+             if x1 is None or x2 is None: continue
+             x_val = (x1 + x2) / 2.0
+        else:
+             x_val = _as_float(row.get(key))
+        
         if x_val is None:
             continue
         
@@ -376,6 +485,12 @@ def _fallback_measure_point(
         elif target_side == "left":
              # 左側優先: xが小さいほうが優先
              rank_metric = x_val
+        elif target_side == "center":
+             # 中心の場合はそれのみ
+             rank_metric = 0 # Dummy
+        elif target_side == "center":
+             # 中心の場合はそれのみ
+             rank_metric = 0 # Dummy
         else:
              # 従来: 白線距離
              rank_metric = _distance_to_white_lines((x_val, y_val), left_line, right_line)
@@ -434,10 +549,14 @@ def attach_measure_points(
         how="left",
     )
 
+    
+    # Track which rows rely on fallback (no tire data)
+    missing_tire_mask = merged["measure_x"].isna()
+
     if left_line or right_line:
-        missing_mask = merged["measure_x"].isna() | merged["measure_y"].isna()
-        if missing_mask.any():
-            fallback_rows = merged.loc[missing_mask].copy()
+        # missing_mask is effectively same as missing_tire_mask at this point
+        if missing_tire_mask.any():
+            fallback_rows = merged.loc[missing_tire_mask].copy()
             fallback_values = fallback_rows.apply(
                 _fallback_measure_point,
                 axis=1,
@@ -447,15 +566,76 @@ def attach_measure_points(
             )
             if isinstance(fallback_values, pd.DataFrame):
                 fallback_values.columns = ["fallback_x", "fallback_y"]
-                merged.loc[missing_mask, "measure_x"] = merged.loc[missing_mask, "measure_x"].combine_first(
+                merged.loc[missing_tire_mask, "measure_x"] = merged.loc[missing_tire_mask, "measure_x"].combine_first(
                     fallback_values["fallback_x"]
                 )
-                merged.loc[missing_mask, "measure_y"] = merged.loc[missing_mask, "measure_y"].combine_first(
+                merged.loc[missing_tire_mask, "measure_y"] = merged.loc[missing_tire_mask, "measure_y"].combine_first(
                     fallback_values["fallback_y"]
                 )
 
-    merged["measure_x"] = merged["measure_x"].combine_first(merged["x2"])
-    merged["measure_y"] = merged["measure_y"].combine_first(merged["y2"])
+    # Final Fallback: If still NaN (e.g. no lines provided, or fallback failed), use BBOX corners.
+    # Refined: Respect direction 'F' -> x1 (Left), otherwise 'B'/Unknown -> x2 (Right)
+    remaining_nan = merged["measure_x"].isna()
+    if remaining_nan.any():
+        # Get direction (safe access)
+        dirs = merged.loc[remaining_nan, "travel_direction"].astype(str).str.strip()
+        
+        # Prepare default series (default to x2)
+        final_x = merged.loc[remaining_nan, "x2"].copy()
+        final_y = merged.loc[remaining_nan, "y2"].copy()
+        
+        # If 'F', use x1
+        mask_f = dirs == "F"
+        if mask_f.any():
+            # mask_f is a Series with the correct index.
+            # We just need the indices where it is True.
+            f_indices = mask_f[mask_f].index
+            final_x.loc[f_indices] = merged.loc[f_indices, "x1"]
+            
+        merged.loc[remaining_nan, "measure_x"] = merged.loc[remaining_nan, "measure_x"].combine_first(final_x)
+        merged.loc[remaining_nan, "measure_y"] = merged.loc[remaining_nan, "measure_y"].combine_first(final_y)
+
+    # SAFETY CHECK: For fallback rows (missing_tire_mask), ensure point is on correct half
+    # if tire was NOT detected.
+    # Direction B -> Expect Right Half (>= center). If < center -> Force x2.
+    # Direction F -> Expect Left Half (<= center). If > center -> Force x1.
+    
+    # Re-evaluate mask for rows that were originally missing tire data AND now have values
+    check_mask = missing_tire_mask & merged["measure_x"].notna()
+    
+    if check_mask.any():
+        check_subset = merged.loc[check_mask].copy()
+        
+        c_dirs = check_subset["travel_direction"].astype(str).str.strip()
+        c_x1 = check_subset["x1"]
+        c_x2 = check_subset["x2"]
+        c_mx = check_subset["measure_x"]
+        c_center = (c_x1 + c_x2) / 2
+        
+        # 1. Direction B (Right): violations if mx < center
+        bad_b = (c_dirs == "B") & (c_mx < c_center)
+        if bad_b.any():
+            b_idx = check_subset.index[bad_b]
+            merged.loc[b_idx, "measure_x"] = merged.loc[b_idx, "x2"]
+            merged.loc[b_idx, "measure_y"] = merged.loc[b_idx, "y2"]
+            
+        # 2. Direction F (Left): violations if mx > center
+        bad_f = (c_dirs == "F") & (c_mx > c_center)
+        if bad_f.any():
+            f_idx = check_subset.index[bad_f]
+            merged.loc[f_idx, "measure_x"] = merged.loc[f_idx, "x1"]
+            merged.loc[f_idx, "measure_y"] = merged.loc[f_idx, "y2"]
+            
+        # 3. Bicycle (Center): Should stay in center roughly?
+        # If it was bike, we already set to center. If not bike, fallback logic applies.
+        # This safety check is mostly for cars.
+        if "class_name" in merged.columns:
+            c_names = check_subset["class_name"].fillna("").astype(str).str.lower()
+            bike_mask = c_names.str.contains("bicycle") | c_names.str.contains("bike") | c_names.str.contains("cyclist")
+            if bike_mask.any():
+                # For bikes, re-enforce center if somehow drifted?
+                # Actually, our logic above sets it to center logic.
+                pass
 
     return merged
 

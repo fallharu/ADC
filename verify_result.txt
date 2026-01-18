@@ -1,7 +1,82 @@
-Testing GET /statistics...
-Status Code: 200
-SUCCESS: 'No Run registered' message NOT found.
-SUCCESS: Run selection list found.
-Testing POST /statistics with run_id=100177...
-Status Code: 200
-SUCCESS: Preview section found.
+Using DB Path: C:\Users\kurok\Downloads\G_ADC\ADC_08\Source_code\modules\main_test.db
+Initialize DB...
+[OK] Table ManualOvertakeEvents exists
+[OK] Table ManualRunProgress exists
+[OK] Table ManualOvertakeTimeline exists
+[OK] Table ManualContextBacklog exists
+DEBUG: ManualOvertakeEvents columns:
+  manual_event_id (INTEGER)
+  run_id (INTEGER)
+  frame_num (INTEGER)
+  video_time_s (REAL)
+  overtaker_group_id (INTEGER)
+  overtaker_track_id (INTEGER)
+  overtaker_class_name (TEXT)
+  overtaker_speed_km_h (REAL)
+  overtaker_pixel_speed (REAL)
+  overtaker_pixel_speed_frame (REAL)
+  overtaken_group_id (INTEGER)
+  overtaken_track_id (INTEGER)
+  overtaken_class_name (TEXT)
+  overtaken_speed_km_h (REAL)
+  overtaken_pixel_speed (REAL)
+  overtaken_pixel_speed_frame (REAL)
+  approach_distance_m (REAL)
+  approach_distance_px (REAL)
+  clearance_distance_m (REAL)
+  clearance_distance_cm (REAL)
+  clearance_distance_px (REAL)
+  clearance_distance_px_ratio (REAL)
+  overtaker_line_distance_m (REAL)
+  overtaker_line_distance_cm (REAL)
+  overtaker_line_distance_px (REAL)
+  overtaker_line_distance_px_ratio (REAL)
+  overtaken_line_distance_m (REAL)
+  overtaken_line_distance_cm (REAL)
+  overtaken_line_distance_px (REAL)
+  overtaken_line_distance_px_ratio (REAL)
+  overtaker_left_line_distance_m (REAL)
+  overtaker_left_line_distance_cm (REAL)
+  overtaker_left_line_distance_px (REAL)
+  overtaker_right_line_distance_m (REAL)
+  overtaker_right_line_distance_cm (REAL)
+  overtaker_right_line_distance_px (REAL)
+  overtaken_left_line_distance_m (REAL)
+  overtaken_left_line_distance_cm (REAL)
+  overtaken_left_line_distance_px (REAL)
+  overtaken_right_line_distance_m (REAL)
+  overtaken_right_line_distance_cm (REAL)
+  overtaken_right_line_distance_px (REAL)
+  overtaker_measure_x (REAL)
+  overtaker_measure_y (REAL)
+  overtaken_measure_x (REAL)
+  overtaken_measure_y (REAL)
+  overtaker_x1 (REAL)
+  overtaker_y1 (REAL)
+  overtaker_x2 (REAL)
+  overtaker_y2 (REAL)
+  overtaken_x1 (REAL)
+  overtaken_y1 (REAL)
+  overtaken_x2 (REAL)
+  overtaken_y2 (REAL)
+  lane_width_m (REAL)
+  lane_width_px_reference (REAL)
+  lane_width_cm_per_px (REAL)
+  context_frames (TEXT)
+  notes (TEXT)
+  created_at (TEXT)
+  updated_at (TEXT)
+[OK] Created dummy ProcessLog for run_id=9999
+Testing Insert...
+[OK] Inserted event ID: 1
+Testing Fetch...
+[OK] Fetched event correctly: 1
+Testing Update...
+[OK] Update successful
+Testing List...
+[OK] List returned 1 events
+Testing Helpers...
+[OK] Count manual events for run 9999: 1
+Cleaning up...
+[OK] Cleanup complete
+Verification complete.

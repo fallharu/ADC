@@ -1,7 +1,12 @@
 from flask import render_template, request, jsonify, redirect, url_for, flash, current_app
 import os
-from typing import Dict, Any, Optional
+import threading
+import uuid
+import time
+from typing import Dict, Any, Optional, List
 from . import main
+
+import queue
 
 # Global progress state for post-processing
 post_process_progress: Dict[str, Any] = {
@@ -9,8 +14,19 @@ post_process_progress: Dict[str, Any] = {
     "total": 0, 
     "percent": 0, 
     "message": None, 
-    "status": "idle"
+    "status": "idle",
+    "queue_size": 0
 }
+
+# Global Request Queue
+task_queue = queue.Queue()
+
+# Queue Registry for UI visibility
+# format: { task_id: { "id": str, "description": str, "status": "queued"|"processing", "submitted_at": float } }
+queue_registry: Dict[str, Dict] = {}
+current_processing_task_id: Optional[str] = None
+
+is_worker_running = False
 
 @main.route("/post_process")
 def post_process():
@@ -39,7 +55,63 @@ def post_process():
     ])
     
     logs = get_all_process_logs()
+    
+    # Group logs by folder for UX (OptGroup)
+    from collections import defaultdict
+    grouped_logs = defaultdict(list)
+    for log in logs:
+        f_alias = log.get('folder_alias') or "未分類"
+        f_count = log.get('folder_run_count', 0)
+        
+        # サブフォルダがある場合は、その名前でグルーピング
+        sub_disp = log.get('subfolder_display')
+        if sub_disp:
+            # ラベル名: "Alias [Subfolder]"
+            group_label = f"{f_alias} [{sub_disp}]"
+            # ソートキー用にサブフォルダも含める
+            key = (group_label, f_count, f_alias, sub_disp)
+        else:
+            group_label = f_alias
+            key = (group_label, f_count, f_alias, "")
+            
+        grouped_logs[key].append(log)
+    
+    # Sort: Alias asc, then Subfolder asc
+    folder_groups = sorted(grouped_logs.items(), key=lambda x: (x[0][2], x[0][3]))
+    
     folder_batches = list_folder_batches()
+    
+    # --- Synthesize Parent Folders for Batch Selection ---
+    # Allow selecting a parent folder to process all subfolders recursively
+    existing_aliases = set(b['folder_alias'] for b in folder_batches)
+    parents_map = {}
+    
+    for b in folder_batches:
+        root = b.get('root_folder')
+        alias = b.get('folder_alias')
+        
+        # If this batch is a subfolder (root != alias) and the root is NOT in the list
+        if root and root != alias and root not in existing_aliases:
+            if root not in parents_map:
+                parents_map[root] = {
+                    'folder_alias': root,
+                    'root_folder': root,
+                    'subfolder': None,
+                    'section': None,
+                    'subfolder_display': f"[一括] {root} (全サブフォルダ含む)",
+                    'run_count': 0,
+                    'missing_profiles': 0,
+                    'folder_run_count': 0 # helper field
+                }
+            # Aggregate stats
+            parents_map[root]['run_count'] += b.get('run_count', 0)
+            parents_map[root]['folder_run_count'] += b.get('folder_run_count', 0)
+            parents_map[root]['missing_profiles'] += b.get('missing_profiles', 0)
+    
+    if parents_map:
+        folder_batches.extend(parents_map.values())
+        folder_batches.sort(key=lambda x: x['folder_alias'])
+    # -----------------------------------------------------
     selected_run_id = request.args.get('selected_run_id', type=int)
     
     video_fonts = discover_font_files()
@@ -52,6 +124,7 @@ def post_process():
         "post_process.html",
         title="Post Process",
         logs=logs,
+        folder_groups=folder_groups,
         folder_batches=folder_batches,
         available_profiles=available_profiles,
         selected_run_id=selected_run_id,
@@ -71,24 +144,28 @@ def api_process_logs():
         # Format for display
         results = []
         for log in logs:
-            run_id = log["run_id"]
-            video_name = log.get("video_filename", "Unknown")
-            start_dt = log.get("start_datetime", "")
-            end_dt = log.get("end_datetime", "")
-            status = log.get("status", "unknown")
-            output_folder = log.get("output_folder", "")
+            # db_manager.get_all_process_logs returns:
+            # run_id, video_id, video_filename, process_start, process_end, output_folder,
+            # folder_alias, status, message, calibration_profile, is_folder_batch
             
             results.append({
-                "run_id": run_id,
-                "video_name": video_name,
-                "start_time": start_dt,
-                "end_time": end_dt,
-                "status": status,
-                "output_folder": output_folder,
+                "run_id": log["run_id"],
+                "filename": log.get("video_filename", "Unknown"), # Map video_filename to filename for JS
+                "process_start": log.get("process_start"), # JS expects process_start
+                "status": log.get("status", "unknown"),
+                "folder_alias": log.get("folder_alias"),
+                "calibration_profile": log.get("calibration_profile"),
+                "is_folder_batch": log.get("is_folder_batch"),
                 "message": log.get("message", "")
             })
             
-        return jsonify({"data": results})
+        from ..modules.db_manager import list_folder_batches
+        folders = list_folder_batches()
+            
+        return jsonify({
+            "logs": results,
+            "folders": folders
+        })
     except Exception as e:
         current_app.logger.exception("Failed to fetch process logs")
         return jsonify({"data": []}) # Return empty list on error to not break table
@@ -103,6 +180,7 @@ def post_process_status():
 
 @main.route("/api/post_process/preview", methods=["POST"])
 def preview_post_process():
+    print("!!! PREVIEW REQUEST RECEIVED !!!", flush=True)
     """後処理実行前の確認用データを返す。
     エラー発生時はどの段階で失敗したかを明確に返す。
     Steps:
@@ -125,17 +203,25 @@ def preview_post_process():
         target_mode = data.get("target_mode")
         target_run_id = data.get("run_id")
         target_folder = data.get("folder_alias")
+        target_folders = data.get("folder_aliases") or [] # New List Support
+        if target_folder and target_folder not in target_folders:
+            target_folders.append(target_folder)
+            
         profile_name = data.get("folder_profile_name")
         
-        log_step(f"Request: mode={target_mode}, folder={target_folder}, run={target_run_id}, profile={profile_name}")
+        log_step(f"Request: mode={target_mode}, folders={target_folders}, run={target_run_id}, profile={profile_name}")
 
         # 1. Identify Target Runs
         from ..modules.db_manager import list_folder_batches, get_run_ids_by_folder, get_run_video_info
         
         run_ids = []
         try:
-            if target_mode == "folder" and target_folder:
-                run_ids = get_run_ids_by_folder(target_folder)
+            if target_mode == "folder":
+                for f_alias in target_folders:
+                    ids = get_run_ids_by_folder(f_alias)
+                    run_ids.extend(ids)
+                # Ensure unique and sorted
+                run_ids = sorted(list(set(run_ids)))
             elif target_mode == "run" and target_run_id:
                  run_ids = [int(target_run_id)]
             log_step(f"Step 1 OK: Found {len(run_ids)} runs")
@@ -156,7 +242,8 @@ def preview_post_process():
         
         # 2. Get Metadata & Video Path
         try:
-            repre_info = get_run_video_info(target_run_id)
+            upload_folder = current_app.config.get('UPLOAD_FOLDER', os.getenv("Upload_folder", "uploads"))
+            repre_info = get_run_video_info(target_run_id, upload_base_folder=upload_folder)
             log_step(f"Step 2 OK: Metadata for run {target_run_id} (Index {preview_index}) retrieved")
         except Exception as e:
             log_step(f"Step 2 Failed (Metadata Fetch): {e}")
@@ -169,6 +256,12 @@ def preview_post_process():
         if target_mode == "folder" and profile_name:
             effective_profile = profile_name
             log_step(f"Using explicit folder profile: {profile_name}")
+        
+        # 1-b. 明示的に指定されたRunプロファイル
+        run_profile_name = data.get("run_profile_name")
+        if target_mode == "run" and run_profile_name:
+            effective_profile = run_profile_name
+            log_step(f"Using explicit run profile: {run_profile_name}")
         
         # 2. サブフォルダプロファイル設定を確認
         if not effective_profile:
@@ -220,30 +313,30 @@ def preview_post_process():
         img_base64 = None
         img_error = None
         
-        if effective_profile:
-             # Load Calibration Profile
-            import json
-            calib_dir = os.path.join(os.getenv("Opt_files", "output"), "calibrations")
-            profile_path = os.path.join(calib_dir, f"{effective_profile}.json")
-            
-            if not os.path.exists(profile_path):
-                log_step(f"Step 4 Error: Profile json not found at {profile_path}")
-                img_error = f"プロファイルが見つかりません: {effective_profile}"
-            else:
-                log_step(f"Step 4 OK: Profile found: {effective_profile}")
+        if video_path:
+            try:
+                from ..modules.video_utils import load_video_frame
+                frame = load_video_frame(video_path, 120) # Frame 120
+                if frame is None:
+                    log_step("Step 5 Warning: Frame 120 failed, trying Frame 0")
+                    frame = load_video_frame(video_path, 0)
                 
-                if video_path:
-                    try:
-                        from ..modules.video_utils import load_video_frame
-                        frame = load_video_frame(video_path, 0) # Frame 0
+                if frame is None:
+                    log_step("Step 5 Error: Failed to load frame 0 (cv2 read failed)")
+                    img_error = "動画フレームの読み込みに失敗しました"
+                else:
+                    log_step("Step 5 OK: Frame loaded")
+                    
+                    # Draw Lines if profile exists
+                    if effective_profile:
+                        import json
+                        calib_dir = os.path.join(os.getenv("Opt_files", "output"), "calibrations")
+                        profile_path = os.path.join(calib_dir, f"{effective_profile}.json")
                         
-                        if frame is None:
-                            log_step("Step 5 Error: Failed to load frame 0 (cv2 read failed)")
-                            img_error = "動画フレームの読み込みに失敗しました"
+                        if not os.path.exists(profile_path):
+                            log_step(f"Step 4 Error: Profile json not found at {profile_path}")
+                            img_error = f"プロファイルが見つかりません: {effective_profile}"
                         else:
-                            log_step("Step 5 OK: Frame loaded")
-                            
-                            # Draw Lines using shared function
                             try:
                                 with open(profile_path, 'r', encoding='utf-8') as f:
                                     p_data = json.load(f)
@@ -255,27 +348,26 @@ def preview_post_process():
                                 
                                 if drew_lines:
                                     draw_calibration_lines(frame, lines)
-                                
                                 log_step(f"Step 6 OK: Drew lines (found={drew_lines})")
-                                
-                                # Encode
-                                _, buffer = cv2.imencode('.jpg', frame)
-                                import base64
-                                img_base64 = base64.b64encode(buffer).decode('utf-8')
-                                log_step("Step 7 OK: Image encoded to base64")
-                                
                             except Exception as e_draw:
                                 log_step(f"Step 6 Error (Drawing): {e_draw}")
                                 img_error = f"描画エラー: {e_draw}"
-                                
-                    except Exception as e_vid:
-                        log_step(f"Step 5 Error (Video Load): {e_vid}")
-                        img_error = f"動画読み込みエラー: {e_vid}"
-                else:
-                    log_step("Warning: Video path is None, cannot generate preview")
-                    img_error = "動画ファイルが見つかりません"
+                    else:
+                        log_step("No profile selected, showing raw frame")
+                    
+                    # Encode (Always)
+                    import cv2
+                    _, buffer = cv2.imencode('.jpg', frame)
+                    import base64
+                    img_base64 = base64.b64encode(buffer).decode('utf-8')
+                    log_step("Step 7 OK: Image encoded to base64")
+                    
+            except Exception as e_vid:
+                log_step(f"Step 5 Error (Video Load): {e_vid}")
+                img_error = f"動画読み込みエラー: {e_vid}"
         else:
-            log_step("Warning: No effective profile, skipping preview generation")
+             log_step("Warning: Video path is None, cannot generate preview")
+             img_error = "動画ファイルが見つかりません"
 
         log_step("Preview generation completed")
         
@@ -302,13 +394,10 @@ def preview_post_process():
 
 @main.route("/post_process/action", methods=["POST"])
 def post_process_action():
-    """詳細集計・CSVバンドル作成のバックグラウンド処理を開始する。"""
-    print("[DEBUG] Terminal Output: Execute Button Pressed! (Backend Reached)")
-    global post_process_progress
+    """Post Process Action with Queue Support"""
+    global post_process_progress, is_worker_running
     
-    if post_process_progress["status"] == "processing":
-         return jsonify({"error": "現在、他の処理が実行中です。"}), 400
-
+    # 1. Capture Request Data (Main Thread)
     # Handle JSON or Form Data
     if request.is_json:
         req_data = request.get_json()
@@ -316,413 +405,545 @@ def post_process_action():
         req_data = request.form
 
     action = req_data.get("action")
-    target_date = req_data.get("target_date") 
+    target_date = req_data.get("target_date")
     
-    # Background Thread
-    import threading
-    import concurrent.futures
-    from ..modules.db_manager import list_folder_batches, get_run_ids_by_folder
-    # Import the new worker module
-    from ..modules.batch_processor import process_single_batch
+    # Pre-extract list data from request (Context Safety)
+    input_folders = []
+    if request.is_json:
+        aliases = req_data.get("folder_aliases")
+        if aliases and isinstance(aliases, list):
+            input_folders = aliases
+        elif req_data.get("folder_alias"):
+            input_folders = [req_data.get("folder_alias")]
+    else:
+        input_folders = request.form.getlist("folder_alias")
+        if not input_folders and req_data.get("folder_alias"):
+            input_folders = [req_data.get("folder_alias")] 
+            
+    # Remove duplicates and clean
+    cleaned_folders = sorted(list(set([f for f in input_folders if f])))
+
+    # 2. Build Task Payload
+    task_id = str(uuid.uuid4())
     
-    def worker():
-        try:
+    # Register in global registry for UI
+    queue_registry[task_id] = {
+        "id": task_id,
+        "description": f"{action} (folders: {len(cleaned_folders)})",
+        "status": "queued",
+        "submitted_at": time.time(),
+        "details": {
+            "req_data": req_data,
+            "target_date": target_date
+        }
+    }
+
+    task_payload = {
+        "task_id": task_id,
+        "req_data": req_data, # Contains scalars
+        "action": action,
+        "input_folders": cleaned_folders,
+        # Preserve specific items extracted manually if needed
+        "target_date": target_date
+    }
+    
+    # 3. Add to Queue
+    task_queue.put(task_payload)
+    current_q_size = task_queue.qsize()
+    
+    # Update progress to show queue status immediately
+    post_process_progress["queue_size"] = current_q_size
+
+    # 4. Start Worker if not running
+    if not is_worker_running:
+        is_worker_running = True
+        
+        # Capture app context object for the thread
+        app = current_app._get_current_object()
+
+        def worker_loop():
+            global is_worker_running, post_process_progress, queue_registry, current_processing_task_id
+            
+            # Imports inside worker to avoid circular dependency issues if any
+            import threading
+            import concurrent.futures
             import multiprocessing
-
-            # 1. Setup - 進捗を完全にリセット
-            post_process_progress.update({
-                "status": "processing",
-                "current": 0,
-                "total": 0, 
-                "percent": 0,
-                "batch_percent": 0,
-                "message": "初期化中...",
-                "current_detail": "",
-                "details": [],
-                "logs": [],
-                "results": None
-            })
-
-            # Retrieve form data
+            from ..modules.db_manager import list_folder_batches, get_run_ids_by_folder, batch_update_run_attributes, update_run_profiles, get_all_run_ids, get_run_ids_by_condition
+            from ..modules.batch_processor import process_single_batch
+            import datetime
+            import os
             
-            t_mode = req_data.get("target_mode", "run")
-            t_run_id = req_data.get("run_id")
-            t_folder = req_data.get("folder_alias")
-            
-            # Additional Options
-            t_profile_name = req_data.get("folder_profile_name")
-            t_profile_scope = req_data.get("folder_profile_scope")
-            
-            # ===== 動画生成処理 =====
-            if action == "generate_video":
-                from ..modules.video_generator import VideoGenerator, normalize_video_options
-                
-                # Run IDの取得
-                if not t_run_id:
-                    post_process_progress.update({
-                        "status": "error",
-                        "message": "Run IDが指定されていません。"
-                    })
-                    return
-                
-                run_id = int(t_run_id)
-                
-                post_process_progress.update({
-                    "message": f"Run ID {run_id} の動画を生成中...",
-                    "percent": 10
-                })
-                
-                # 動画オプションの取得
-                video_options = {}
-                
-                # 表示要素のチェックボックス
-                if req_data.get("video_options_submitted"):
-                    video_options["show_vehicle_box"] = req_data.get("video_show_vehicle_box") is not None
-                    video_options["show_tire_boxes"] = req_data.get("video_show_tire_boxes") is not None
-                    video_options["show_trace"] = req_data.get("video_show_trace") is not None
-                    video_options["show_measurement"] = req_data.get("video_show_measurement") is not None
-                    video_options["show_approach_lines"] = req_data.get("video_show_approach_lines") is not None
-                    video_options["show_lane_left"] = req_data.get("video_show_lane_left") is not None
-                    video_options["show_lane_right"] = req_data.get("video_show_lane_right") is not None
-                    video_options["show_lane_center"] = req_data.get("video_show_lane_center") is not None
-                    video_options["show_homography_overlay"] = req_data.get("video_show_homography_overlay") is not None
-                    video_options["show_homography_only"] = req_data.get("video_show_homography_only") is not None
-                    
-                    # ラベル項目
-                    video_options["label_group_id"] = req_data.get("video_label_group") is not None
-                    video_options["label_speed"] = req_data.get("video_label_speed") is not None
-                    video_options["label_lane_distance"] = req_data.get("video_label_lane") is not None
-                    video_options["label_approach"] = req_data.get("video_label_approach") is not None
-                    video_options["label_clearance"] = req_data.get("video_label_clearance") is not None
-                    video_options["label_direction"] = req_data.get("video_label_direction") is not None
-                    video_options["label_overtake"] = req_data.get("video_label_overtake") is not None
-                    video_options["label_acceleration"] = req_data.get("video_label_acceleration") is not None
-                    
-                    # フォント設定
-                    font_path = req_data.get("video_font_path")
-                    if font_path:
-                        video_options["font_path"] = font_path
-                    
-                    font_size = req_data.get("video_font_size")
-                    if font_size:
-                        try:
-                            video_options["font_size"] = int(font_size)
-                        except (ValueError, TypeError):
-                            pass
-                    
-                    # 出力設定
-                    output_format = req_data.get("video_output_format")
-                    if output_format:
-                        video_options["output_format"] = output_format
-                    
-                    output_name_mode = req_data.get("video_output_name_mode")
-                    if output_name_mode:
-                        video_options["output_name_mode"] = output_name_mode
-                
-                # VideoGeneratorで動画生成
-                try:
-                    post_process_progress.update({
-                        "message": f"動画生成を開始しています...",
-                        "percent": 20
-                    })
-                    
-                    generator = VideoGenerator(run_id, options=video_options)
-                    output_path = generator.run()
-                    
-                    post_process_progress.update({
-                        "status": "complete",
-                        "percent": 100,
-                        "message": f"動画生成が完了しました: {output_path}",
-                        "results": {
-                            "output_path": output_path,
-                            "run_id": run_id
-                        }
-                    })
-                    
-                except Exception as e:
-                    current_app.logger.exception(f"Video generation failed for run {run_id}")
-                    post_process_progress.update({
-                        "status": "error",
-                        "message": f"動画生成に失敗しました: {str(e)}"
-                    })
-                
-                return
-            
-                return
-            
-            # ===== Export Targets (Bicycle / Overtaken) Logic =====
-            if action in ["export_targets_csv", "export_targets_excel"]:
-                # 1. Identify Target Runs based on t_mode
-                target_runs = []
-                from ..modules.db_manager import list_folder_batches, get_run_ids_by_folder, get_all_run_ids, get_run_ids_by_condition
-
-                if t_mode == "all" or action == "process_all": # Though action check handles intent, keep t_mode consistency
-                    target_runs = get_all_run_ids()
-                
-                elif t_mode == "folder" and t_folder:
-                    target_runs = get_run_ids_by_folder(t_folder)
-                    
-                elif t_mode == "run" and t_run_id:
-                    target_runs = [int(t_run_id)]
-                    
-                elif t_mode == "condition":
-                    t_road_type = req_data.get("condition_road_type")
-                    t_year = req_data.get("condition_year")
-                    target_runs = get_run_ids_by_condition(road_type=t_road_type, process_year=t_year)
-                
-                if not target_runs:
-                     return jsonify({"status": "error", "message": "対象のデータが見つかりません"}), 404
-
-                # 2. Export Data
-                from ..modules.comparative_report import export_target_vehicles
-                fmt = "csv" if action == "export_targets_csv" else "excel"
-                file_bytes = export_target_vehicles(target_runs, output_format=fmt)
-                
-                # 3. Create temp file for download (since this is async worker, we need a way to pass it back... 
-                # actually, post_process_action is defined as start_background_task. 
-                # This route is NOT returning a file directly, it returns JSON status.
-                # So we must save the file and return the path in 'results'.
-                
-                # ...Wait, the user wants a button that downloads the file.
-                # If I use the existing async worker structure, the user will have to wait for the progress bar to finish?
-                # Exporting might be fast enough to be synchronous, OR I should save it to 'outputs' and provide a link.
-                
-                # Let's save to a temp file in 'outputs/exports' and return the path.
-                
-                filename = f"targets_export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.{'csv' if fmt == 'csv' else 'xlsx'}"
-                export_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'exports')
-                os.makedirs(export_dir, exist_ok=True)
-                file_path = os.path.join(export_dir, filename)
-                
-                with open(file_path, "wb") as f:
-                    f.write(file_bytes)
-                    
-                # Update progress to complete immediately
-                post_process_progress.update({
-                    "status": "complete",
-                    "percent": 100,
-                    "message": "エクスポートが完了しました。",
-                    "results": {
-                        "download_url": f"/exports/{filename}", # Need a route to serve this? or static?
-                        # Usually 'uploads' is static? Let's check. 
-                        # If 'exports' is in UPLOAD_FOLDER, typically accessible via route if configured.
-                        # Assuming I need to verify how to serve. 
-                        # For now, let's assume I can serve it or I'll add a simple download route.
-                        "filename": filename
-                    }
-                })
-                return
-
-            # ===== 既存のバッチ処理 =====
-            # --- Apply Profile Logic ---
-            if t_mode == "folder" and t_folder and t_profile_name:
-                from ..modules.db_manager import update_folder_profiles
-                count = update_folder_profiles(t_folder, t_profile_name, t_profile_scope)
-                post_process_progress["details"].append(f"プロファイルを適用しました: {t_folder} ({count} Runs)")
-
-            # --- Filter Batches Logic ---
-            from ..modules.db_manager import list_folder_batches, get_run_ids_by_folder
-            
-            batches = list_folder_batches()
-            valid_batches = []
-            
-            if t_mode == "folder" and t_folder:
-                # Filter for single folder
-                runs = get_run_ids_by_folder(t_folder)
-                if runs:
-                    valid_batches.append((t_folder, runs))
-                    
-            elif action == "process_all" or (action == "all_postprocess" and t_mode == "all"):
-                # 全てのフォルダバッチを対象にする（フォルダ単位でまとめる）
-                # さらに、フォルダに属さないRun（orphan）も拾う
-                from ..modules.db_manager import get_all_run_ids
-                
-                # 1. 既存のフォルダバッチを追加
-                processed_run_ids = set()
-                for b in batches:
-                    runs = get_run_ids_by_folder(b["folder_alias"])
-                    if runs:
-                        valid_batches.append((b["folder_alias"], runs))
-                        processed_run_ids.update(runs)
-                
-                # 2. フォルダに属さないRun（Orphan）を追加
-                all_ids = get_all_run_ids()
-                orphan_runs = [rid for rid in all_ids if rid not in processed_run_ids]
-                
-                if orphan_runs:
-                    valid_batches.append(("Uncategorized (Orphan)", orphan_runs))
-            
-            elif t_mode == "run" and t_run_id:
-                # Filter for single run
-                # access run_id, check which folder it belongs to (or just process as ad-hoc batch)
-                rid = int(t_run_id)
-                found = False
-                # We need to find the folder alias for this run to keep batch structure, or just use dummy
-                # Iterate batches to find where this run lives
-                for b in batches:
-                    runs = get_run_ids_by_folder(b["folder_alias"])
-                    if rid in runs:
-                        valid_batches.append((b["folder_alias"], [rid]))
-                        found = True
-                        break
-                if not found:
-                     valid_batches.append(("SingleRun", [rid]))
-
-            elif t_mode == "condition":
-                # Filter by condition (road_type, year)
-                t_road_type = req_data.get("condition_road_type")
-                t_year = req_data.get("condition_year")
-                
-                from ..modules.db_manager import get_run_ids_by_condition
-                # road_typeやyearが 'all' の場合は db_manager側で全件扱いになるよう調整済み、
-                # またはここでパラメータ変換を行う
-                
-                # UIからは 'all', 'widened', 'non_widened', 'undefined' などが来る想定
-                runs = get_run_ids_by_condition(road_type=t_road_type, process_year=t_year)
-                
-                if runs:
-                    # バッチとしては1つの塊として扱うか、フォルダごとに分けるか。
-                    # ここではシンプルに「ConditionBatch」として1つにまとめる
-                    valid_batches.append((f"ConditionMatch ({len(runs)} runs)", runs))
-
-            else:
-                 # Legacy fall-back: Process EVERYTHING (or nothing?)
-                 # If no target specified, maybe process nothing or all folders?
-                 # UI defaults to Run mode. If submitted empty, do nothing.
-                 pass
-
-            total_tasks = len(valid_batches)
-            post_process_progress["total"] = total_tasks
-            
-            if total_tasks == 0:
-                post_process_progress.update({
-                    "status": "complete",
-                    "percent": 100,
-                    "message": "処理対象が選択されていません。"
-                })
-                return
-
-            post_process_progress["message"] = f"並列処理を開始: {total_tasks} バッチ"
-            
-            # Setup Manager Queue for granular progress
-            manager = multiprocessing.Manager()
-            queue = manager.Queue()
-            
-            def queue_listener(q):
-                while True:
+            with app.app_context():
+                while not task_queue.empty():
+                    t_id = None
                     try:
-                        msg = q.get()
-                        if msg == "DONE":
-                            break
-                        if isinstance(msg, dict):
-                            msg_type = msg.get("type", "")
-                            m_text = msg.get("message", "")
+                        # Fetch next task
+                        task = task_queue.get()
+                        
+                        # Identify Task
+                        t_id = task.get("task_id")
+                        if t_id and t_id in queue_registry:
+                             queue_registry[t_id]["status"] = "processing"
+                             current_processing_task_id = t_id
+                        
+                        remaining = task_queue.qsize()
+                        post_process_progress["queue_size"] = remaining
+                        
+                        # Unpack Task
+                        t_req_data = task["req_data"]
+                        t_action = task["action"]
+                        t_input_folders = task["input_folders"]
+                        t_target_date = task["target_date"]
+                        
+                        # --- Processing Logic Start ---
+                        
+                        # 1. Setup - Update Status
+                        post_process_progress.update({
+                            "status": "processing",
+                            "current": 0,
+                            "total": 0, 
+                            "percent": 0,
+                            "batch_percent": 0,
+                            "message": f"処理を開始します... (残り予約: {remaining}件)",
+                            "current_detail": "",
+                            "details": [],
+                            "logs": [],
+                            "results": None
+                        })
+
+                        t_mode = t_req_data.get("target_mode", "run")
+                        t_run_id = t_req_data.get("run_id")
+                        
+                        # Additional Options
+                        t_profile_name = t_req_data.get("folder_profile_name")
+                        t_profile_name = t_req_data.get("folder_profile_name")
+                        t_profile_scope = t_req_data.get("folder_profile_scope")
+                        
+                        # ===== 設定のみ保存処理 =====
+                        if t_action == "save_settings":
+                            post_process_progress.update({
+                                "message": f"設定を保存しています... (残り予約: {remaining}件)",
+                                "percent": 50
+                            })
                             
-                            if msg_type == "progress":
-                                # バッチ内進捗の更新
-                                m_percent = msg.get("percent", 0)
-                                if m_text:
-                                    post_process_progress["message"] = m_text
-                                    post_process_progress["current_detail"] = m_text
-                                post_process_progress["batch_percent"] = m_percent
+                            try:
+                                # 1. Identify Target Runs
+                                target_runs = []
+                                if t_mode == "all":
+                                    target_runs = get_all_run_ids()
+                                elif t_mode == "folder":
+                                    target_runs = []
+                                    for folder in t_input_folders:
+                                        target_runs.extend(get_run_ids_by_folder(folder))
+                                    target_runs = sorted(list(set(target_runs)))
+                                elif t_mode == "run" and t_run_id:
+                                    target_runs = [int(t_run_id)]
+                                elif t_mode == "condition":
+                                    target_runs = get_run_ids_by_condition(
+                                        road_type=t_req_data.get("condition_road_type"), 
+                                        process_year=t_req_data.get("condition_year")
+                                    )
                                 
-                            elif msg_type == "log":
-                                # ターミナル出力をログに追加
-                                if m_text:
-                                    logs = post_process_progress.get("logs", [])
-                                    # 最大100件に制限
-                                    if len(logs) >= 100:
-                                        logs = logs[-99:]
-                                    logs.append(m_text)
-                                    post_process_progress["logs"] = logs
+                                if not target_runs:
+                                    raise ValueError("対象のデータが見つかりません")
+                                
+                                count_meta = 0
+                                count_profile = 0
+                                
+                                # 2. Update Metadata (Year, RoadType)
+                                t_year_val = t_req_data.get("collection_year")
+                                t_road_val = t_req_data.get("road_type")
+                                
+                                # Convert empty strings to None
+                                if t_year_val == "": t_year_val = None
+                                if t_road_val == "": t_road_val = None
+                                
+                                if t_year_val is not None or t_road_val is not None:
+                                    count_meta = batch_update_run_attributes(target_runs, collection_year=t_year_val, road_type=t_road_val)
+                                
+                                # 3. Update Profile
+                                if t_profile_name:
+                                    count_profile = update_run_profiles(target_runs, t_profile_name)
                                     
-                    except Exception:
-                        break
-
-            listener = threading.Thread(target=queue_listener, args=(queue,))
-            listener.daemon = True
-            listener.start()
-            
-            # 2. Parallel Execution
-            completed_count = 0
-            aggregated_results = {
-                "total_overtakes": 0,
-                "images": []
-            }
-
-            # Use max_workers=None (defaults to num_cpus) or set explicitly if needed
-            with concurrent.futures.ProcessPoolExecutor() as executor:
-                # Submit all tasks
-                future_to_alias = {
-                    executor.submit(process_single_batch, alias, run_ids, output_dir=None, progress_queue=queue): alias 
-                    for alias, run_ids in valid_batches
-                }
-                
-                for future in concurrent.futures.as_completed(future_to_alias):
-                    alias = future_to_alias[future]
-                    try:
-                        result = future.result()
-                        msg = result.get("message", "")
+                                post_process_progress.update({
+                                    "status": "complete",
+                                    "percent": 100,
+                                    "message": f"保存完了 (対象: {len(target_runs)}件, メタデータ更新: {count_meta}, プロファイル更新: {count_profile})",
+                                    "results": {"run_ids": target_runs}
+                                })
+                                
+                            except Exception as e:
+                                post_process_progress.update({
+                                    "status": "error",
+                                    "message": f"保存に失敗しました: {str(e)}"
+                                })
+                                
+                            task_queue.task_done()
+                            continue
                         
-                        # Collect stats
-                        ov = result.get("overtake_stats", {})
-                        aggregated_results["total_overtakes"] += ov.get("total", 0)
-                        aggregated_results["images"].extend(ov.get("images", []))
+                        # ===== 動画生成処理 =====
+                        if t_action == "generate_video":
+                            from ..modules.video_generator import VideoGenerator, normalize_video_options
+                            
+                            if not t_run_id:
+                                post_process_progress.update({
+                                    "status": "error",
+                                    "message": "Run IDが指定されていません。"
+                                })
+                                task_queue.task_done()
+                                continue
+                            
+                            run_id = int(t_run_id)
+                            
+                            post_process_progress.update({
+                                "message": f"Run ID {run_id} の動画を生成中... (残り予約: {remaining}件)",
+                                "percent": 10
+                            })
+                            
+                            # 動画オプションの取得
+                            video_options = {}
+                            
+                            # 表示要素のチェックボックス
+                            if t_req_data.get("video_options_submitted"):
+                                video_options["show_vehicle_box"] = t_req_data.get("video_show_vehicle_box") is not None
+                                video_options["show_tire_boxes"] = t_req_data.get("video_show_tire_boxes") is not None
+                                video_options["show_trace"] = t_req_data.get("video_show_trace") is not None
+                                video_options["show_measurement"] = t_req_data.get("video_show_measurement") is not None
+                                video_options["show_approach_lines"] = t_req_data.get("video_show_approach_lines") is not None
+                                video_options["show_lane_left"] = t_req_data.get("video_show_lane_left") is not None
+                                video_options["show_lane_right"] = t_req_data.get("video_show_lane_right") is not None
+                                video_options["show_lane_center"] = t_req_data.get("video_show_lane_center") is not None
+                                video_options["show_homography_overlay"] = t_req_data.get("video_show_homography_overlay") is not None
+                                video_options["show_homography_only"] = t_req_data.get("video_show_homography_only") is not None
+                                
+                                # ラベル項目
+                                video_options["label_group_id"] = t_req_data.get("video_label_group") is not None
+                                video_options["label_speed"] = t_req_data.get("video_label_speed") is not None
+                                video_options["label_lane_distance"] = t_req_data.get("video_label_lane") is not None
+                                video_options["label_approach"] = t_req_data.get("video_label_approach") is not None
+                                video_options["label_clearance"] = t_req_data.get("video_label_clearance") is not None
+                                video_options["label_direction"] = t_req_data.get("video_label_direction") is not None
+                                video_options["label_overtake"] = t_req_data.get("video_label_overtake") is not None
+                                video_options["label_acceleration"] = t_req_data.get("video_label_acceleration") is not None
+                                
+                                # フォント設定
+                                font_path = t_req_data.get("video_font_path")
+                                if font_path:
+                                    video_options["font_path"] = font_path
+                                
+                                font_size = t_req_data.get("video_font_size")
+                                if font_size:
+                                    try:
+                                        video_options["font_size"] = int(font_size)
+                                    except (ValueError, TypeError):
+                                        pass
+                                
+                                # 出力設定
+                                output_format = t_req_data.get("video_output_format")
+                                if output_format:
+                                    video_options["output_format"] = output_format
+                                
+                                output_name_mode = t_req_data.get("video_output_name_mode")
+                                if output_name_mode:
+                                    video_options["output_name_mode"] = output_name_mode
+                            
+                            # VideoGeneratorで動画生成
+                            try:
+                                post_process_progress.update({
+                                    "message": f"動画生成を開始しています... (残り予約: {remaining}件)",
+                                    "percent": 20
+                                })
+                                
+                                generator = VideoGenerator(run_id, options=video_options)
+                                output_path = generator.run()
+                                
+                                post_process_progress.update({
+                                    "status": "complete",
+                                    "percent": 100,
+                                    "message": f"動画生成が完了しました: {output_path}",
+                                    "results": {
+                                        "output_path": output_path,
+                                        "run_id": run_id
+                                    }
+                                })
+                                
+                            except Exception as e:
+                                current_app.logger.exception(f"Video generation failed for run {run_id}")
+                                post_process_progress.update({
+                                    "status": "error",
+                                    "message": f"動画生成に失敗しました: {str(e)}"
+                                })
+                            
+                            task_queue.task_done()
+                            continue
                         
-                        # Log success/failure in details
-                        # post_process_progress.setdefault("details", []).append(f"{alias}: {msg}")
+                        # ===== Export Targets (Bicycle / Overtaken) Logic =====
+                        if t_action in ["export_targets_csv", "export_targets_excel"]:
+                            # 1. Identify Target Runs based on t_mode
+                            target_runs = []
+                            from ..modules.db_manager import list_folder_batches, get_run_ids_by_folder, get_all_run_ids, get_run_ids_by_condition
+
+                            if t_mode == "all" or t_action == "process_all":
+                                target_runs = get_all_run_ids()
+                            
+                            elif t_mode == "folder":
+                                target_runs = []
+                                for folder in t_input_folders:
+                                    target_runs.extend(get_run_ids_by_folder(folder))
+                                target_runs = sorted(list(set(target_runs)))
+                                
+                            elif t_mode == "run" and t_run_id:
+                                target_runs = [int(t_run_id)]
+                                
+                            elif t_mode == "condition":
+                                t_road_type = t_req_data.get("condition_road_type")
+                                t_year = t_req_data.get("condition_year")
+                                target_runs = get_run_ids_by_condition(road_type=t_road_type, process_year=t_year)
+                            
+                            if not target_runs:
+                                post_process_progress.update({
+                                    "status": "error",
+                                    "message": "対象のデータが見つかりません"
+                                })
+                                task_queue.task_done()
+                                continue
+
+                            # 2. Export Data
+                            from ..modules.comparative_report import export_target_vehicles
+                            fmt = "csv" if t_action == "export_targets_csv" else "excel"
+                            file_bytes = export_target_vehicles(target_runs, output_format=fmt)
+                            
+                            filename = f"targets_export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.{'csv' if fmt == 'csv' else 'xlsx'}"
+                            export_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'exports')
+                            os.makedirs(export_dir, exist_ok=True)
+                            file_path = os.path.join(export_dir, filename)
+                            
+                            with open(file_path, "wb") as f:
+                                f.write(file_bytes)
+                                
+                            # Update progress to complete immediately
+                            post_process_progress.update({
+                                "status": "complete",
+                                "percent": 100,
+                                "message": "エクスポートが完了しました。",
+                                "results": {
+                                    "download_url": f"/exports/{filename}",
+                                    "filename": filename
+                                }
+                            })
+                            task_queue.task_done()
+                            continue
+
+                        # ===== 既存のバッチ処理 =====
+                        if t_mode == "folder" and t_input_folders and t_profile_name:
+                            from ..modules.db_manager import update_folder_profiles
+                            total_count = 0
+                            for folder in t_input_folders:
+                                count = update_folder_profiles(folder, t_profile_name, t_profile_scope)
+                                total_count += count
+                                post_process_progress["details"].append(f"プロファイルを適用しました: {folder} ({count} Runs)")
                         
-                    except Exception as exc:
-                        current_app.logger.error(f"Batch {alias} generated an exception: {exc}")
-                    
-                    completed_count += 1
-                    percent = int((completed_count / total_tasks) * 100)
-                    # Note: Queue listener might also be updating message, but that's fine (last wins)
-                    post_process_progress.update({
-                        "current": completed_count,
-                        "percent": percent
-                    })
-            
-            # Stop listener
-            queue.put("DONE")
-            listener.join()
+                        # --- Apply Profile Logic (Single Run) ---
+                        t_run_profile_name = t_req_data.get("run_profile_name")
+                        if t_mode == "run" and t_run_id and t_run_profile_name:
+                            from ..modules.db_manager_helpers import apply_calibration_profile_to_runs
+                            try:
+                                rid_int = int(t_run_id)
+                                apply_calibration_profile_to_runs([rid_int], t_run_profile_name)
+                                post_process_progress["details"].append(f"プロファイルを適用しました: Run {rid_int} -> {t_run_profile_name}")
+                            except Exception as e:
+                                print(f"Failed to apply profile to run {t_run_id}: {e}")
 
-            # 3. Completion
-            post_process_progress.update({
-                "status": "complete",
-                "percent": 100,
-                "message": "すべての並列処理が完了しました。",
-                "results": {
-                    "total_overtakes": aggregated_results["total_overtakes"],
-                    "images": sorted(aggregated_results["images"])
-                }
-            })
-                
-        except Exception as e:
-            current_app.logger.exception("Post process background job failed")
-            post_process_progress.update({
-                "status": "error",
-                "message": f"エラーが発生しました: {str(e)}"
-            })
-    
+                        # --- Filter Batches Logic ---
+                        from ..modules.db_manager import list_folder_batches, get_run_ids_by_folder
+                        
+                        batches = list_folder_batches()
+                        valid_batches = []
+                        
+                        if t_mode == "folder" and t_input_folders:
+                            # Filter for multiple folders
+                            for folder in t_input_folders:
+                                runs = get_run_ids_by_folder(folder)
+                                if runs:
+                                    valid_batches.append((folder, runs))
+                                
+                        elif t_action == "process_all" or (t_action == "all_postprocess" and t_mode == "all"):
+                            from ..modules.db_manager import get_all_run_ids
+                            # 1. 既存のフォルダバッチを追加
+                            processed_run_ids = set()
+                            for b in batches:
+                                runs = get_run_ids_by_folder(b["folder_alias"])
+                                if runs:
+                                    valid_batches.append((b["folder_alias"], runs))
+                                    processed_run_ids.update(runs)
+                            
+                            # 2. フォルダに属さないRun（Orphan）を追加
+                            all_ids = get_all_run_ids()
+                            orphan_runs = [rid for rid in all_ids if rid not in processed_run_ids]
+                            
+                            if orphan_runs:
+                                valid_batches.append(("Uncategorized (Orphan)", orphan_runs))
+                        
+                        elif t_mode == "run" and t_run_id:
+                            rid = int(t_run_id)
+                            found = False
+                            for b in batches:
+                                runs = get_run_ids_by_folder(b["folder_alias"])
+                                if rid in runs:
+                                    valid_batches.append((b["folder_alias"], [rid]))
+                                    found = True
+                                    break
+                            if not found:
+                                    valid_batches.append(("SingleRun", [rid]))
 
-    
-    # Capture the real app object to pass to the thread
-    app = current_app._get_current_object()
+                        elif t_mode == "condition":
+                            t_road_type = t_req_data.get("condition_road_type")
+                            t_year = t_req_data.get("condition_year")
+                            from ..modules.db_manager import get_run_ids_by_condition
+                            runs = get_run_ids_by_condition(road_type=t_road_type, process_year=t_year)
+                            if runs:
+                                valid_batches.append((f"ConditionMatch ({len(runs)} runs)", runs))
 
-    def worker_wrapper():
-        """Worker wrapper to ensure application context"""
-        with app.app_context():
-            worker()
+                        total_tasks = len(valid_batches)
+                        post_process_progress["total"] = total_tasks
+                        
+                        if total_tasks == 0:
+                            post_process_progress.update({
+                                "status": "complete",
+                                "percent": 100,
+                                "message": "処理対象が選択されていません。"
+                            })
+                            task_queue.task_done()
+                            continue
 
-    thread = threading.Thread(target=worker_wrapper)
-    thread.daemon = True
-    thread.start()
-    
-    return jsonify({
-        "message": "処理を開始しました。",
-        "progress": post_process_progress
-    })
+                        post_process_progress["message"] = f"並列処理を開始: {total_tasks} バッチ (残り予約: {remaining}件)"
+                        
+                        # Setup Manager Queue for granular progress
+                        manager = multiprocessing.Manager()
+                        sub_queue = manager.Queue()
+                        
+                        def queue_listener_task(q):
+                            while True:
+                                try:
+                                    msg = q.get()
+                                    if msg == "DONE":
+                                        break
+                                    if isinstance(msg, dict):
+                                        msg_type = msg.get("type", "")
+                                        m_text = msg.get("message", "")
+                                        
+                                        if msg_type == "progress":
+                                            # バッチ内進捗の更新
+                                            m_percent = msg.get("percent", 0)
+                                            if m_text:
+                                                post_process_progress["message"] = m_text
+                                                post_process_progress["current_detail"] = m_text
+                                            post_process_progress["batch_percent"] = m_percent
+                                            
+                                        elif msg_type == "log":
+                                            # ターミナル出力をログに追加
+                                            if m_text:
+                                                logs = post_process_progress.get("logs", [])
+                                                if len(logs) >= 100:
+                                                    logs = logs[-99:]
+                                                logs.append(m_text)
+                                                post_process_progress["logs"] = logs
+                                                
+                                except Exception:
+                                    break
+
+                        listener = threading.Thread(target=queue_listener_task, args=(sub_queue,))
+                        listener.daemon = True
+                        listener.start()
+                        
+                        # 2. Parallel Execution
+                        completed_count = 0
+                        aggregated_results = {
+                            "total_overtakes": 0,
+                            "images": []
+                        }
+
+                        with concurrent.futures.ProcessPoolExecutor() as executor:
+                            future_to_alias = {
+                                executor.submit(process_single_batch, alias, run_ids, output_dir=None, progress_queue=sub_queue): alias 
+                                for alias, run_ids in valid_batches
+                            }
+                            
+                            for future in concurrent.futures.as_completed(future_to_alias):
+                                alias = future_to_alias[future]
+                                try:
+                                    result = future.result()
+                                    msg = result.get("message", "")
+                                    
+                                    # Collect stats
+                                    ov = result.get("overtake_stats", {})
+                                    aggregated_results["total_overtakes"] += ov.get("total", 0)
+                                    aggregated_results["images"].extend(ov.get("images", []))
+                                    
+                                except Exception as exc:
+                                    current_app.logger.error(f"Batch {alias} generated an exception: {exc}")
+                                
+                                completed_count += 1
+                                percent = int((completed_count / total_tasks) * 100)
+                                post_process_progress.update({
+                                    "current": completed_count,
+                                    "percent": percent
+                                })
+                        
+                        # Stop listener
+                        sub_queue.put("DONE")
+                        listener.join()
+
+                        # 3. Completion
+                        post_process_progress.update({
+                            "status": "complete",
+                            "percent": 100,
+                            "message": f"すべての並列処理が完了しました。(残り予約: {remaining}件)",
+                            "results": {
+                                "total_overtakes": aggregated_results["total_overtakes"],
+                                "images": sorted(aggregated_results["images"])
+                            }
+                        })
+                        
+                        # Mark task as done in queue
+                        task_queue.task_done()
+                        if t_id and t_id in queue_registry:
+                             del queue_registry[t_id]
+                            
+                    except Exception as e:
+                        current_app.logger.exception("Post process background job failed")
+                        post_process_progress.update({
+                            "status": "error",
+                            "message": f"エラーが発生しました: {str(e)}"
+                        })
+                        # Ensure we mark done so queue doesn't stall indefinitely on error?
+                        # Actually task_done() is mostly for join(). Flow continues.
+                        if not task_queue.empty():
+                              task_queue.task_done()
+                        if t_id and t_id in queue_registry:
+                              del queue_registry[t_id]
+
+                # Loop End
+                current_processing_task_id = None
+                is_worker_running = False
+
+        # Start the worker thread
+        thread = threading.Thread(target=worker_loop)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "message": "処理を開始しました。",
+            "status": "started",
+            "queue_size": current_q_size
+        })
+    else:
+        # Worker already running, just queued
+        return jsonify({
+            "message": f"処理を予約しました (現在の待ち: {current_q_size}件)",
+            "status": "queued",
+            "queue_size": current_q_size
+        })
 
 
 @main.route("/post_process/folder_runs/<path:folder_alias>")
@@ -746,6 +967,7 @@ def apply_scope_profile_api():
         
         # Sigle scope update (legacy/simple mode)
         if "scope" in data:
+
             items = [{
                 "scope": data["scope"],
                 "profile": data.get("profile"),
@@ -962,3 +1184,25 @@ def api_traffic_count(run_id):
     except Exception as e:
         current_app.logger.exception(f"Traffic count API failed for run {run_id}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@main.route("/post_process/queue_status")
+def queue_status_api():
+    """Returns current processing and queued tasks"""
+    # Convert registry to list
+    queued = [
+        val for key, val in queue_registry.items() 
+        if val["status"] == "queued"
+    ]
+    # Sort by timestamp
+    queued.sort(key=lambda x: x["submitted_at"])
+    
+    current = None
+    if current_processing_task_id and current_processing_task_id in queue_registry:
+        current = queue_registry[current_processing_task_id]
+        
+    return jsonify({
+        "current_task": current,
+        "queued_tasks": queued,
+        "queue_size": len(queued)
+    })

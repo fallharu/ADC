@@ -1,42 +1,32 @@
-
 import sqlite3
-import os
 
-MAIN_DB_PATH = os.path.join('db', 'my_app_data.db')
+conn = sqlite3.connect('db/my_app_data.db')
+c = conn.cursor()
 
-def check_schema():
-    if not os.path.exists(MAIN_DB_PATH):
-        print(f"DB not found at {MAIN_DB_PATH}")
-        return
+print('=== Detection テーブル スキーマ ===')
+c.execute("PRAGMA table_info(Detection)")
+cols = c.fetchall()
+for col in cols:
+    print(f'  {col[1]}: {col[2]} (nullable={not col[3]})')
 
-    conn = sqlite3.connect(MAIN_DB_PATH)
-    cursor = conn.execute("PRAGMA table_info(Detection)")
-    columns = [row[1] for row in cursor.fetchall()]
-    conn.close()
-    
-    print("Detection Table Columns:")
-    print(columns)
-    
-    if 'model_name' in columns:
-        print("Has model_name")
-    else:
-        print("MISSING model_name")
-        
-    # Check ClassMaster too
-    conn = sqlite3.connect(MAIN_DB_PATH)
-    cursor = conn.execute("PRAGMA table_info(ClassMaster)")
-    cols_cm = [row[1] for row in cursor.fetchall()]
-    conn.close()
-    print("ClassMaster Table Columns:")
-    print(cols_cm)
+# Required columns for post-processing
+required_cols = [
+    'auto_id', 'run_id', 'video_id', 'class_id', 'frame_num',
+    'x1', 'y1', 'x2', 'y2', 'model_name', 'track_id', 'confidence',
+    'group_id', 'speed_km_h', 'measure_x', 'measure_y',
+    'line_distance', 'line_distance_m', 'l_line_distance_m', 'r_line_distance_m',
+    'travel_direction'
+]
+existing_cols = [col[1] for col in cols]
+missing = [c for c in required_cols if c not in existing_cols]
+if missing:
+    print(f'\n⚠ 不足カラム: {missing}')
+else:
+    print('\n✓ 必要なカラムはすべて存在します')
 
-    # Check ProcessLog
-    cursor = conn.execute("PRAGMA table_info(ProcessLog)")
-    cols_pl = [row[1] for row in cursor.fetchall()]
-    conn.close()
-    print("ProcessLog Table Columns:")
-    print(cols_pl)
+print('\n=== OvertakeEvents テーブル スキーマ ===')
+c.execute("PRAGMA table_info(OvertakeEvents)")
+for col in c.fetchall():
+    print(f'  {col[1]}: {col[2]}')
 
-
-if __name__ == "__main__":
-    check_schema()
+conn.close()

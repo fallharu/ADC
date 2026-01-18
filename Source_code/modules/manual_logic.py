@@ -45,6 +45,11 @@ get_run_video_info = getattr(dbm, 'get_run_video_info', None)
 if get_run_video_info is None:
     def get_run_video_info(run_id, upload_folder): return None
 
+get_group_movement_direction = getattr(dbm, 'get_group_movement_direction', None)
+if get_group_movement_direction is None:
+     def get_group_movement_direction(run_id, group_id, frame, window=20): return 'unknown'
+
+
 from .class_filters import vehicle_allowed_classes
 from .group_id import assign_group_ids
 from .speed import assign_kinematics
@@ -895,6 +900,28 @@ def _compute_manual_overtake_event_data(
     overtaker_detection = fetch_detection_for_group(run_id, detection_frame_num, overtaker_group_id)
     overtaken_detection = fetch_detection_for_group(run_id, detection_frame_num, overtaken_group_id)
 
+    # Fallback search for nearby frames (±5)
+    search_range = 5
+    if overtaker_detection is None:
+        for offset in range(1, search_range + 1):
+            for sign in [-1, 1]:
+                check_frame = detection_frame_num + (offset * sign)
+                det = fetch_detection_for_group(run_id, check_frame, overtaker_group_id)
+                if det:
+                    overtaker_detection = det
+                    break
+            if overtaker_detection: break
+            
+    if overtaken_detection is None:
+        for offset in range(1, search_range + 1):
+            for sign in [-1, 1]:
+                check_frame = detection_frame_num + (offset * sign)
+                det = fetch_detection_for_group(run_id, check_frame, overtaken_group_id)
+                if det:
+                    overtaken_detection = det
+                    break
+            if overtaken_detection: break
+
     if overtaker_detection is None:
         raise ManualOvertakeComputationError("追い越し側の検出が見つかりません。", status_code=404)
     if overtaken_detection is None:
@@ -1048,6 +1075,9 @@ def _compute_manual_overtake_event_data(
         if best_bbox:
             bbox_source = {**bbox_source, **best_bbox}
 
+        direction = get_group_movement_direction(run_id, group_value, frame_index)
+
+
         def _select_plate_bbox(
             detections: Sequence[Mapping[str, Any]]
         ) -> Optional[tuple[float, float, float, float]]:
@@ -1094,13 +1124,16 @@ def _compute_manual_overtake_event_data(
                 filtered_candidates,
                 left_line,
                 right_line,
+                direction=direction,
             )
         else:
             measure_x, measure_y = select_measure_point_from_candidates(
                 filtered_candidates,
                 left_line,
                 right_line,
+                direction=direction,
             )
+
 
         fallback_x = _float_or_none(bbox_source.get("x2"))
         fallback_y = _float_or_none(bbox_source.get("y2"))
@@ -1194,6 +1227,8 @@ def _compute_manual_overtake_event_data(
 
         ordered_frames = sorted(frames)
         return [candidate - frame_num for candidate in ordered_frames]
+
+
 
     measurement_band: list[float] = []
     measurement_band.extend(collect_measurement_y(overtaker_detection))
@@ -1880,10 +1915,12 @@ def _compute_manual_overtake_event_data(
 def _process_manual_context_backlog(
     batch_size: int = 10,
     time_limit_s: float = 2.0,
+    run_ids: Optional[list[int]] = None,
 ) -> tuple[int, list[str], int]:
     """バックログにあるコンテキスト未生成の手動追い越しイベントを処理する。"""
 
-    candidates = list_manual_context_backlog(limit=batch_size)
+    candidates = list_manual_context_backlog(limit=batch_size, run_ids=run_ids)
+
     if not candidates:
         return 0, [], 0
 
@@ -1930,13 +1967,34 @@ def _process_manual_context_backlog(
         if save_warns:
             notices.extend(save_warns)
 
+        # イベント本体のデータを更新 (距離などの再計算結果を反映)
+        if getattr(dbm, 'update_manual_overtake_event', None):
+            dbm.update_manual_overtake_event(event_id, computation.payload)
+        else:
+            notices.append(f"Event {event_id}: update_manual_overtake_event not found")
+
         if saved_ok:
+            # 成功したらフラグを適用する (実装計画に基づく追加)
+            if apply_manual_overtake_flags:
+                try:
+                    apply_manual_overtake_flags(run_id, frame_num, overtaker_gid, overtaken_gid)
+                except Exception as exc_flag:
+                    # フラグ付与に失敗してもイベント自体は保存されているのでWarningだけ残して進む
+                    notices.append(f"Event {event_id}: フラグ付与失敗 ({exc_flag})")
+            
             mark_manual_context_backlog_processed(event_id)
+
             processed += 1
 
-    remaining_dict = count_manual_context_backlog()
-    remaining = sum(remaining_dict.values())
+    remaining_dict = count_manual_context_backlog(run_ids=run_ids)
+    if isinstance(remaining_dict, dict):
+        remaining = sum(remaining_dict.values())
+    elif isinstance(remaining_dict, int):
+        remaining = remaining_dict
+    else:
+        remaining = 0
     return processed, notices, remaining
+
 
 
 def _execute_manual_context_processing(app_context: Any) -> None:
@@ -2012,3 +2070,30 @@ def _collect_manual_scale_preview(
         },
         "event": computation.payload,
     }, None
+
+def _apply_manual_distance_ratios(event: dict[str, Any]) -> None:
+    """イベントデータの距離(m)とピクセル(px)から比率を計算して格納する。"""
+    keys = [
+        ("clearance_distance", "clearance_distance_px_ratio"),
+        ("overtaker_line_distance", "overtaker_line_distance_px_ratio"),
+        ("overtaken_line_distance", "overtaken_line_distance_px_ratio"),
+    ]
+    for prefix, ratio_key in keys:
+        dist_m = event.get(f"{prefix}_m")
+        dist_px = event.get(f"{prefix}_px")
+        
+        # 既存の値があれば優先
+        if event.get(ratio_key) is not None:
+             continue
+             
+        ratio = None
+        if dist_m is not None and dist_px is not None:
+            try:
+                m_val = float(dist_m)
+                px_val = float(dist_px)
+                if px_val > 0.001:  # avoid zero div
+                    ratio = m_val / px_val
+            except (TypeError, ValueError):
+                pass
+        
+        event[ratio_key] = ratio

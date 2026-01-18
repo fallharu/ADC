@@ -31,7 +31,7 @@ def assign_kinematics(run_id: int):
         fps = fps_result[0] if fps_result and fps_result[0] else 30.0
 
         df = pd.read_sql_query(f"""
-            SELECT auto_id, track_id, frame_num, group_id, x1, x2, y1, y2, model_name
+            SELECT auto_id, track_id, frame_num, group_id, x1, x2, y1, y2, model_name, travel_direction
             FROM Detection
             WHERE run_id = {run_id} AND track_id IS NOT NULL
             ORDER BY track_id, frame_num
@@ -140,7 +140,7 @@ def assign_kinematics(run_id: int):
         fallback_measure_y,
     )
 
-    vehicles['scale_pixels_per_meter'] = vehicles['measure_y'].apply(get_y_scale)
+    vehicles['scale_pixels_per_meter'] = pd.to_numeric(vehicles['measure_y'].apply(get_y_scale), errors='coerce')
 
     # --- 3. X軸スケール（横方向）の計算 ---
     vehicles['x_pixels_per_meter'] = np.nan
@@ -148,14 +148,32 @@ def assign_kinematics(run_id: int):
     vehicles['x_pixels_per_meter'] = pixel_width / REF_WIDTH_M
 
     # --- 4. 進行方向、速度、加速度の計算 ---
-    vehicles.sort_values(['track_id', 'frame_num'], inplace=True)
+    # group_idが欠損している場合はtrack_idで補完
+    vehicles['group_id'] = vehicles['group_id'].fillna(vehicles['track_id'])
 
-    vehicles['y_diff_direction'] = vehicles.groupby('track_id')['measure_y'].diff()
-    vehicles['travel_direction'] = np.where(vehicles['y_diff_direction'] < 0, 'F', 'B')
+    # 時間順に並べ替え (Group単位で正しい始点・終点を判定するため)
+    vehicles.sort_values(['group_id', 'frame_num'], inplace=True)
 
+    # 進行方向をグループごとに統一して決定 (始点と終点のY座標差分)
+    # 上(小) -> 下(大) = 正 = Front ('F')
+    # 下(大) -> 上(小) = 負 = Back ('B')
+    
+    # 各グループの最初と最後のmeasure_yを取得
+    grp_start_y = vehicles.groupby('group_id')['measure_y'].transform('first')
+    grp_end_y = vehicles.groupby('group_id')['measure_y'].transform('last')
+    
+    # 全体差分
+    vehicles['group_y_diff'] = grp_end_y - grp_start_y
+    
+    # 差分が正（Yが増加＝上から下）なら 'B' (Backward/Downward), 負（Yが減少＝下から上）なら 'F' (Forward/Upward)
+    vehicles['travel_direction'] = np.where(vehicles['group_y_diff'] >= 0, 'B', 'F')
+
+    # 瞬時速度計算用にはフレーム間差分を使用 (Track単位)
+    # Note: グループ+時間でソート済みなので、Track内も時間順になっている
     vehicles['y_diff_speed'] = vehicles.groupby('track_id')['measure_y'].diff()
     vehicles['frame_diff'] = vehicles.groupby('track_id')['frame_num'].diff()
-    vehicles.fillna(0, inplace=True)
+    vehicles['y_diff_speed'] = vehicles['y_diff_speed'].fillna(0)
+    vehicles['frame_diff'] = vehicles['frame_diff'].fillna(0)
 
     distance_m = vehicles['y_diff_speed'].abs() / vehicles['scale_pixels_per_meter']
     time_s = vehicles['frame_diff'] / fps

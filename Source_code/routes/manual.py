@@ -9,6 +9,7 @@ from flask import (
     url_for,
     send_file,
     make_response,
+    Response,
 )
 import cv2
 import numpy as np
@@ -21,13 +22,16 @@ from . import main
 from ..modules import db_manager as dbm
 
 # Safe imports
-get_run_video_info = getattr(dbm, "get_run_video_info", None)
+get_run_video_info = dbm.get_run_video_info
 list_detection_runs = getattr(dbm, "list_detection_runs", None)
+list_runs_for_manual_tool = getattr(dbm, "list_runs_for_manual_tool", None)
 list_manual_overtake_events = getattr(dbm, "list_manual_overtake_events", None)
+
 list_manual_overtake_timeline_entries = getattr(dbm, "list_manual_overtake_timeline_entries", None)
 count_manual_overtake_events = getattr(dbm, "count_manual_overtake_events", None)
 count_manual_context_backlog = getattr(dbm, "count_manual_context_backlog", None)
 summarize_manual_context_backlog_by_status = getattr(dbm, "summarize_manual_context_backlog_by_status", None)
+# Forced reload trigger
 touch_manual_run_progress = getattr(dbm, "touch_manual_run_progress", None)
 update_manual_overtake_event = getattr(dbm, "update_manual_overtake_event", None)
 delete_manual_overtake_event = getattr(dbm, "delete_manual_overtake_event", None)
@@ -45,26 +49,36 @@ mark_manual_overtake_timeline_event_deleted = getattr(dbm, "mark_manual_overtake
 list_manual_overtake_event_cores = getattr(dbm, "list_manual_overtake_event_cores", None)
 mark_manual_overtake_timeline_processed = getattr(dbm, "mark_manual_overtake_timeline_processed", None)
 summarize_manual_overtake_events = getattr(dbm, "summarize_manual_overtake_events", None)
+list_manual_context_backlog = getattr(dbm, "list_manual_context_backlog", None)
+mark_manual_context_backlog_processed = getattr(dbm, "mark_manual_context_backlog_processed", None)
 
 if get_run_video_info is None:
-    def get_run_video_info(run_id): return None
+    def get_run_video_info(run_id, upload_folder=None): return None
 
 # Import db_manager_helpers functions
 from ..modules import db_manager_helpers
-convert_video_frame_to_detection_frame = getattr(db_manager_helpers, "convert_video_frame_to_detection_frame", None)
-convert_detection_frame_to_video_frame = getattr(db_manager_helpers, "convert_detection_frame_to_video_frame", None)
-fetch_detections_for_frame = getattr(db_manager_helpers, "fetch_detections_for_frame", None)
-get_detection_frame_offset = getattr(db_manager_helpers, "get_detection_frame_offset", None)
-get_first_detection_frame = getattr(db_manager_helpers, "get_first_detection_frame", None)
-get_first_bicycle_detection_frame = getattr(db_manager_helpers, "get_first_bicycle_detection_frame", None)
-get_bicycle_orientation_counts = getattr(db_manager_helpers, "get_bicycle_orientation_counts", None)
-get_bicycle_class_aliases = getattr(db_manager_helpers, "get_bicycle_class_aliases", None)
-fetch_tire_detections_for_group = getattr(db_manager_helpers, "fetch_tire_detections_for_group", None)
-fetch_best_group_bbox = getattr(db_manager_helpers, "fetch_best_group_bbox", None)
-get_first_detection_frame_for_group = getattr(db_manager_helpers, "get_first_detection_frame_for_group", None)
-get_next_detection_frame_for_group = getattr(db_manager_helpers, "get_next_detection_frame_for_group", None)
+convert_video_frame_to_detection_frame = getattr(dbm, "convert_video_frame_to_detection_frame", None)
+convert_detection_frame_to_video_frame = getattr(dbm, "convert_detection_frame_to_video_frame", None)
+fetch_detections_for_frame = getattr(dbm, "fetch_detections_for_frame", None)
+get_detection_frame_offset = getattr(dbm, "get_detection_frame_offset", None)
+get_first_detection_frame = getattr(dbm, "get_first_detection_frame", None)
+get_first_bicycle_detection_frame = getattr(dbm, "get_first_bicycle_detection_frame", None)
+get_bicycle_orientation_counts = getattr(dbm, "get_bicycle_orientation_counts", None)
+get_bicycle_class_aliases = getattr(dbm, "get_bicycle_class_aliases", None)
+fetch_tire_detections_for_group = getattr(dbm, "fetch_tire_detections_for_group", None)
+fetch_best_group_bbox = getattr(dbm, "fetch_best_group_bbox", None)
+get_first_detection_frame_for_group = getattr(dbm, "get_first_detection_frame_for_group", None)
+get_next_detection_frame_for_group = getattr(dbm, "get_next_detection_frame_for_group", None)
 fetch_manual_overtake_event = getattr(dbm, "fetch_manual_overtake_event", None)
 ensure_manual_annotation_schema = getattr(dbm, "ensure_manual_annotation_schema", None)
+get_auto_overtake_events_for_run = getattr(dbm, "get_auto_overtake_events_for_run", None)
+if get_auto_overtake_events_for_run is None:
+    def get_auto_overtake_events_for_run(run_id): return []
+
+get_group_movement_direction = getattr(dbm, "get_group_movement_direction", None)
+if get_group_movement_direction is None:
+    def get_group_movement_direction(run_id, group_id, frame, window=20): return 'unknown'
+
 
 from ..modules.manual_logic import (
     _prepare_manual_events,
@@ -82,6 +96,7 @@ from ..modules.manual_logic import (
     _process_manual_context_backlog,
     _execute_manual_context_processing,
     _prepare_manual_overtake_dependencies,
+    _apply_manual_distance_ratios,
     ManualOvertakeComputationError,
     MANUAL_OVERTAKE_EXPORT_COLUMNS,
     MANUAL_OVERTAKE_CONTEXT_COLUMNS,
@@ -114,23 +129,52 @@ def _ensure_database_ready():
 
 @main.route("/manual_overtake")
 def manual_overtake():
-    run_options = list_detection_runs()
+    run_options = list_runs_for_manual_tool() if list_runs_for_manual_tool else []
     selected_run_id = request.args.get("run_id", type=int)
+
     events = []
+    auto_events = []
     if selected_run_id is not None:
         try:
             events = list_manual_overtake_events(run_id=selected_run_id, limit=500)
             _prepare_manual_events(events)
+            
+            # Fetch auto events
+            auto_events_raw = get_auto_overtake_events_for_run(selected_run_id)
+            for ae in auto_events_raw:
+                auto_events.append({
+                    'type': 'auto',
+                    'id': ae['overtake_event_id'],
+                    'frame': ae['event_frame_num'],
+                    'desc': f"自動検出 (ID:{ae['overtake_event_id']}, 距離:{ae.get('clearance_distance_cm')}cm)"
+                })
         except Exception as exc:
             current_app.logger.exception("Failed to load manual overtake events")
-            flash(f"手動追い越しイベントの取得に失敗しました: {exc}", "danger")
+            flash(f"イベントの取得に失敗しました: {exc}", "danger")
             events = []
+            
+    # Combine for display
+    existing_events = []
+    for e in events:
+        desc = f"手動: {e.get('overtaker_class_name')} vs {e.get('overtaken_class_name')}"
+        existing_events.append({
+            'type': 'manual',
+            'id': e['manual_event_id'],
+            'frame': e['frame_num'],
+            'desc': desc
+        })
+    
+    existing_events.extend(auto_events)
+    # Sort by frame
+    existing_events.sort(key=lambda x: x['frame'])
+
     context_rows = _build_manual_context_rows(events)
     return render_template(
         "manual_overtake.html",
         run_options=run_options,
         selected_run_id=selected_run_id,
         events=events,
+        existing_events=existing_events,
         context_rows=context_rows,
     )
 
@@ -165,7 +209,7 @@ def manual_overtake_view():
                         "Failed to update manual run review timestamp"
                     )
 
-    run_options = list_detection_runs()
+    run_options = list_runs_for_manual_tool() if list_runs_for_manual_tool else []
     
     run_label_map: dict[int, str] = {}
     status_groups: dict[str, list[int]] = {
@@ -182,8 +226,9 @@ def manual_overtake_view():
         run_label_map[int(rid)] = label or ""
         status = option.get("manual_status") if isinstance(option, dict) else getattr(option, "manual_status", None)
         normalized_status = (status or "new").lower()
-        if normalized_status not in {"annotated", "visited", "new"}:
+        if normalized_status not in {"annotated", "visited", "new", "new_auto"}:
             normalized_status = "new"
+
         rid_int = int(rid)
         status_groups["all"].append(rid_int)
         status_groups.setdefault(normalized_status, []).append(rid_int)
@@ -197,8 +242,15 @@ def manual_overtake_view():
             timeline_entries = []
             
     timeline_summary = {} 
-    backlog_summary = count_manual_context_backlog(selected_run_ids or None)
-    backlog_total = sum(backlog_summary.values())
+    # Use empty dict for per-run backlog summary if breakdown is not available
+    backlog_summary = {} 
+    
+    backlog_total = 0
+    try:
+         backlog_total = count_manual_context_backlog(selected_run_ids or None)
+    except:
+         current_app.logger.exception("Failed to count backlog")
+         
     backlog_status_summary = summarize_manual_context_backlog_by_status(
         selected_run_ids or None
     )
@@ -472,42 +524,55 @@ def manual_overtake_context_process_api():
 
     payload = request.get_json(silent=True) or {}
     raw_runs = payload.get("run_ids")
-    
-    if isinstance(raw_runs, (str, int)):
-        run_values = [raw_runs]
-    elif isinstance(raw_runs, Sequence):
-        run_values = list(raw_runs)
-    else:
-        run_values = []
-        
-    run_ids = _normalize_run_ids(run_values)
-    if not run_ids:
-        return jsonify({"error": "後処理対象のRunが指定されていません。"}), 400
-
+    limit = payload.get("limit", 5)
+    ensure_missing = bool(payload.get("ensure_missing", True))
     lane_width_m_value = payload.get("lane_width_m")
-    try:
-        lane_width_meters = float(lane_width_m_value) if lane_width_m_value is not None else None
-    except (TypeError, ValueError):
-        lane_width_meters = None
-        
-    if lane_width_meters is not None and lane_width_meters > 0:
+
+    run_ids = _normalize_run_ids([raw_runs] if isinstance(raw_runs, (str, int)) else raw_runs)
+
+    if lane_width_m_value is not None:
         try:
-             update_manual_lane_width(run_ids, lane_width_meters)
-        except Exception:
+            lane_width_meters = float(lane_width_m_value)
+            if lane_width_meters > 0 and update_manual_lane_width and run_ids:
+                update_manual_lane_width(run_ids, lane_width_meters)
+        except (TypeError, ValueError):
             pass
 
-    limit_val = payload.get("limit")
-    limit_candidate = int(limit_val) if limit_val is not None and str(limit_val).isdigit() else None
+    notices = []
+    enqueued = 0
+    ensure_error = None
     
-    ensure_missing = bool(payload.get("ensure_missing", True))
+    if ensure_missing and run_ids and ensure_manual_context_backlog_for_runs:
+        try:
+            enqueued, _ = ensure_manual_context_backlog_for_runs(run_ids)
+            if enqueued > 0:
+                notices.append(f"{enqueued}件をキューに追加しました。")
+        except Exception as e:
+            current_app.logger.exception("Failed to ensure backlog")
+            ensure_error = str(e)
+            notices.append(f"キュー確認失敗: {e}")
 
-    result = _execute_manual_context_processing(
-        run_ids,
-        limit=limit_candidate,
-        ensure_missing=ensure_missing,
-    )
+    try:
+        # Use the logic function directly
+        processed, proc_notices, remaining = _process_manual_context_backlog(
+            batch_size=int(limit) if limit else 5,
+            run_ids=run_ids
+        )
+        if proc_notices:
+            notices.extend(proc_notices)
+    except Exception as exc:
+        current_app.logger.exception("Failed to process manual backlog")
+        return jsonify({"error": str(exc)}), 500
 
-    return jsonify(result)
+    return jsonify({
+        "processed": processed,
+        "remaining_total": remaining,
+        "enqueued": enqueued,
+        "notices": notices,
+        "ensure_error": ensure_error,
+        "lane_width_updated": len(run_ids) if lane_width_m_value else 0,
+        "lane_width_m": lane_width_m_value
+    })
 
 @main.route("/api/manual_overtake/context/backlog", methods=["GET"])
 def manual_overtake_context_backlog_status_api():
@@ -1068,11 +1133,6 @@ def manual_overtake_scale_preview(run_id: int):
     return jsonify(response_payload)
 
 
-@main.route("/manual_overtake/<int:run_id>/scale_preview_image")
-@main.route("/api/manual_overtake/<int:run_id>/metadata")
-
-
-
 @main.route("/api/manual_overtake/<int:run_id>/scale_preview")
 def manual_overtake_scale_preview(run_id: int):
     frame_num = request.args.get("frame", type=int)
@@ -1239,7 +1299,7 @@ def manual_overtake_scale_preview_image(run_id: int):
 
 def manual_overtake_metadata(run_id: int):
     upload_folder = current_app.config['UPLOAD_FOLDER']
-    info = get_run_video_info(run_id, upload_folder)
+    info = get_run_video_info(run_id)
     if not info:
         return jsonify({"error": "対象のRunが見つかりません。"}), 404
     video_path = info.get('path')
@@ -1249,8 +1309,9 @@ def manual_overtake_metadata(run_id: int):
         stats = probe_video(video_path)
     except FileNotFoundError:
         return jsonify({"error": "動画ファイルが見つかりません。"}), 404
-    except Exception:
-        return jsonify({"error": "動画を読み込めませんでした。"}), 500
+    except Exception as e:
+        current_app.logger.exception(f"Metadata error for run {run_id}: {e}")
+        return jsonify({"error": f"動画を読み込めませんでした: {e}"}), 500
 
     manual_frame_buffer.prepare_video(
         run_id,
@@ -1262,7 +1323,13 @@ def manual_overtake_metadata(run_id: int):
     )
 
     try:
-        touch_manual_run_progress(run_id, visit=True)
+        # Inline touch_manual_run_progress logic to bypass stale function signature
+        now_ts = datetime.now().isoformat()
+        with dbm.get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("INSERT OR IGNORE INTO ManualRunProgress (run_id) VALUES (?)", (run_id,))
+            c.execute("UPDATE ManualRunProgress SET manual_status = CASE WHEN manual_status = 'annotated' THEN 'annotated' ELSE 'visited' END, last_visit_at = ? WHERE run_id = ?", (now_ts, run_id))
+            conn.commit()
     except Exception as exc:  # pragma: no cover - runtime safeguard
         current_app.logger.exception("Failed to update manual run visit timestamp")
 
@@ -1278,6 +1345,10 @@ def manual_overtake_metadata(run_id: int):
     bicycle_orientation_counts = get_bicycle_orientation_counts(run_id)
     bicycle_aliases = sorted(get_bicycle_class_aliases())
     buffer_status = manual_frame_buffer.get_status(run_id) or {}
+    
+    # 自動検出追い越しイベントを取得
+    auto_overtake_events = get_auto_overtake_events_for_run(run_id)
+    auto_overtake_frames = [e.get('event_frame_num') for e in auto_overtake_events if e.get('event_frame_num') is not None]
 
     return jsonify({
         "run_id": run_id,
@@ -1296,6 +1367,8 @@ def manual_overtake_metadata(run_id: int):
         "bicycle_orientation_counts": bicycle_orientation_counts,
         "bicycle_class_aliases": bicycle_aliases,
         "buffer_status": buffer_status,
+        "auto_overtake_events": auto_overtake_events,
+        "auto_overtake_frames": auto_overtake_frames,
     })
 
 
@@ -1420,6 +1493,8 @@ def manual_overtake_detections(run_id: int):
                 if not _is_plate(det)
             ]
             bbox_source: Mapping[str, Any] = det
+            
+            direction = get_group_movement_direction(run_id, group_value, detection_frame)
 
             if _is_bicycle(det):
                 best_bbox = fetch_best_group_bbox(run_id, detection_frame, group_value)
@@ -1430,13 +1505,16 @@ def manual_overtake_detections(run_id: int):
                     candidates,
                     left_line,
                     right_line,
+                    direction=direction,
                 )
             else:
                 measure_x, measure_y = select_measure_point_from_candidates(
                     candidates,
                     left_line,
                     right_line,
+                    direction=direction,
                 )
+
 
             if None in (measure_x, measure_y):
                 continue
@@ -1836,6 +1914,7 @@ def manual_overtake_events_api(run_id: int):
     overtaken_group_raw = payload.get('overtaken_group_id') if 'overtaken_group_id' in payload else payload.get('overtaken')
     notes_raw = payload.get('notes')
     lane_width_raw = payload.get('lane_width_m')
+    immediate = bool(payload.get("immediate"))
 
     try:
         frame_num = int(frame_num_raw)
@@ -1858,6 +1937,28 @@ def manual_overtake_events_api(run_id: int):
     if sanitized_notes and len(sanitized_notes) > 500:
         sanitized_notes = sanitized_notes[:500]
 
+    # 距離を計算
+    computed_payload = None
+    try:
+        computation = _compute_manual_overtake_event_data(
+            run_id,
+            frame_num,
+            overtaker_group_id,
+            overtaken_group_id,
+            notes=sanitized_notes or None,
+            compute_lane_metrics=True,
+            group_presence_context=True,
+        )
+        computed_payload = computation.payload
+        notices.extend(computation.notices)
+    except ManualOvertakeComputationError as exc:
+        current_app.logger.warning(f"距離計算に失敗しました: {exc}")
+        notices.append(f"距離計算に失敗しました: {exc}")
+    except Exception as exc:
+        current_app.logger.exception("距離計算で予期しないエラー")
+        notices.append(f"距離計算で予期しないエラーが発生しました: {exc}")
+
+    # 基本情報を設定
     event_payload = {
         "run_id": run_id,
         "frame_num": frame_num,
@@ -1865,6 +1966,35 @@ def manual_overtake_events_api(run_id: int):
         "overtaken_group_id": overtaken_group_id,
         "notes": sanitized_notes or None,
     }
+
+    # 計算結果があれば距離情報を追加
+    if computed_payload:
+        distance_keys = [
+            "video_time_s",
+            "lane_width_m", "lane_width_px_reference", "lane_width_cm_per_px",
+            "overtaker_track_id", "overtaker_class_name",
+            "overtaker_speed_km_h", "overtaker_pixel_speed", "overtaker_pixel_speed_frame",
+            "overtaker_x1", "overtaker_y1", "overtaker_x2", "overtaker_y2",
+            "overtaker_measure_x", "overtaker_measure_y",
+            "overtaker_line_distance_m", "overtaker_line_distance_cm", "overtaker_line_distance_px",
+            "overtaker_line_distance_px_ratio",
+            "overtaker_left_line_distance_m", "overtaker_left_line_distance_cm", "overtaker_left_line_distance_px",
+            "overtaker_right_line_distance_m", "overtaker_right_line_distance_cm", "overtaker_right_line_distance_px",
+            "overtaken_track_id", "overtaken_class_name",
+            "overtaken_speed_km_h", "overtaken_pixel_speed", "overtaken_pixel_speed_frame",
+            "overtaken_x1", "overtaken_y1", "overtaken_x2", "overtaken_y2",
+            "overtaken_measure_x", "overtaken_measure_y",
+            "overtaken_line_distance_m", "overtaken_line_distance_cm", "overtaken_line_distance_px",
+            "overtaken_line_distance_px_ratio",
+            "overtaken_left_line_distance_m", "overtaken_left_line_distance_cm", "overtaken_left_line_distance_px",
+            "overtaken_right_line_distance_m", "overtaken_right_line_distance_cm", "overtaken_right_line_distance_px",
+            "approach_distance_m", "approach_distance_px",
+            "clearance_distance_m", "clearance_distance_cm", "clearance_distance_px",
+            "clearance_distance_px_ratio",
+        ]
+        for key in distance_keys:
+            if key in computed_payload and computed_payload[key] is not None:
+                event_payload[key] = computed_payload[key]
 
     try:
         lane_width_value = float(lane_width_raw)
@@ -1902,6 +2032,9 @@ def manual_overtake_events_api(run_id: int):
     context_saved = False
     context_notices: list[str] = []
     context_enqueued = False
+    context_executed = False
+    context_success = False
+    context_message = None
     try:
         enqueue_manual_context_backlog(
             event_id,
@@ -1911,9 +2044,38 @@ def manual_overtake_events_api(run_id: int):
             [],
         )
         context_enqueued = True
-        context_notices.append(
-            "追い越しフレームを後処理キューに登録しました。手動追い越し観覧で後処理を実行してください。"
-        )
+        
+        if immediate:
+            try:
+                # Execute processing immediately for this run
+                # Using _process_manual_context_backlog directly
+                processed_count, exec_notices, _ = _process_manual_context_backlog(
+                    run_ids=[run_id],
+                    batch_size=5,  # Process a few items to clear backlog
+                    time_limit_s=10.0
+                )
+                
+                context_executed = True
+                context_success = processed_count > 0
+                
+                if exec_notices:
+                     context_notices.extend(exec_notices)
+                     
+                context_message = f"後処理を即時実行しました ({processed_count}件処理)。"
+                if not context_success:
+                    context_message = "後処理の即時実行対象が見つかりませんでした。バックグラウンドですでに処理されている可能性があります。"
+                    
+            except Exception as e:
+                current_app.logger.exception("Immediate context processing failed")
+                context_executed = True # Attempted
+                context_success = False
+                context_message = f"後処理の即時実行中にエラーが発生しました: {e}"
+                context_notices.append(context_message)
+        else:
+            context_notices.append(
+                "追い越しフレームを後処理キューに登録しました。手動追い越し観覧で後処理を実行してください。"
+            )
+                
     except Exception as exc:  # pragma: no cover - runtime safeguard
         current_app.logger.exception("Failed to enqueue manual context backlog")
         context_notices.append(f"追い越しフレームの後処理キュー登録に失敗しました: {exc}")
@@ -1930,8 +2092,11 @@ def manual_overtake_events_api(run_id: int):
             last_event_id=None,
         )
     except Exception as exc:  # pragma: no cover - runtime safeguard
-        current_app.logger.exception("Failed to record manual overtake timeline entry")
-        notices.append(f"タイムラインの更新に失敗しました: {exc}")
+        if "UNIQUE constraint failed" in str(exc):
+             current_app.logger.warning(f"Duplicate timeline entry ignored: {exc}")
+        else:
+            current_app.logger.exception("Failed to record manual overtake timeline entry")
+            notices.append(f"タイムラインの更新に失敗しました: {exc}")
 
     # Generate overtake snapshot photo
     snapshot_generated = 0
@@ -1994,7 +2159,10 @@ def manual_overtake_events_api(run_id: int):
         "event": saved_event,
         "database_verified": database_verified,
         "context_saved": context_saved,
-        "context_queued": context_enqueued,
+        "context_enqueued": context_enqueued,
+        "context_executed": context_executed,
+        "context_success": context_success,
+        "context_message": context_message,
         "snapshot_generated": snapshot_generated,
     }
 
@@ -2003,6 +2171,24 @@ def manual_overtake_events_api(run_id: int):
         response_payload["notices"] = remaining_notices
 
     return jsonify(response_payload), 201
+
+@main.route("/api/manual_overtake/<int:run_id>/events/<int:event_id>", methods=["DELETE"])
+def delete_manual_overtake_event_api(run_id: int, event_id: int):
+    """手動追い越しイベントを削除する"""
+    try:
+        if delete_manual_overtake_event is None:
+             return jsonify({"success": False, "error": "削除機能が無効です（db_manager非対応）"}), 500
+
+        success = delete_manual_overtake_event(run_id, event_id)
+        if success:
+            current_app.logger.info(f"Deleted manual overtake event {event_id} for run {run_id}")
+            return jsonify({"success": True, "message": "イベントを削除しました。"}), 200
+        else:
+            current_app.logger.error(f"Failed to delete manual overtake event {event_id}")
+            return jsonify({"success": False, "error": "イベントの削除に失敗しました。"}), 500
+    except Exception as e:
+        current_app.logger.exception(f"Error deleting manual overtake event: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @main.route("/api/manual_overtake/<int:run_id>/context/flush", methods=["POST"])
@@ -2023,3 +2209,105 @@ def manual_overtake_context_flush(run_id: int):
                 f"追い越しフレーム後処理キューに {enqueued} 件を追加しました。"
             )
     return manual_overtake_scale_image(manual_event_id)
+
+
+# =============================================
+# Manual Overtake Export API
+# =============================================
+
+@main.route("/api/manual_overtake/export")
+def export_manual_overtakes():
+    """手動追い越しイベントをCSV/Excelでエクスポート"""
+    import pandas as pd
+    from io import BytesIO
+    
+    format_type = request.args.get("format", "csv").lower()
+    raw_run_ids = request.args.getlist("run_id")
+    selected_run_ids = _normalize_run_ids(raw_run_ids) if raw_run_ids else None
+    
+    try:
+        events = list_manual_overtake_events(
+            run_ids=selected_run_ids,
+            limit=10000,
+        )
+    except Exception as exc:
+        current_app.logger.exception("Failed to fetch manual overtake events for export")
+        return jsonify({"error": f"データ取得に失敗しました: {exc}"}), 500
+    
+    if not events:
+        return jsonify({"error": "エクスポートするデータがありません"}), 404
+    
+    # Build export rows
+    export_rows = []
+    for evt in events:
+        row = {
+            "イベントID": evt.get("manual_event_id"),
+            "Run ID": evt.get("run_id"),
+            "フレーム番号": evt.get("frame_num"),
+            "動画時間(秒)": evt.get("video_time_s"),
+            "追い越し側Group": evt.get("overtaker_group_id"),
+            "追い越し側クラス": evt.get("overtaker_class_name"),
+            "追い越し側速度(km/h)": evt.get("overtaker_speed_km_h"),
+            "追い越され側Group": evt.get("overtaken_group_id"),
+            "追い越され側クラス": evt.get("overtaken_class_name"),
+            "追い越され側速度(km/h)": evt.get("overtaken_speed_km_h"),
+            "離隔距離(m)": evt.get("clearance_distance_m"),
+            "離隔距離(cm)": evt.get("clearance_distance_cm"),
+            "追い越し側白線距離(m)": evt.get("overtaker_line_distance_m"),
+            "追い越し側白線距離(cm)": evt.get("overtaker_line_distance_cm"),
+            "追い越され側白線距離(m)": evt.get("overtaken_line_distance_m"),
+            "追い越され側白線距離(cm)": evt.get("overtaken_line_distance_cm"),
+            "備考": evt.get("notes"),
+            "作成日時": evt.get("created_at"),
+            "更新日時": evt.get("updated_at"),
+        }
+        export_rows.append(row)
+    
+    df = pd.DataFrame(export_rows)
+    
+    if format_type == "excel":
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="手動追い越し")
+        output.seek(0)
+        return Response(
+            output.getvalue(),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=manual_overtakes.xlsx"}
+        )
+    else:
+        # CSV format
+        csv_data = df.to_csv(index=False, encoding="utf-8-sig")
+        return Response(
+            csv_data,
+            mimetype="text/csv; charset=utf-8-sig",
+            headers={"Content-Disposition": "attachment; filename=manual_overtakes.csv"}
+        )
+
+
+@main.route("/api/manual_overtake/process_backlog", methods=["POST"])
+def process_manual_backlog():
+    """手動追い越しの後処理バックログを処理"""
+    raw_run_ids = request.json.get("run_ids") if request.is_json else None
+    selected_run_ids = _normalize_run_ids(raw_run_ids) if raw_run_ids else None
+    
+    limit = request.json.get("limit", 50) if request.is_json else 50
+    
+    try:
+        processed_count, notices, remaining_count = _process_manual_context_backlog(
+            batch_size=limit,
+            run_ids=selected_run_ids,
+        )
+    except Exception as exc:
+        current_app.logger.exception("Failed to process manual backlog via logic")
+        return jsonify({"error": f"バックログ処理中にエラーが発生しました: {exc}"}), 500
+
+    return jsonify({
+        "message": f"{processed_count}件の処理が完了しました",
+        "processed": processed_count,
+        "remaining_total": remaining_count,
+        "errors": len(notices) if notices else 0,
+        "error_details": notices[:10] if notices else []
+    })
+
+

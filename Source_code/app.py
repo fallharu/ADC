@@ -11,13 +11,19 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # routesパッケージからBlueprintをインポート
 from .routes import main
+from .routes.verify_route import verify_bp
+from .routes.results import results_bp
 
 app = Flask(__name__, template_folder="../templates")
 app.secret_key = "a-very-secret-key-for-adc-system"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Blueprintを登録
+from .routes.check_sheet_routes import check_sheet_bp
 app.register_blueprint(main, url_prefix="/")
+app.register_blueprint(verify_bp)
+app.register_blueprint(check_sheet_bp)
+app.register_blueprint(results_bp)
 
 # データベースマイグレーション
 import sqlite3

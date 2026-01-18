@@ -34,6 +34,7 @@ except Exception:
 
 from .db_manager import MAIN_DB_PATH, configure_connection
 from .perf_utils import resolve_worker_count
+from .video_path_resolver import collect_video_candidates
 
 # --- 色やスタイルの定義（BGR） ---
 VEHICLE_BOX_COLOR = (255, 178, 50)   # 水色：通常車両
@@ -697,13 +698,30 @@ class VideoGenerator:
         - 例外の有無に関わらず VideoCapture/DB は必ず解放する
         """
         upload_folder = os.getenv("Upload_folder", "uploads")
-        original_video_path = os.path.join(upload_folder, self.original_video_filename)
+        
+        # パス解決の強化: collect_video_candidates を使用して再帰的に探索
+        candidates = collect_video_candidates(
+            upload_folder=upload_folder,
+            filename=self.original_video_filename,
+            source_path=None, # DBにsource_pathがあれば渡すべきだが、今回はfilenameベースで探索
+            output_folder=self.output_folder
+        )
+        
+        original_video_path = None
+        for path in candidates:
+            if os.path.exists(path):
+                original_video_path = path
+                break
+        
+        if not original_video_path:
+             # フォールバック: 元のロジック + 絶対パス化
+             original_video_path = os.path.abspath(os.path.join(upload_folder, self.original_video_filename))
 
         cap = cv2.VideoCapture(original_video_path)
         if not cap.isOpened():
             # DBを開いたままにしない
             self.conn.close()
-            raise IOError(f"[VideoGenerator] 動画ファイルが開けません: {original_video_path}")
+            raise IOError(f"[VideoGenerator] 動画ファイルが開けません: {original_video_path} (探索候補: {len(candidates)}件)")
 
         writer_wrapper = None
         try:

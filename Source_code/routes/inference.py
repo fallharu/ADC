@@ -188,9 +188,12 @@ def detect():
                     "location_id": process_location_id,
                     "vehicle_model": (request.form.get('batch_vehicle_model') or '').strip() or None,
                     "tire_model": (request.form.get('batch_tire_model') or '').strip() or None,
+                    "road_type": (request.form.get('batch_road_type') or '').strip() or None,
                 },
             )
 
+            overwrite = _coerce_checkbox(request.form.get('batch_overwrite'))
+            
             profile_name = updated_settings.get('profile') or None
             export_csv = bool(updated_settings.get('auto_csv'))
             auto_postprocess_enabled = bool(updated_settings.get('auto_postprocess'))
@@ -319,6 +322,7 @@ def detect():
                         folder_settings_root=alias_dir,
                         default_process_year=updated_settings.get("process_year"),
                         default_location_id=updated_settings.get("location_id"),
+                        overwrite=overwrite,
                     )
                     current_results = list(batch_status.get('results', []))
                     has_error = any(entry.get('error') for entry in current_results)
@@ -373,7 +377,7 @@ def detect():
                 return redirect(url_for('main.detect'))
             
             use_stored = _coerce_checkbox(request.form.get("single_use_stored"))
-            road_type_arg = None
+            road_type_arg = (request.form.get("single_road_type") or "").strip() or None
             vehicle_model_arg = (request.form.get("vehicle_model_select") or "").strip() or None
             tire_model_arg = (request.form.get("tire_model_select") or "").strip() or None
 
@@ -404,6 +408,8 @@ def detect():
                 if not tire_model_arg and resolved.tire_model:
                      tire_model_arg = resolved.tire_model
 
+            overwrite = _coerce_checkbox(request.form.get("single_overwrite"))
+
             update_yolo_progress(0, 0, "processing")
 
             def worker():
@@ -417,6 +423,7 @@ def detect():
                         road_type=road_type_arg,
                         vehicle_model=vehicle_model_arg,
                         tire_model=tire_model_arg,
+                        overwrite=overwrite,
                     )
                     message = _format_yolo_completion_message(video_result)
                     if profile_candidate:

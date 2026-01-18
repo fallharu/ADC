@@ -797,6 +797,89 @@ def comparative_analysis_view():
         
 
 # ---------------------------------------------------------------------------
+# Kanaoka Export API
+# ---------------------------------------------------------------------------
+@main.route("/api/export_kanaoka", methods=["POST"])
+@main.route("/export_kanaoka", methods=["POST"])
+def export_kanaoka():
+    """金岡出力 (Overtake Time-Series Export)"""
+    try:
+        from ..modules.kanaoka_export import generate_kanaoka_excel
+        from datetime import datetime
+        
+        excel_bytes = generate_kanaoka_excel(MAIN_DB_PATH)
+        filename = f"kanaoka_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return send_file(
+            io.BytesIO(excel_bytes),
+            as_attachment=True,
+            download_name=filename,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    except Exception as e:
+        current_app.logger.error(f"Kanaoka Export failed: {e}", exc_info=True)
+@main.route("/export_kanaoka_csv", methods=["POST"])
+def export_kanaoka_csv():
+    """金岡出力 (CSV)"""
+    try:
+        from ..modules.kanaoka_export import generate_kanaoka_csv
+        from datetime import datetime
+        
+        csv_bytes = generate_kanaoka_csv(MAIN_DB_PATH)
+        filename = f"kanaoka_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        return send_file(
+            io.BytesIO(csv_bytes),
+            as_attachment=True,
+            download_name=filename,
+            mimetype="text/csv"
+        )
+    except Exception as e:
+        current_app.logger.error(f"Kanaoka CSV Export failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@main.route("/export_overtake_summary_csv", methods=["POST"])
+def export_overtake_summary_csv():
+    """追い越し有まとめ (CSV)"""
+    try:
+        from ..modules.summary_csv_export import generate_summary_csv
+        from datetime import datetime
+        
+        csv_bytes = generate_summary_csv(MAIN_DB_PATH)
+        filename = f"overtake_summary_all_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        return send_file(
+            io.BytesIO(csv_bytes),
+            as_attachment=True,
+            download_name=filename,
+            mimetype="text/csv"
+        )
+    except Exception as e:
+        current_app.logger.error(f"Overtake Summary CSV Export failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@main.route("/export_full_data", methods=["POST"])
+def export_full_data():
+    """全データ出力 (Full Data CSV Export)"""
+    try:
+        from ..modules.full_csv_export import generate_full_csv
+        from datetime import datetime
+        
+        csv_bytes = generate_full_csv(MAIN_DB_PATH)
+        filename = f"overtake_full_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        return send_file(
+            io.BytesIO(csv_bytes),
+            as_attachment=True,
+            download_name=filename,
+            mimetype="text/csv"
+        )
+    except Exception as e:
+        current_app.logger.error(f"Full CSV Export failed: {e}", exc_info=True)
+        # Using jsonify for consistent error response instead of missing response_error
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ---------------------------------------------------------------------------
 # Comparative Analysis Execution API
 @main.route("/api/comparative_analysis/run", methods=["POST"])
 def comparative_analysis_run():
@@ -1073,4 +1156,39 @@ def overtake_photo_group_data():
     
     except Exception as e:
         current_app.logger.exception("Overtake photo group data API failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@main.route("/api/overtake_events/all_group_ids")
+def overtake_events_all_group_ids():
+    """全追い越しイベントの車・自転車グループIDを一覧で取得するAPI"""
+    try:
+        with sqlite3.connect(MAIN_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            configure_connection(conn, mode="read")
+            
+            sql = """
+                SELECT 
+                    o.run_id,
+                    o.event_frame_num,
+                    o.overtaker_group_id,
+                    o.overtaken_group_id,
+                    v.filename as video_filename
+                FROM OvertakeEvents o
+                LEFT JOIN ProcessLog p ON o.run_id = p.run_id
+                LEFT JOIN Video v ON p.video_id = v.video_id
+                ORDER BY o.run_id, o.event_frame_num
+            """
+            rows = conn.execute(sql).fetchall()
+            
+            events = [dict(row) for row in rows]
+            
+            return jsonify({
+                "ok": True,
+                "count": len(events),
+                "events": events,
+            })
+    
+    except Exception as e:
+        current_app.logger.exception("Overtake events all group IDs API failed")
         return jsonify({"ok": False, "error": str(e)}), 500

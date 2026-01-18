@@ -20,13 +20,16 @@
                     <i class="bi bi-arrow-clockwise me-1" id="regenerateIcon"></i>写真を再生成
                 </button>
             </form>
-            <form action="{{ url_for('main.reset_overtake_photos') }}" method="POST" class="d-inline"
-                onsubmit="return confirm('すべての追い越し写真を削除しますか？この操作は取り消せません。');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is defined else '' }}">
-                <button type="submit" class="btn btn-outline-danger btn-sm">
-                    <i class="bi bi-trash me-1"></i>写真をリセット
-                </button>
-            </form>
+            <!-- Reset Button Trigger -->
+            <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal"
+                data-bs-target="#resetPhotosModal">
+                <i class="bi bi-trash me-1"></i>写真をリセット
+            </button>
+
+            <button type="button" class="btn btn-outline-success btn-sm" id="btnExportGroupIds"
+                onclick="exportAllGroupIds()">
+                <i class="bi bi-download me-1"></i>グループID一覧出力
+            </button>
         </div>
     </div>
 
@@ -328,7 +331,39 @@
         </div>
     </div>
 </div>
+
+<!-- リセット確認モーダル -->
+<div class="modal fade" id="resetPhotosModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1"
+    aria-labelledby="resetPhotosModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="resetPhotosModalLabel">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>警告
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="fw-bold">本当にすべての追い越し写真を削除しますか？</p>
+                <p class="text-muted small">
+                    この操作は取り消せません。<br>
+                    再度写真を確認するには「再生成」を実行する必要があります。
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                <form action="{{ url_for('main.reset_overtake_photos') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is defined else '' }}">
+                    <button type="submit" class="btn btn-danger">削除を実行</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
+
+
 
 {% block scripts %}
 <script>
@@ -721,5 +756,51 @@
             alert('コピーに失敗しました: ' + err.message);
         });
     }
+
+    // 全追い越しイベントのグループIDを一括出力
+    async function exportAllGroupIds() {
+        const btn = document.getElementById('btnExportGroupIds');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> 取得中...';
+
+        try {
+            const response = await fetch('/api/overtake_events/all_group_ids');
+            const data = await response.json();
+
+            if (!data.ok) {
+                alert('データ取得に失敗しました: ' + (data.error || '不明なエラー'));
+                return;
+            }
+
+            if (data.events.length === 0) {
+                alert('追い越しイベントがありません');
+                return;
+            }
+
+            // TSV形式でデータ作成
+            const header = ['run_id', 'frame_num', 'overtaker_group_id (車)', 'overtaken_group_id (自転車)', 'video_filename'].join('\t');
+            const rows = data.events.map(e => [
+                e.run_id || '',
+                e.event_frame_num || '',
+                e.overtaker_group_id || '',
+                e.overtaken_group_id || '',
+                e.video_filename || ''
+            ].join('\t'));
+
+            const copyText = [header, ...rows].join('\n');
+
+            // クリップボードにコピー
+            await navigator.clipboard.writeText(copyText);
+            alert(`${data.events.length} 件のグループIDをクリップボードにコピーしました`);
+
+        } catch (err) {
+            alert('エラーが発生しました: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
+
 </script>
 {% endblock %}

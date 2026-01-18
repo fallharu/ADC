@@ -12,6 +12,7 @@ from . import (
     database,
     video,
     inference,
+    export_routes,
 )
 
 from .inference import yolo_progress

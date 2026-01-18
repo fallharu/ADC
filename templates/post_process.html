@@ -242,13 +242,29 @@
             <label for="actionRunSelect" class="form-label">処理対象のRun:</label>
             <select id="actionRunSelect" name="run_id" class="form-select" required>
               <option value="" disabled selected>-- Runを選択 --</option>
-              {% for log in logs %}
-              <option value="{{ log.run_id }}" {% if selected_run_id is defined and log.run_id==selected_run_id
-                %}selected{% endif %}>
-                Run #{{ log.run_id }} (Profile: {{ log.calibration_profile or '未設定' }})
-              </option>
+              {% for (group_label, f_count, _, _), group_logs in folder_groups %}
+              <optgroup label="{{ group_label }} (Total: {{ f_count }})">
+                {% for log in group_logs %}
+                <option value="{{ log.run_id }}" {% if selected_run_id is defined and log.run_id==selected_run_id
+                  %}selected{% endif %}>
+                  Run {{ log.run_id }} - {{ log.filename }}
+                  {% if log.calibration_profile %} (Profile: {{ log.calibration_profile }}) {% else %} (No Profile) {%
+                  endif %}
+                </option>
+                {% endfor %}
+              </optgroup>
               {% endfor %}
             </select>
+            <div class="mt-2">
+              <label for="runProfileSelect" class="form-label">適用するプロファイル (任意):</label>
+              <select id="runProfileSelect" name="run_profile_name" class="form-select">
+                <option value="">-- 変更しない --</option>
+                {% for profile in available_profiles %}
+                <option value="{{ profile }}">{{ profile }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">指定するとこのRunにプロファイルを設定してから処理します。</div>
+            </div>
           </div>
           <div class="border rounded-3 p-3 mb-3 bg-light" id="folderSelectionGroup" style="display: none;">
             <h6 class="mb-2">フォルダ単位で後処理を実行</h6>
@@ -258,12 +274,13 @@
                 <option value="" disabled selected>-- フォルダを選択 --</option>
                 {% for batch in folder_batches %}
                 <option value="{{ batch.folder_alias }}">
-                  {{ batch.folder_alias }} ({{ batch.run_count }}本 / 完了 {{ batch.completed_runs }} / プロファイル未設定 {{
-                  batch.missing_profiles }})
+                  {{ batch.subfolder_display if batch.subfolder_display else batch.folder_alias }} (Count: {{
+                  batch.run_count }}, Profile: {% if batch.missing_profiles == 0 %}OK{% else %}Missing {{
+                  batch.missing_profiles }}{% endif %})
                 </option>
                 {% endfor %}
               </select>
-              <div class="form-text">選択したフォルダに属するRunを順番に処理します。未完了のRunも自動的に対象になります。</div>
+              <div class="form-text">選択したフォルダ（複数可）に属するRunを順番に処理します。</div>
             </div>
             <div>
               <label for="folderProfileSelect" class="form-label">適用する既存プロファイル (任意):</label>
@@ -337,6 +354,72 @@
             </div>
             <div class="form-text">Run IDの昇順で処理します。エラーが発生したRunは記録して次のRunへ進みます。</div>
           </div>
+          <!-- インラインプレビューセクション -->
+          <div class="card mb-3" id="inlinePreviewSection">
+            <div class="card-header bg-info text-white py-2">
+              <i class="bi bi-eye me-2"></i>処理内容の確認
+            </div>
+            <div class="card-body">
+              <div class="row g-3">
+                <!-- プレビュー画像 -->
+                <div class="col-md-7">
+                  <label class="form-label small fw-bold mb-1">キャリブレーション適用イメージ</label>
+                  <div
+                    class="border rounded bg-dark d-flex align-items-center justify-content-center position-relative overflow-hidden"
+                    style="height: 200px;">
+                    <img id="inlinePreviewImage" src="" class="img-fluid"
+                      style="display: none; max-height: 100%; max-width: 100%; object-fit: contain;">
+                    <div id="inlinePreviewNoImage" class="text-white-50 small text-center p-3" style="display: none;">
+                      <i class="bi bi-camera-video-off fs-1 d-block mb-2"></i>
+                      プレビュー画像を取得できませんでした
+                    </div>
+                    <div id="inlinePreviewLoading" class="text-white small text-center p-3">
+                      <div class="spinner-border spinner-border-sm text-light mb-2" role="status"></div>
+                      <div>読み込み中...</div>
+                    </div>
+                  </div>
+                  <!-- Run ナビゲーション -->
+                  <div class="d-flex justify-content-between align-items-center mt-2 bg-light p-1 rounded border">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="inlinePrevBtn" disabled>&lt;
+                      前へ</button>
+                    <span id="inlinePreviewCounter" class="mx-2">- / -</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="inlineNextBtn" disabled>次へ
+                      &gt;</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm ms-2" id="inlineRefreshBtn">更新</button>
+                  </div>
+                </div>
+                <!-- 情報テーブル -->
+                <div class="col-md-5">
+                  <table class="table table-sm table-bordered mb-2">
+                    <tbody>
+                      <tr>
+                        <th class="table-light" style="width: 40%;">適用プロファイル</th>
+                        <td id="inlinePreviewProfile" class="fw-bold text-primary">-</td>
+                      </tr>
+                      <tr>
+                        <th class="table-light">登録年度</th>
+                        <td id="inlinePreviewYear">-</td>
+                      </tr>
+                      <tr>
+                        <th class="table-light">道路種別</th>
+                        <td id="inlinePreviewRoadType">-</td>
+                      </tr>
+                      <tr>
+                        <th class="table-light">処理対象数</th>
+                        <td id="inlinePreviewCount" class="fw-bold">-</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div>
+                    <label class="small text-muted fw-bold">対象Run ID (抜粋)</label>
+                    <div id="inlinePreviewRunIds" class="small text-muted border rounded p-2 bg-light font-monospace"
+                      style="max-height: 80px; overflow-y: auto;">-</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- 動画出力オプション (アコーディオン化) -->
           <div class="accordion mb-3" id="videoOptionsAccordion">
             <div class="accordion-item">
@@ -523,72 +606,7 @@
             </div>
           </div>
 
-          <!-- インラインプレビューセクション -->
-          <div class="card mb-3" id="inlinePreviewSection" style="display: none;">
-            <div class="card-header bg-info text-white py-2">
-              <i class="bi bi-eye me-2"></i>処理内容の確認
-            </div>
-            <div class="card-body">
-              <div class="row g-3">
-                <!-- プレビュー画像 -->
-                <div class="col-md-7">
-                  <label class="form-label small fw-bold mb-1">キャリブレーション適用イメージ</label>
-                  <div
-                    class="border rounded bg-dark d-flex align-items-center justify-content-center position-relative overflow-hidden"
-                    style="height: 200px;">
-                    <img id="inlinePreviewImage" src="" class="img-fluid"
-                      style="display: none; max-height: 100%; max-width: 100%; object-fit: contain;">
-                    <div id="inlinePreviewNoImage" class="text-white-50 small text-center p-3" style="display: none;">
-                      <i class="bi bi-camera-video-off fs-1 d-block mb-2"></i>
-                      プレビュー画像を取得できませんでした
-                    </div>
-                    <div id="inlinePreviewLoading" class="text-white small text-center p-3">
-                      <div class="spinner-border spinner-border-sm text-light mb-2" role="status"></div>
-                      <div>読み込み中...</div>
-                    </div>
-                  </div>
-                  <!-- Run ナビゲーション -->
-                  <div class="d-flex justify-content-between align-items-center mt-2 bg-light p-1 rounded border">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="inlinePrevBtn" disabled>
-                      <i class="bi bi-chevron-left"></i> 前へ
-                    </button>
-                    <span class="small fw-bold text-muted" id="inlinePreviewCounter">- / -</span>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="inlineNextBtn" disabled>
-                      次へ <i class="bi bi-chevron-right"></i>
-                    </button>
-                  </div>
-                </div>
-                <!-- 情報テーブル -->
-                <div class="col-md-5">
-                  <table class="table table-sm table-bordered mb-2">
-                    <tbody>
-                      <tr>
-                        <th class="table-light" style="width: 40%;">適用プロファイル</th>
-                        <td id="inlinePreviewProfile" class="fw-bold text-primary">-</td>
-                      </tr>
-                      <tr>
-                        <th class="table-light">登録年度</th>
-                        <td id="inlinePreviewYear">-</td>
-                      </tr>
-                      <tr>
-                        <th class="table-light">道路種別</th>
-                        <td id="inlinePreviewRoadType">-</td>
-                      </tr>
-                      <tr>
-                        <th class="table-light">処理対象数</th>
-                        <td id="inlinePreviewCount" class="fw-bold">-</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <div>
-                    <label class="small text-muted fw-bold">対象Run ID (抜粋)</label>
-                    <div id="inlinePreviewRunIds" class="small text-muted border rounded p-2 bg-light font-monospace"
-                      style="max-height: 80px; overflow-y: auto;">-</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+
 
           <p class="fw-bold mb-2">実行するアクション:</p>
           <div class="row g-2">
@@ -889,6 +907,7 @@
     const runSelectionGroup = document.getElementById('runSelectionGroup');
     const folderSelectionGroup = document.getElementById('folderSelectionGroup');
     const folderSelect = document.getElementById('actionFolderSelect');
+    const runProfileSelect = document.getElementById('runProfileSelect'); // START_ADDED
     const folderProfileSelect = document.getElementById('folderProfileSelect');
     const folderProfileManagerButton = document.getElementById('openFolderProfileManager');
     const folderProfileModalEl = document.getElementById('folderProfileModal');
@@ -1018,6 +1037,7 @@
     const inlinePreviewCounter = document.getElementById('inlinePreviewCounter');
     const inlinePrevBtn = document.getElementById('inlinePrevBtn');
     const inlineNextBtn = document.getElementById('inlineNextBtn');
+    const inlineRefreshBtn = document.getElementById('inlineRefreshBtn'); // New Button
 
     let inlinePreviewState = {
       currentIndex: 0,
@@ -1025,8 +1045,19 @@
       targetMode: 'run',
       runId: null,
       folderAlias: null,
-      folderProfileName: null
+      folderAliases: [], // Add array support
+      folderProfileName: null,
+      runProfileName: null // ADDED
     };
+
+    // Last updated: 2026-01-17T21:30:00 - Force cache refresh
+    if (inlineRefreshBtn) {
+      inlineRefreshBtn.addEventListener('click', () => {
+        console.log('[DEBUG] 更新ボタンがクリックされました');
+        alert('更新ボタンがクリックされました。コンソールを確認してください。');
+        loadInlinePreview(inlinePreviewState.currentIndex);
+      });
+    }
 
     function resetInlinePreviewUI() {
       if (inlinePreviewImage) inlinePreviewImage.style.display = 'none';
@@ -1043,25 +1074,38 @@
     }
 
     async function loadInlinePreview(index = 0) {
-      if (!inlinePreviewSection) return;
+      console.log('[DEBUG] loadInlinePreview関数が呼ばれました, index:', index);
+      console.log('[DEBUG] inlinePreviewState:', JSON.stringify(inlinePreviewState));
+      if (!inlinePreviewSection) {
+        console.log('[DEBUG] inlinePreviewSectionが見つかりません');
+        return;
+      }
 
       resetInlinePreviewUI();
 
       const payload = {
         target_mode: inlinePreviewState.targetMode,
         run_id: inlinePreviewState.runId,
-        folder_alias: inlinePreviewState.folderAlias,
+        folder_alias: inlinePreviewState.folderAlias, // Legacy support
+        folder_aliases: inlinePreviewState.folderAliases, // New array support
         folder_profile_name: inlinePreviewState.folderProfileName,
+        run_profile_name: inlinePreviewState.runProfileName || null, // fix undefined
         preview_index: index
       };
 
+      console.log('loadInlinePreview called with index:', index);
+      console.log('Payload:', payload);
+
       try {
+        console.log('Fetching preview...');
         const res = await fetch('/api/post_process/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
+        console.log('Fetch response status:', res.status);
         const data = await res.json();
+        console.log('Preview data received:', data);
 
         if (!res.ok) throw new Error(data.error || 'プレビュー取得エラー');
 
@@ -1126,34 +1170,61 @@
     function updateInlinePreviewVisibility() {
       if (!inlinePreviewSection) return;
 
+      // Always ensure it's visible
+      inlinePreviewSection.style.display = 'block';
+
       const currentTargetModeRadio = document.querySelector('input[name="target_mode"]:checked');
       const mode = currentTargetModeRadio?.value || 'run';
       inlinePreviewState.targetMode = mode;
 
+      let shouldLoad = false;
+
       if (mode === 'run') {
         const runId = actionRunSelect?.value;
         if (runId) {
-          inlinePreviewSection.style.display = 'block';
           inlinePreviewState.runId = runId;
           inlinePreviewState.folderAlias = null;
-          loadInlinePreview(0);
-        } else {
-          inlinePreviewSection.style.display = 'none';
+          // Capture the newly selected profile for run
+          inlinePreviewState.runProfileName = runProfileSelect?.value || null;
+          shouldLoad = true;
         }
       } else if (mode === 'folder') {
-        const folderAlias = folderSelect?.value;
-        if (folderAlias) {
-          inlinePreviewSection.style.display = 'block';
+        const selectedOptions = Array.from(folderSelect?.selectedOptions || []).map(opt => opt.value).filter(v => v);
+
+        if (selectedOptions.length > 0) {
           inlinePreviewState.runId = null;
-          inlinePreviewState.folderAlias = folderAlias;
+          inlinePreviewState.folderAliases = selectedOptions;
+          inlinePreviewState.folderAlias = selectedOptions[0]; // For backward compatibility/preview of first folder
           inlinePreviewState.folderProfileName = folderProfileSelect?.value || null;
-          loadInlinePreview(0);
-        } else {
-          inlinePreviewSection.style.display = 'none';
+          shouldLoad = true;
         }
+      }
+
+      if (shouldLoad) {
+        loadInlinePreview(0);
       } else {
-        // 'condition' or 'all' mode -> hide inline preview
-        inlinePreviewSection.style.display = 'none';
+        // Show "No Selection" state (keep card visible, but clear content)
+        if (inlinePreviewImage) {
+          inlinePreviewImage.style.display = 'none';
+          inlinePreviewImage.src = '';
+        }
+        if (inlinePreviewLoading) inlinePreviewLoading.style.display = 'none';
+
+        if (inlinePreviewNoImage) {
+          inlinePreviewNoImage.style.display = 'block';
+          inlinePreviewNoImage.className = 'text-white-50 small text-center p-4'; // Add some padding
+          inlinePreviewNoImage.innerHTML = '<i class="bi bi-arrow-up-circle fs-3 d-block mb-2"></i>Runまたはフォルダを選択するとプレビューが表示されます';
+        }
+
+        // Reset text fields
+        if (inlinePreviewProfile) inlinePreviewProfile.textContent = '-';
+        if (inlinePreviewYear) inlinePreviewYear.textContent = '-';
+        if (inlinePreviewRoadType) inlinePreviewRoadType.textContent = '-';
+        if (inlinePreviewCount) inlinePreviewCount.textContent = '-';
+        if (inlinePreviewRunIds) inlinePreviewRunIds.textContent = '-';
+        if (inlinePreviewCounter) inlinePreviewCounter.textContent = '- / -';
+        if (inlinePrevBtn) inlinePrevBtn.disabled = true;
+        if (inlineNextBtn) inlineNextBtn.disabled = true;
       }
     }
 
@@ -1172,6 +1243,11 @@
         }
       });
     }
+    if (inlineRefreshBtn) {
+      inlineRefreshBtn.addEventListener('click', () => {
+        loadInlinePreview(inlinePreviewState.currentIndex);
+      });
+    }
 
     // Add listeners to Run and Folder selects
     if (actionRunSelect) {
@@ -1183,7 +1259,16 @@
     if (folderProfileSelect) {
       folderProfileSelect.addEventListener('change', () => {
         inlinePreviewState.folderProfileName = folderProfileSelect.value || null;
-        if (inlinePreviewState.targetMode === 'folder' && inlinePreviewState.folderAlias) {
+        if (inlinePreviewState.targetMode === 'folder' && inlinePreviewState.folderAliases.length > 0) {
+          loadInlinePreview(inlinePreviewState.currentIndex);
+        }
+      });
+    }
+
+    if (runProfileSelect) {
+      runProfileSelect.addEventListener('change', () => {
+        inlinePreviewState.runProfileName = runProfileSelect.value || null;
+        if (inlinePreviewState.targetMode === 'run' && inlinePreviewState.runId) {
           loadInlinePreview(inlinePreviewState.currentIndex);
         }
       });
@@ -1194,6 +1279,9 @@
       input.addEventListener('change', updateInlinePreviewVisibility);
       input.addEventListener('change', (e) => setTargetMode(e.target.value));
     });
+
+    // Initialize Visibility based on current selection
+    updateInlinePreviewVisibility();
 
     function getCsrfToken() {
       const tokenInput = actionForm ? actionForm.querySelector('input[name="csrf_token"]') : null;
@@ -2691,9 +2779,8 @@
             return `Run #${log.run_id} (現在: ${profile} / フォルダ: ${folderText})`;
           };
           const buildActionLabel = (log) => {
-            const folderText = folderLabel(log);
-            const profile = log.calibration_profile || '未設定';
-            return `Run #${log.run_id} (Profile: ${profile} / フォルダ: ${folderText})`;
+            // Updated as per user request: RunID : VideoName
+            return `${log.run_id} : ${log.filename}`;
           };
           updateSelectOptions(calibRunSelect, logs, '-- Runを選択 --', buildCalibLabel);
           updateSelectOptions(applyRunSelect, logs, '-- Runを選択 --', buildApplyLabel);
@@ -3154,6 +3241,73 @@
     }
 
     refreshLogs();
+
+    // --- Queue Viewer Logic ---
+    // Using 'pp' prefix to avoid collision with any other 'queueCard' var
+    var ppQueueCard = document.getElementById('postProcessQueueCard');
+    var ppQueueList = document.getElementById('postProcessQueueList');
+    var ppQueueEmpty = document.getElementById('postProcessQueueEmpty');
+
+    async function updatePpQueue() {
+      if (!ppQueueCard || !ppQueueList) return;
+      try {
+        const res = await fetch('/post_process/queue_status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Show/Hide Card if there is any activity (queued or current)
+        const hasActivity = (data.queued_tasks.length > 0 || data.current_task);
+        if (hasActivity) {
+          ppQueueCard.style.display = 'block';
+        } else {
+          // Optional: Hide if empty, or keep visible saying "No tasks"
+          // User requested "confim reserved tasks", likely wants to see it appear when needed.
+          // But if running, we want to see it too.
+          ppQueueCard.style.display = 'none';
+        }
+
+        // Render List
+        ppQueueList.innerHTML = '';
+
+        // Add Current Task First
+        if (data.current_task) {
+          const li = document.createElement('li');
+          li.className = 'list-group-item list-group-item-warning small d-flex justify-content-between align-items-center';
+          li.innerHTML = `
+                <div>
+                   <span class="badge bg-warning text-dark me-2"><i class="bi bi-gear-fill me-1 fw-normal spin-icon"></i>実行中</span>
+                   <span class="fw-bold">${data.current_task.description}</span>
+                </div>
+             `;
+          ppQueueList.appendChild(li);
+        }
+
+        if (data.queued_tasks.length === 0) {
+          ppQueueEmpty.style.display = (data.current_task) ? 'none' : 'block';
+        } else {
+          ppQueueEmpty.style.display = 'none';
+          data.queued_tasks.forEach(task => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item small d-flex justify-content-between align-items-center';
+            const dateStr = new Date(task.submitted_at * 1000).toLocaleTimeString();
+            li.innerHTML = `
+                    <div>
+                        <span class="badge bg-secondary me-2">待機中</span>
+                        ${task.description}
+                    </div>
+                    <span class="text-muted" style="font-size: 0.75rem;">${dateStr}</span>
+                `;
+            ppQueueList.appendChild(li);
+          });
+        }
+
+      } catch (e) { console.error('Queue poll error', e); }
+    }
+
+    // Poll every 3 seconds
+    setInterval(updatePpQueue, 3000);
+    updatePpQueue();
+
   });
 </script>
 
@@ -3180,11 +3334,13 @@
                 </tr>
                 <tr>
                   <th class="table-light">登録年度</th>
-                  <td id="confirmYear"></td>
+                  <td><input type="number" class="form-control form-control-sm" id="confirmYear" placeholder="例: 2024">
+                  </td>
                 </tr>
                 <tr>
                   <th class="table-light">道路種別</th>
-                  <td id="confirmRoadType"></td>
+                  <td><input type="text" class="form-control form-control-sm" id="confirmRoadType"
+                      placeholder="例: 一般道 / 高速道路"></td>
                 </tr>
                 <tr>
                   <th class="table-light">処理対象数</th>
@@ -3196,6 +3352,22 @@
               <label class="small text-muted fw-bold">対象Run ID (抜粋)</label>
               <div id="confirmRunIds" class="small text-muted border rounded p-2 bg-light font-monospace text-wrap"
                 style="max-height: 100px; overflow-y: auto;"></div>
+            </div>
+            <div class="mt-3 pt-3 border-top">
+              <div class="alert alert-light border small text-muted mb-2 p-2">
+                ※「設定のみ保存」は動画生成・CSV出力をスキップします。
+              </div>
+              <button type="button" class="btn btn-info w-100 py-2 fs-6 fw-bold shadow-sm mb-2"
+                id="confirmSaveSettingsBtn">
+                <i class="bi bi-save me-2"></i>設定のみ保存
+              </button>
+              <button type="button" class="btn btn-primary w-100 py-2 fs-6 fw-bold shadow-sm mb-2"
+                id="confirmExecuteBtn">
+                <i class="bi bi-check-circle-fill me-2"></i>上記の内容で実行する
+              </button>
+              <button type="button" class="btn btn-outline-secondary w-100 btn-sm" data-bs-dismiss="modal">
+                キャンセル
+              </button>
             </div>
           </div>
 
@@ -3230,14 +3402,7 @@
         </div>
       </div>
     </div>
-    <div class="mt-4 pt-3 border-top">
-      <button type="button" class="btn btn-primary w-100 py-2 fs-5 fw-bold shadow-sm mb-2" id="confirmExecuteBtn">
-        <i class="bi bi-check-circle-fill me-2"></i>上記の内容で実行する
-      </button>
-      <button type="button" class="btn btn-outline-secondary w-100" data-bs-dismiss="modal">
-        キャンセル
-      </button>
-    </div>
+
   </div>
 </div>
 </div>
@@ -3285,6 +3450,7 @@
     // UI Elements
     const ui = {
       executeBtn: document.getElementById('confirmExecuteBtn'),
+      saveSettingsBtn: document.getElementById('confirmSaveSettingsBtn'), // New Button
       loading: document.getElementById('confirmLoading'),
       previewImage: document.getElementById('confirmImage'),
       noImage: document.getElementById('confirmNoImage'),
@@ -3436,115 +3602,108 @@
       });
     });
 
+    // --- Helper Functions in IIFE Scope ---
+
+    const getCsrf = () => {
+      const el = document.querySelector('input[name="csrf_token"]');
+      return el ? el.value : '';
+    };
+
+    const executeAction = async (overridePayload = {}) => {
+      if (!state.formData) {
+        console.error('No pending form data found.');
+        return;
+      }
+
+      const payload = {};
+      state.formData.forEach((value, key) => payload[key] = value);
+      Object.assign(payload, overridePayload);
+
+      const yearVal = ui.year ? ui.year.value : '';
+      const roadVal = ui.roadType ? ui.roadType.value : '';
+      payload['collection_year'] = yearVal;
+      payload['road_type'] = roadVal;
+
+      ui.executeBtn.disabled = true;
+      if (ui.saveSettingsBtn) ui.saveSettingsBtn.disabled = true;
+
+      const btnEl = overridePayload.action === 'save_settings' ? ui.saveSettingsBtn : ui.executeBtn;
+      if (btnEl) btnEl.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>送信中...';
+
+      try {
+        const csrfToken = getCsrf();
+        const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+        if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+
+        const response = await fetch("{{ url_for('main.post_process_action') }}", {
+          method: 'POST', headers: headers, body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+
+        if (!response.ok) throw new Error(data.error || 'サーバーエラー');
+
+        getModalInst().hide();
+
+        // Progress Logic
+        const progressArea = document.getElementById('progressArea');
+        const statusMessage = document.getElementById('statusMessage');
+        const statusBadge = document.getElementById('statusBadge');
+        const progressBar = document.getElementById('progressBar');
+        const lastResultEl = document.getElementById('postProcessLastResult');
+
+        if (progressArea) {
+          progressArea.style.display = 'block';
+          if (data.status === 'queued') {
+            if (statusMessage) statusMessage.textContent = `予約しました (待ち: ${data.queue_size}件)`;
+            if (statusBadge) { statusBadge.className = 'badge bg-secondary text-white'; statusBadge.textContent = '予約中'; }
+          } else {
+            if (statusMessage) statusMessage.textContent = '処理を開始しました...';
+            if (statusBadge) { statusBadge.className = 'badge bg-warning text-dark'; statusBadge.textContent = '処理中'; }
+            if (progressBar) {
+              progressBar.style.width = '0%'; progressBar.classList.remove('bg-success', 'bg-danger');
+              progressBar.classList.add('bg-info', 'progress-bar-striped', 'progress-bar-animated');
+              progressBar.textContent = '初期化中...';
+            }
+          }
+          progressArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+          if (lastResultEl) {
+            if (data.status === 'queued') lastResultEl.textContent = `タスクを予約しました (Queue: ${data.queue_size})`;
+            else lastResultEl.textContent = '処理を開始しました...';
+          }
+        }
+
+        if (typeof window.pollProgress === 'function') setTimeout(window.pollProgress, 500);
+        else if (typeof pollProgress === 'function') setTimeout(pollProgress, 500);
+
+      } catch (error) {
+        console.error('Exec failed:', error);
+        alert('エラー: ' + error.message);
+      } finally {
+        if (confModalEl.classList.contains('show')) {
+          if (ui.executeBtn) { ui.executeBtn.disabled = false; ui.executeBtn.innerHTML = '<i class="bi bi-check-circle-fill me-2"></i>上記の内容で実行する'; }
+          if (ui.saveSettingsBtn) { ui.saveSettingsBtn.disabled = false; ui.saveSettingsBtn.innerHTML = '<i class="bi bi-save me-2"></i>設定のみ保存'; }
+        }
+        state.formData = null;
+      }
+    };
+
     // 2. Execute Button Click
     if (ui.executeBtn) {
-      ui.executeBtn.onclick = async () => {
-        if (!state.formData) {
-          console.error('No pending form data found.');
-          return;
-        }
-
-        console.log('Execute button clicked. Processing...');
-
-        // Helper: Get CSRF Token safely
-        const getCsrf = () => {
-          const el = document.querySelector('input[name="csrf_token"]');
-          return el ? el.value : '';
-        };
-
-        // Prepare Payload
-        const payload = {};
-        state.formData.forEach((value, key) => payload[key] = value);
-
-        // Disable UI immediately
-        ui.executeBtn.disabled = true;
-        ui.executeBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>送信中...';
-
-        try {
-          const csrfToken = getCsrf();
-          const headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          };
-          if (csrfToken) headers['X-CSRFToken'] = csrfToken;
-
-          // Direct Fetch Call
-          const response = await fetch("{{ url_for('main.post_process_action') }}", {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(payload)
-          });
-
-          const data = await response.json();
-
-          if (!response.ok) {
-            throw new Error(data.error || data.message || 'サーバーエラーが発生しました');
-          }
-
-          // Success Handling
-          console.log('Execution started successfully:', data);
-
-          // Hide Modal
-          getModalInst().hide(); // Use getModalInst()
-
-          // === NEW: Show Progress Area Immediately ===
-          const progressArea = document.getElementById('progressArea');
-          const statusMessage = document.getElementById('statusMessage');
-          const statusBadge = document.getElementById('statusBadge');
-          const progressBar = document.getElementById('progressBar');
-          const lastResultEl = document.getElementById('postProcessLastResult');
-
-          if (progressArea) {
-            progressArea.style.display = 'block';
-            if (statusMessage) statusMessage.textContent = '後処理を開始しました...';
-
-            if (statusBadge) {
-              statusBadge.className = 'badge bg-warning text-dark';
-              statusBadge.textContent = '処理中';
-            }
-
-            if (progressBar) {
-              progressBar.style.width = '0%';
-              progressBar.classList.remove('bg-success', 'bg-danger', 'bg-info'); // Clear previous states
-              progressBar.classList.add('progress-bar-striped', 'progress-bar-animated', 'bg-info'); // Set to info for pending
-              progressBar.textContent = '初期化中...';
-              progressBar.setAttribute('aria-valuenow', '0');
-            }
-
-            // Explicitly Reset Last Result Display to prevent stale data
-            if (lastResultEl) {
-              lastResultEl.textContent = '処理を開始しました...';
-              lastResultEl.classList.remove('text-danger', 'text-success');
-              lastResultEl.classList.add('text-muted');
-            }
-
-            // Scroll to top
-            progressArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-
-          // Trigger polling
-          if (typeof window.pollProgress === 'function') {
-            setTimeout(window.pollProgress, 500);
-          } else {
-            console.log('Poll function not found, reloading logs manually...');
-            if (typeof window.refreshLogs === 'function') window.refreshLogs();
-          }
-
-        } catch (error) {
-          console.error('Execution Failed:', error);
-          alert('エラー: ' + error.message);
-        } finally {
-          // Restore Button State (if modal still open due to error)
-          if (confModalEl.classList.contains('show')) {
-            ui.executeBtn.disabled = false;
-            ui.executeBtn.innerHTML = '<i class="bi bi-check-circle-fill me-2"></i>上記の内容で実行する';
-          }
-          state.formData = null;
-        }
+      ui.executeBtn.onclick = () => {
+        executeAction({});
       };
     }
 
-    // 3. Modal Hidden Event (Cleanup)
+    // 3. Save Settings Button Click
+    if (ui.saveSettingsBtn) {
+      ui.saveSettingsBtn.onclick = () => {
+        executeAction({ action: 'save_settings' });
+      };
+    }
+
+
+    // 4. Modal Hidden Event (Cleanup)
     confModalEl.addEventListener('hidden.bs.modal', () => {
       // Small delay to ensure execute click handler finishes first if it triggered the hide
       setTimeout(() => {
@@ -3602,8 +3761,8 @@
 
         // Render Data
         if (ui.profile) ui.profile.textContent = data.profile || '未設定';
-        if (ui.year) ui.year.textContent = data.year || '未設定';
-        if (ui.roadType) ui.roadType.textContent = data.road_type || '未設定';
+        if (ui.year) ui.year.value = data.year || ''; // Update Value
+        if (ui.roadType) ui.roadType.value = data.road_type || ''; // Update Value
         if (ui.count) ui.count.textContent = (data.count || 0) + ' 件';
 
         if (ui.runIds) {
@@ -3724,8 +3883,9 @@
     }
 
     // フォーム送信時にポーリング開始
-    if (actionForm) {
-      actionForm.addEventListener('submit', () => {
+    if (form) {
+      form.addEventListener('submit', () => {
+        if (progressPollingTimer) clearTimeout(progressPollingTimer);
         lastLogCount = 0;
         if (postProcessLogs) postProcessLogs.textContent = '';
         setTimeout(pollProgressStatus, 500);

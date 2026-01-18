@@ -34,7 +34,7 @@ def create_all_save(run_id: int):
 
     with sqlite3.connect(MAIN_DB_PATH) as conn:
         configure_connection(conn, mode="write")
-        ensure_detection_distance_columns(conn)
+        ensure_detection_distance_columns()
         conn.commit()
         configure_connection(conn, mode="read")
         c = conn.cursor()

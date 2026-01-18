@@ -63,6 +63,7 @@ def _compute_distance(
     center_line,
     left_inner_line,
     right_inner_line,
+    lane_width_m: float = 3.5,
 ) -> _DistanceResult:
     ax, ay = float(row_a['measure_x']), float(row_a['measure_y'])
     bx, by = float(row_b['measure_x']), float(row_b['measure_y'])
@@ -81,6 +82,7 @@ def _compute_distance(
                 center_line,
                 left_inner_line,
                 right_inner_line,
+                lane_width_m=lane_width_m,
             )
             if scale and scale > 0:
                 x_scales.append(float(scale))
@@ -94,13 +96,19 @@ def _compute_distance(
     avg_x = float(np.mean(x_scales)) if x_scales else None
     avg_y = float(np.mean(y_scales)) if y_scales else None
 
+    # ユーザー要望: Verifyで作成したスケール(lane_width_mに基づくスケール)を優先利用する
+    # lane_scale_at_point が返すスケールは lane_width_m に基づくため、
+    # avg_x が存在すればそれを優先的に距離換算に利用する。
+    
     distance_m: Optional[float] = None
     if avg_x and avg_y:
         dx_m = abs(dx_px) / avg_x
         dy_m = abs(dy_px) / avg_y
         distance_m = float(np.hypot(dx_m, dy_m))
     elif avg_x:
-        distance_m = abs(dx_px) / avg_x
+        # Xスケールのみ (Yスケールがない場合、Xスケールで代用するか、等方とみなすか)
+        # ここではHypot全体に適用
+        distance_m = distance_px / avg_x
 
     distance_cm: Optional[float] = None
     if distance_m is not None:
@@ -151,11 +159,19 @@ def assign_approach_and_clearance(run_id: int) -> None:
         calibration_data = None
         print(f"[assign_approach_and_clearance] キャリブレーション読込に失敗しました: {exc}")
 
-    from ..manual_metrics import load_white_lines
+    from ..manual_metrics import load_white_lines, LANE_WIDTH_METERS
     lane_lines = load_white_lines(calibration_data)
     left_line, right_line, center_line = lane_lines
     left_inner_line = lane_lines.left_inner
     right_inner_line = lane_lines.right_inner
+    
+    # 校正データから車線幅を取得 (検証済みスケール)
+    calib_lane_width = LANE_WIDTH_METERS
+    if calibration_data:
+        # JSONキーは lane_width_m と想定
+        val = _float_or_none(calibration_data.get("lane_width_m"))
+        if val is not None and val > 0:
+            calib_lane_width = val
 
     if df.empty:
         print(f"Run ID {run_id}: 接近距離を計算する対象データがありません。")
@@ -163,12 +179,23 @@ def assign_approach_and_clearance(run_id: int) -> None:
 
     df['class_lower'] = df['class_name'].str.lower()
 
+    vehicles = df[df['model_name'] != 'best'].copy()
+    
+    # ユーザー要望対応: グループ中心座標を事前計算 (タイヤの左右判定に使用)
+    # 車両(Car/Bus/Truck)のグループBBOX中心を基準にタイヤをフィルタリングする
+    vehicles['center_x'] = (vehicles['x1'] + vehicles['x2']) / 2.0
+    group_centers = {}
+    # フレーム番号とグループIDをキーにして中心座標を辞書化
+    for row in vehicles.itertuples():
+         group_centers[(float(row.frame_num), float(row.group_id))] = float(row.center_x)
+
     tyre_points = compute_front_right_tire_points(
         df[df['model_name'] == 'best'],
         left_line,
         right_line,
+        group_centers=group_centers,
     )
-    vehicles = df[df['model_name'] != 'best'].copy()
+
     vehicles = attach_measure_points(
         vehicles,
         tyre_points,
@@ -215,6 +242,7 @@ def assign_approach_and_clearance(run_id: int) -> None:
                     center_line,
                     left_inner_line,
                     right_inner_line,
+                    lane_width_m=calib_lane_width,
                 )
 
                 dir_bike = str(bike_row.get('travel_direction') or '').strip()

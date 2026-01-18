@@ -1,4 +1,4 @@
-﻿from flask import render_template, request, jsonify, redirect, url_for, flash, current_app
+﻿from flask import render_template, request, jsonify, redirect, url_for, flash, current_app, send_file, Response
 from typing import Optional, Any
 import os
 
@@ -703,44 +703,148 @@ def detection_preview_image(detection_id: int):
 def export_tracks():
     try:
         run_id = request.args.get('run_id', type=int)
+        file_format = request.args.get('format', 'xlsx').lower()
         
         # Fetch data
-        print(f"DEBUG: Starting full track export. RunID={run_id}")
+        print(f"DEBUG: Starting full track export. RunID={run_id}, Format={file_format}")
         data = dbm.get_track_data_for_export(run_id)
         
-        # Create Excel
-        output = io.BytesIO()
-        # local import pandas if needed, but dbm handles logic. 
-        # Here we need pandas for ExcelWriter
         import pandas as pd
+        from datetime import datetime
         
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Bicycle Sheet
-            df_bicycle = data.get('bicycle')
-            if df_bicycle is not None and not df_bicycle.empty:
-                df_bicycle.to_excel(writer, sheet_name='自転車', index=False)
-            else:
-                 pd.DataFrame({'Info': ['データがありません']}).to_excel(writer, sheet_name='自転車', index=False)
-
-            # Overtake Sheet
-            df_overtake = data.get('overtake')
-            if df_overtake is not None and not df_overtake.empty:
-                df_overtake.to_excel(writer, sheet_name='追い越し', index=False)
-            else:
-                 pd.DataFrame({'Info': ['データがありません']}).to_excel(writer, sheet_name='追い越し', index=False)
+        df_bicycle = data.get('bicycle')
+        df_overtake = data.get('overtake')
+        
+        # Debug logging
+        with open('debug_export.log', 'w') as f:
+            f.write(f"DEBUG: Starting export for run_id={run_id}, format={file_format}\n")
             
-        output.seek(0)
+            f.write(f"DEBUG: Bicycle DF type: {type(df_bicycle)}\n")
+            if df_bicycle is not None:
+                f.write(f"DEBUG: Bicycle DF empty: {df_bicycle.empty}, Shape: {df_bicycle.shape}\n")
+            else:
+                f.write("DEBUG: Bicycle DF is None\n")
+                
+            f.write(f"DEBUG: Overtake DF type: {type(df_overtake)}\n")
+            if df_overtake is not None:
+                f.write(f"DEBUG: Overtake DF empty: {df_overtake.empty}, Shape: {df_overtake.shape}\n")
+            else:
+                f.write("DEBUG: Overtake DF is None\n")
         
-        filename = f"track_data_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        # Truncate if too large (limit approx 1M rows)
+        MAX_ROWS = 1000000
+        if df_bicycle is not None and len(df_bicycle) > MAX_ROWS:
+            with open('debug_export.log', 'a') as f: f.write(f"WARNING: Bicycle DF truncated from {len(df_bicycle)} to {MAX_ROWS}\n")
+            df_bicycle = df_bicycle.iloc[:MAX_ROWS]
+            
+        if df_overtake is not None and len(df_overtake) > MAX_ROWS:
+            with open('debug_export.log', 'a') as f: f.write(f"WARNING: Overtake DF truncated from {len(df_overtake)} to {MAX_ROWS}\n")
+            df_overtake = df_overtake.iloc[:MAX_ROWS]
         
-        return send_file(
-            output,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=filename
-        )
+        # Get filename provided by user
+        user_filename = request.args.get('filename')
+        save_server = request.args.get('save_server') == 'true'
+        
+        output_dir = os.path.join(current_app.root_path, '..', 'OutPut')
+        if save_server and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Sanitize filename if provided
+        if user_filename:
+            import re
+            # Remove invalid characters
+            safe_filename = re.sub(r'[\\/*?:"<>|]', "", user_filename)
+            # Ensure it's not empty and no paths
+            safe_filename = os.path.basename(safe_filename)
+            if not safe_filename:
+                safe_filename = f"track_data_export_{timestamp}"
+        else:
+            safe_filename = f"track_data_export_{timestamp}"
+
+        if file_format == 'csv':
+            # CSV形式：ZIPファイルで2つのCSVを出力
+            import zipfile
+            
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zf:
+                # 自転車シート
+                bicycle_csv = io.BytesIO()
+                if df_bicycle is not None and not df_bicycle.empty:
+                    df_bicycle.to_csv(bicycle_csv, index=False, encoding='utf-8-sig')
+                else:
+                    pd.DataFrame({'Info': ['データがありません']}).to_csv(bicycle_csv, index=False, encoding='utf-8-sig')
+                bicycle_csv.seek(0)
+                zf.writestr(f'{safe_filename}_bicycle.csv', bicycle_csv.getvalue())
+                
+                # 追い越しシート
+                overtake_csv = io.BytesIO()
+                if df_overtake is not None and not df_overtake.empty:
+                    df_overtake.to_csv(overtake_csv, index=False, encoding='utf-8-sig')
+                else:
+                    pd.DataFrame({'Info': ['データがありません']}).to_csv(overtake_csv, index=False, encoding='utf-8-sig')
+                overtake_csv.seek(0)
+                zf.writestr(f'{safe_filename}_overtake.csv', overtake_csv.getvalue())
+            
+            output.seek(0)
+            final_filename = f"{safe_filename}.zip"
+            
+            if save_server:
+                server_path = os.path.join(output_dir, final_filename)
+                with open(server_path, 'wb') as f:
+                    f.write(output.getvalue())
+                print(f"DEBUG: Saved export to server: {server_path}")
+                # Reset buffer position for response
+                output.seek(0)
+            
+            return Response(
+                output.getvalue(),
+                mimetype='application/zip',
+                headers={'Content-Disposition': f'attachment; filename={final_filename}'}
+            )
+        else:
+            # Excel形式（デフォルト）
+            output = io.BytesIO()
+            
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                # Bicycle Sheet
+                if df_bicycle is not None and not df_bicycle.empty:
+                    print("DEBUG: Writing Bicycle sheet (Data)")
+                    df_bicycle.to_excel(writer, sheet_name='自転車', index=False)
+                else:
+                    print("DEBUG: Writing Bicycle sheet (Empty)")
+                    pd.DataFrame({'Info': ['データがありません']}).to_excel(writer, sheet_name='自転車', index=False)
+
+                # Overtake Sheet
+                if df_overtake is not None and not df_overtake.empty:
+                    print("DEBUG: Writing Overtake sheet (Data)")
+                    df_overtake.to_excel(writer, sheet_name='追い越し', index=False)
+                else:
+                    print("DEBUG: Writing Overtake sheet (Empty)")
+                    pd.DataFrame({'Info': ['データがありません']}).to_excel(writer, sheet_name='追い越し', index=False)
+                
+            output.seek(0)
+            
+            # Use safe_filename for Excel as well
+            final_filename = f"{safe_filename}.xlsx"
+            
+            if save_server:
+                server_path = os.path.join(output_dir, final_filename)
+                with open(server_path, 'wb') as f:
+                    f.write(output.getvalue())
+                print(f"DEBUG: Saved export to server: {server_path}")
+                # Reset buffer position for response
+                output.seek(0)
+            
+            return send_file(
+                output,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=final_filename
+            )
     except Exception as e:
         print(f"Export Error: {e}")
         import traceback
         traceback.print_exc()
-        return Response(f"Export failed: {str(e)}", status=500)

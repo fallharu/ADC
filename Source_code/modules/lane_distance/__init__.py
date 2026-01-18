@@ -190,7 +190,7 @@ def assign_lane_distance(
     run_id: int,
 ):
     with sqlite3.connect(MAIN_DB_PATH) as conn:
-        ensure_detection_distance_columns(conn)
+        ensure_detection_distance_columns()
         row = conn.execute(
             "SELECT calibration_profile FROM ProcessLog WHERE run_id = ?",
             (run_id,),
@@ -365,6 +365,21 @@ def assign_lane_distance(
             enriched["auto_id"].to_numpy(np.int64),
         )
     ):
+        l_cross_m = None
+        r_cross_m = None
+        
+        if flag == '-':
+            # If outside, the smaller distance is the crossing amount
+            if np.isfinite(left_m) and np.isfinite(right_m):
+                if left_m < right_m:
+                    l_cross_m = left_m
+                else:
+                    r_cross_m = right_m
+            elif np.isfinite(left_m):
+                l_cross_m = left_m
+            elif np.isfinite(right_m):
+                r_cross_m = right_m
+
         updates.append(
             (
                 _normalize_distance(measure_x_values[idx]),
@@ -379,6 +394,8 @@ def assign_lane_distance(
                 _normalize_distance(near_m),
                 _normalize_distance(near_cm),
                 flag if isinstance(flag, str) and flag in {"+", "-"} else None,
+                _normalize_distance(l_cross_m),
+                _normalize_distance(r_cross_m),
                 int(auto_id),
             )
         )
@@ -402,13 +419,15 @@ def assign_lane_distance(
                 line_distance = ?,
                 line_distance_m = ?,
                 line_distance_cm = ?,
-                lane_position_flag = ?
+                lane_position_flag = ?,
+                l_line_cross_m = ?,
+                r_line_cross_m = ?
             WHERE auto_id = ?
             """,
             updates,
         )
     print(f"Run ID {run_id}: {len(updates)}件の白線距離を更新しました。")
-_TIRE_PATTERN = re.compile(r"(tire|tyre|wheel)")
+_TIRE_PATTERN = re.compile(r"tire|tyre|wheel")
 
 
 def _build_tire_mask(df: pd.DataFrame) -> pd.Series:

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}キャリブレーション検証 - G_ADC{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="h3 mb-3">キャリブレーション検証</h1>
+        <p class="text-muted">指定された実行IDのキャリブレーション精度を検証します。</p>
+    </div>
+</div>
+
+<div class="card shadow mb-4">
+    <div class="card-header bg-light">
+        <i class="bi bi-list-check me-2"></i>検証対象の選択
+    </div>
+    <div class="card-body">
+        <div class="table-responsive mb-3" style="max-height: 300px; overflow-y: auto;">
+            <table class="table table-sm table-hover table-striped mb-0">
+                <thead class="table-light sticky-top">
+                    <tr>
+                        <th style="width: 100px;">Run ID</th>
+                        <th>動画ファイル名 (Video Name)</th>
+                        <th>適用プロファイル (Profile)</th>
+                        <th style="width: 80px;">選択</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr style="cursor: pointer;" onclick="pointsSelect({{ log.run_id }})">
+                        <td>{{ log.run_id }}</td>
+                        <td>{{ log.video_filename or log.filename or '-' }}</td>
+                        <td>
+                            {% if log.calibration_profile %}
+                            <span class="badge bg-info text-dark">{{ log.calibration_profile }}</span>
+                            {% else %}
+                            <span class="text-muted small">未設定</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            <button class="btn btn-sm btn-outline-primary py-0">Select</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not logs %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">データがありません</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow mb-4">
+    <div class="card-header bg-primary text-white">
+        <h5 class="card-title mb-0">検証実行</h5>
+    </div>
+    <div class="card-body">
+        <form id="verifyForm">
+            <div class="row align-items-end">
+                <div class="col-md-4">
+                    <label for="run_id" class="form-label">実行ID (Run ID)</label>
+                    <input type="number" class="form-control" id="run_id" name="run_id" placeholder="一覧から選択してください"
+                        required>
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="bi bi-check-circle"></i> 検証開始
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="resultArea" class="d-none">
+    <div class="row">
+        <!-- Frame 120 Result -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">フレーム120 (メモリ表示)</h5>
+                </div>
+                <div class="card-body text-center">
+                    <img id="frameImage" src="" class="img-fluid border" alt="Frame 120">
+                    <p class="mt-2 text-muted small" id="framePath"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lane Width Graph -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">車線幅グラフ (ピクセル vs Y座標)</h5>
+                </div>
+                <div class="card-body text-center">
+                    <img id="graphImage" src="" class="img-fluid border" alt="Lane Width Graph">
+                    <p class="mt-2 text-muted small" id="graphPath"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scale Graph -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">1ｍスケール(192px)</h5>
+                </div>
+                <div class="card-body text-center">
+                    <img id="scaleGraphImage" src="" class="img-fluid border" alt="Scale Graph">
+                    <p class="mt-2 text-muted small" id="scaleGraphPath"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="alert alert-info">
+        <i class="bi bi-folder"></i> ファイル保存先: <span id="saveDir"></span>
+    </div>
+</div>
+
+<div id="loadingArea" class="d-none text-center my-5">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-2 text-muted">検証データを生成中...</p>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function pointsSelect(runId) {
+        document.getElementById('run_id').value = runId;
+    }
+
+    document.getElementById('verifyForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const runId = document.getElementById('run_id').value;
+        if (!runId) return;
+
+        // UI Reset
+        document.getElementById('resultArea').classList.add('d-none');
+        document.getElementById('loadingArea').classList.remove('d-none');
+
+        try {
+            const response = await fetch('/api/verify_calibration', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ run_id: parseInt(runId) })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                document.getElementById('framePath').textContent = data.frame_path;
+                document.getElementById('graphPath').textContent = data.graph_path;
+                document.getElementById('saveDir').textContent = data.verify_dir;
+
+                // Display Images
+                document.getElementById('frameImage').src = data.frame_url;
+                document.getElementById('graphImage').src = data.graph_url;
+                document.getElementById('scaleGraphImage').src = data.scale_graph_url;
+                document.getElementById('frameImage').classList.remove('d-none');
+                document.getElementById('graphImage').classList.remove('d-none');
+                document.getElementById('scaleGraphImage').classList.remove('d-none');
+
+                document.getElementById('framePath').textContent = data.frame_path;
+                document.getElementById('graphPath').textContent = data.graph_path;
+                document.getElementById('scaleGraphPath').textContent = data.scale_graph_path;
+
+            } else {
+                alert('エラー: ' + data.error);
+            }
+        } catch (error) {
+            alert('通信エラーが発生しました: ' + error);
+            console.error(error);
+        } finally {
+            document.getElementById('loadingArea').classList.add('d-none');
+            document.getElementById('resultArea').classList.remove('d-none');
+        }
+    });
+</script>
+{% endblock %}

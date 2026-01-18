@@ -238,437 +238,445 @@
     </div>
   </div>
 
-<div class="card shadow-sm mt-4">
-  <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
-    <div>
-      <div class="fw-semibold">追い越しタイムライン</div>
-      <div class="small text-muted">動画ごとに記録した追い越しタイミングと再処理状況を確認できます。</div>
+  <div class="card shadow-sm mt-4">
+    <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+      <div>
+        <div class="fw-semibold">追い越しタイムライン</div>
+        <div class="small text-muted">動画ごとに記録した追い越しタイミングと再処理状況を確認できます。</div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        {% if timeline_total %}
+        <span class="badge bg-secondary text-light rounded-pill">記録 {{ timeline_total }}件</span>
+        {% endif %}
+        {% if context_backlog_total %}
+        <span class="badge bg-warning text-dark rounded-pill">手動後処理待ち {{ context_backlog_total }}件</span>
+        {% endif %}
+        <form method="post" action="{{ url_for('main.manual_overtake_context_process') }}" class="d-inline">
+          {% for rid in selected_run_ids %}
+          <input type="hidden" name="run_id" value="{{ rid }}">
+          {% endfor %}
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="manualTimelineProcessButton"
+            data-manual-process-trigger="context"
+            data-process-url="{{ url_for('main.manual_overtake_context_process_api') }}"
+            data-status-url="{{ url_for('main.manual_overtake_context_backlog_status_api') }}" data-batch-size="5" {% if
+            not selected_run_ids and not context_backlog_total %}disabled{% endif %}>
+            手動追い越しで後処理
+          </button>
+        </form>
+        <form method="post" action="{{ url_for('main.manual_overtake_reprocess') }}" class="d-inline">
+          {% for rid in selected_run_ids %}
+          <input type="hidden" name="run_id" value="{{ rid }}">
+          {% endfor %}
+          <button type="submit" class="btn btn-outline-primary btn-sm" {% if not selected_run_ids %}disabled{% endif %}>
+            {% if selected_run_ids %}選択Runを再処理{% else %}Runを選択{% endif %}
+          </button>
+        </form>
+      </div>
     </div>
-    <div class="d-flex flex-wrap gap-2 align-items-center">
-      {% if timeline_total %}
-      <span class="badge bg-secondary text-light rounded-pill">記録 {{ timeline_total }}件</span>
+    <div class="card-body">
+      <div id="manualTimelineProcessStatus" class="mb-3 d-none"
+        data-backlog-summary='{{ (context_backlog_summary or {}) | tojson | safe }}'
+        data-backlog-status='{{ {"status_totals": context_backlog_status or {}, "pending_total": context_backlog_total, "backlog_total": context_backlog_status_total} | tojson | safe }}'>
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <div class="spinner-border spinner-border-sm text-warning d-none" role="status" data-progress-spinner
+            aria-hidden="true"></div>
+          <div class="small" data-progress-label></div>
+        </div>
+        <div class="progress" style="height: 0.75rem;">
+          <div class="progress-bar" role="progressbar" data-progress-bar style="width: 0%;" aria-valuenow="0"
+            aria-valuemin="0" aria-valuemax="100">0%</div>
+        </div>
+        <div class="small text-muted mt-2" data-progress-note></div>
+        <div class="small text-warning mt-1 d-none" data-progress-notices></div>
+      </div>
+      {% if not selected_run_ids %}
+      <p class="text-muted mb-0">左のリストからRunを選択すると、追い越しタイムラインが表示されます。</p>
+      {% elif not timeline_grouped %}
+      <p class="text-muted mb-0">選択したRunに記録されたタイムラインはありません。再処理ボタンを押すと既存の手動追い越しイベントから再計算できます。</p>
+      {% else %}
+      {% for run_id, entries in timeline_grouped.items() %}
+      {% set summary = timeline_summary.get(run_id) %}
+      {% if summary is none %}
+      {% set summary = {'total': entries|length, 'processed': 0, 'pending': entries|length} %}
       {% endif %}
-      {% if context_backlog_total %}
-      <span class="badge bg-warning text-dark rounded-pill">手動後処理待ち {{ context_backlog_total }}件</span>
+      <div class="mb-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <div>
+            <h6 class="mb-0">Run #{{ run_id }}{% if run_label_map.get(run_id) %}<span class="small text-muted"> / {{
+                run_label_map[run_id] }}</span>{% endif %}</h6>
+            <div class="small text-muted">記録 {{ summary['total'] }} 件 / 再処理済み {{ summary['processed'] }} 件 / 未処理 {{
+              summary['pending'] }} 件</div>
+            {% set backlog_pending = context_backlog_summary.get(run_id, 0) %}
+            {% if backlog_pending %}
+            <div class="small text-warning">手動後処理待ち {{ backlog_pending }} 件</div>
+            {% endif %}
+          </div>
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="badge bg-success text-light manual-timeline-status">再処理済み {{ summary['processed'] }}</span>
+            <span class="badge bg-warning text-dark manual-timeline-status">未処理 {{ summary['pending'] }}</span>
+            <form method="post" action="{{ url_for('main.manual_overtake_reprocess') }}" class="d-inline">
+              <input type="hidden" name="run_id" value="{{ run_id }}">
+              <button type="submit" class="btn btn-outline-primary btn-sm">このRunを再処理</button>
+            </form>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped table-bordered align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">フレーム</th>
+                <th scope="col">Group</th>
+                <th scope="col">ノート</th>
+                <th scope="col">イベントID</th>
+                <th scope="col">ステータス</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in entries %}
+              {% set processed = entry.last_processed_at %}
+              <tr{% if not processed %} class="table-warning" {% endif %}>
+                <td>{{ entry.timeline_id }}</td>
+                <td>
+                  <div>Frame {{ entry.frame_num }}</div>
+                  <div class="small text-muted">記録: {{ entry.created_at|default('-', true) }}</div>
+                </td>
+                <td>
+                  <span class="fw-semibold">{{ entry.overtaker_group_id }}</span>
+                  <span class="text-muted">→</span>
+                  <span class="fw-semibold">{{ entry.overtaken_group_id }}</span>
+                </td>
+                <td class="manual-timeline-note">{{ entry.notes|default('-', true) }}</td>
+                <td>
+                  {% if entry.last_event_id is not none %}
+                  <span class="badge bg-primary">{{ entry.last_event_id }}</span>
+                  {% else %}
+                  <span class="text-muted">-</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if processed %}
+                  <span class="badge bg-success text-light">再処理済み</span>
+                  <div class="small text-muted">最終再処理: {{ processed }}</div>
+                  {% else %}
+                  <span class="badge bg-warning text-dark">未処理</span>
+                  {% endif %}
+                  <div class="small text-muted">最終更新: {{ entry.updated_at|default('-', true) }}</div>
+                </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endfor %}
       {% endif %}
-      <form method="post" action="{{ url_for('main.manual_overtake_context_process') }}" class="d-inline">
-        {% for rid in selected_run_ids %}
-        <input type="hidden" name="run_id" value="{{ rid }}">
-        {% endfor %}
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="manualTimelineProcessButton"
-          data-manual-process-trigger="context"
-          data-process-url="{{ url_for('main.manual_overtake_context_process_api') }}"
-          data-status-url="{{ url_for('main.manual_overtake_context_backlog_status_api') }}" data-batch-size="5" {% if
-          not selected_run_ids and not context_backlog_total %}disabled{% endif %}>
-          手動追い越しで後処理
-        </button>
-      </form>
-      <form method="post" action="{{ url_for('main.manual_overtake_reprocess') }}" class="d-inline">
-        {% for rid in selected_run_ids %}
-        <input type="hidden" name="run_id" value="{{ rid }}">
-        {% endfor %}
-        <button type="submit" class="btn btn-outline-primary btn-sm" {% if not selected_run_ids %}disabled{% endif %}>
-          {% if selected_run_ids %}選択Runを再処理{% else %}Runを選択{% endif %}
-        </button>
-      </form>
     </div>
   </div>
-  <div class="card-body">
-    <div id="manualTimelineProcessStatus" class="mb-3 d-none"
-      data-backlog-summary='{{ (context_backlog_summary or {}) | tojson | safe }}'
-      data-backlog-status='{{ {"status_totals": context_backlog_status or {}, "pending_total": context_backlog_total, "backlog_total": context_backlog_status_total} | tojson | safe }}'>
-      <div class="d-flex align-items-center gap-2 mb-2">
-        <div class="spinner-border spinner-border-sm text-warning d-none" role="status" data-progress-spinner
-          aria-hidden="true"></div>
-        <div class="small" data-progress-label></div>
-      </div>
-      <div class="progress" style="height: 0.75rem;">
-        <div class="progress-bar" role="progressbar" data-progress-bar style="width: 0%;" aria-valuenow="0"
-          aria-valuemin="0" aria-valuemax="100">0%</div>
-      </div>
-      <div class="small text-muted mt-2" data-progress-note></div>
-      <div class="small text-warning mt-1 d-none" data-progress-notices></div>
+
+  <div class="card shadow-sm mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span>グループ出現フレーム コンテキスト一覧</span>
+      <span class="small text-muted">選択したRunの追い越しイベントに紐づく、追い越し側/追い越され側グループが映る全フレームのBBOXと速度・距離を確認できます。</span>
     </div>
-    {% if not selected_run_ids %}
-    <p class="text-muted mb-0">左のリストからRunを選択すると、追い越しタイムラインが表示されます。</p>
-    {% elif not timeline_grouped %}
-    <p class="text-muted mb-0">選択したRunに記録されたタイムラインはありません。再処理ボタンを押すと既存の手動追い越しイベントから再計算できます。</p>
-    {% else %}
-    {% for run_id, entries in timeline_grouped.items() %}
-    {% set summary = timeline_summary.get(run_id) %}
-    {% if summary is none %}
-    {% set summary = {'total': entries|length, 'processed': 0, 'pending': entries|length} %}
-    {% endif %}
-    <div class="mb-4">
-      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-        <div>
-          <h6 class="mb-0">Run #{{ run_id }}{% if run_label_map.get(run_id) %}<span class="small text-muted"> / {{
-              run_label_map[run_id] }}</span>{% endif %}</h6>
-          <div class="small text-muted">記録 {{ summary['total'] }} 件 / 再処理済み {{ summary['processed'] }} 件 / 未処理 {{
-            summary['pending'] }} 件</div>
-          {% set backlog_pending = context_backlog_summary.get(run_id, 0) %}
-          {% if backlog_pending %}
-          <div class="small text-warning">手動後処理待ち {{ backlog_pending }} 件</div>
-          {% endif %}
-        </div>
-        <div class="d-flex flex-wrap align-items-center gap-2">
-          <span class="badge bg-success text-light manual-timeline-status">再処理済み {{ summary['processed'] }}</span>
-          <span class="badge bg-warning text-dark manual-timeline-status">未処理 {{ summary['pending'] }}</span>
-          <form method="post" action="{{ url_for('main.manual_overtake_reprocess') }}" class="d-inline">
-            <input type="hidden" name="run_id" value="{{ run_id }}">
-            <button type="submit" class="btn btn-outline-primary btn-sm">このRunを再処理</button>
-          </form>
-        </div>
-      </div>
+    <div class="card-body">
       <div class="table-responsive">
-        <table class="table table-sm table-striped table-bordered align-middle mb-0">
+        <table class="table table-sm table-striped align-middle mb-0">
           <thead class="table-light">
             <tr>
-              <th scope="col">ID</th>
-              <th scope="col">フレーム</th>
-              <th scope="col">Group</th>
-              <th scope="col">ノート</th>
               <th scope="col">イベントID</th>
-              <th scope="col">ステータス</th>
+              <th scope="col">Run</th>
+              <th scope="col">動画名</th>
+              <th scope="col">オフセット</th>
+              <th scope="col">フレーム</th>
+              <th scope="col">動画時間(s)</th>
+              <th scope="col">追い越し側 Group/Track</th>
+              <th scope="col">追い越し側BBOX(x1,y1,x2,y2)</th>
+              <th scope="col">追い越し側 速度</th>
+              <th scope="col">追い越され側 Group/Track</th>
+              <th scope="col">追い越され側BBOX(x1,y1,x2,y2)</th>
+              <th scope="col">追い越され側 速度</th>
+              <th scope="col">離隔距離</th>
             </tr>
           </thead>
           <tbody>
-            {% for entry in entries %}
-            {% set processed = entry.last_processed_at %}
-            <tr{% if not processed %} class="table-warning" {% endif %}>
-              <td>{{ entry.timeline_id }}</td>
+            {% if context_rows %}
+            {% for row in context_rows %}
+            <tr>
+              <td>{{ row.manual_event_id }}</td>
+              <td>{{ row.run_id }}</td>
+              <td>{{ row.video_filename or '-' }}</td>
+              <td>{{ row.offset_frames }}</td>
+              <td>{{ row.frame_num }}</td>
+              <td>{{ row.video_time_s is not none and "%.2f"|format(row.video_time_s) or '-' }}</td>
               <td>
-                <div>Frame {{ entry.frame_num }}</div>
-                <div class="small text-muted">記録: {{ entry.created_at|default('-', true) }}</div>
+                <div>Group {{ row.overtaker_group_id }}</div>
+                <div class="text-muted small">Track {{ row.overtaker_track_id if row.overtaker_track_id is not none else
+                  '-' }}</div>
               </td>
               <td>
-                <span class="fw-semibold">{{ entry.overtaker_group_id }}</span>
-                <span class="text-muted">→</span>
-                <span class="fw-semibold">{{ entry.overtaken_group_id }}</span>
-              </td>
-              <td class="manual-timeline-note">{{ entry.notes|default('-', true) }}</td>
-              <td>
-                {% if entry.last_event_id is not none %}
-                <span class="badge bg-primary">{{ entry.last_event_id }}</span>
+                {% set ctx_ot_x1 = row.overtaker_x1 %}
+                {% set ctx_ot_y1 = row.overtaker_y1 %}
+                {% set ctx_ot_x2 = row.overtaker_x2 %}
+                {% set ctx_ot_y2 = row.overtaker_y2 %}
+                {% if ctx_ot_x1 is not none or ctx_ot_y1 is not none or ctx_ot_x2 is not none or ctx_ot_y2 is not none
+                %}
+                <div class="text-muted small">({{ ctx_ot_x1 is not none and "%.1f"|format(ctx_ot_x1) or '-' }}, {{
+                  ctx_ot_y1 is not none and "%.1f"|format(ctx_ot_y1) or '-' }}) → ({{ ctx_ot_x2 is not none and
+                  "%.1f"|format(ctx_ot_x2) or '-' }}, {{ ctx_ot_y2 is not none and "%.1f"|format(ctx_ot_y2) or '-' }})
+                </div>
                 {% else %}
-                <span class="text-muted">-</span>
+                -
                 {% endif %}
               </td>
               <td>
-                {% if processed %}
-                <span class="badge bg-success text-light">再処理済み</span>
-                <div class="small text-muted">最終再処理: {{ processed }}</div>
-                {% else %}
-                <span class="badge bg-warning text-dark">未処理</span>
+                {% if row.overtaker_speed_km_h is not none %}
+                <div>{{ "%.1f"|format(row.overtaker_speed_km_h) }} km/h</div>
                 {% endif %}
-                <div class="small text-muted">最終更新: {{ entry.updated_at|default('-', true) }}</div>
+                {% if row.overtaker_pixel_speed is not none %}
+                <div class="text-muted small">{{ "%.1f"|format(row.overtaker_pixel_speed) }} px/s</div>
+                {% endif %}
+                {% if row.overtaker_pixel_speed_frame is not none %}
+                <div class="text-muted small">{{ "%.1f"|format(row.overtaker_pixel_speed_frame) }} px/f</div>
+                {% endif %}
               </td>
-              </tr>
-              {% endfor %}
+              <td>
+                <div>Group {{ row.overtaken_group_id }}</div>
+                <div class="text-muted small">Track {{ row.overtaken_track_id if row.overtaken_track_id is not none else
+                  '-' }}</div>
+              </td>
+              <td>
+                {% set ctx_on_x1 = row.overtaken_x1 %}
+                {% set ctx_on_y1 = row.overtaken_y1 %}
+                {% set ctx_on_x2 = row.overtaken_x2 %}
+                {% set ctx_on_y2 = row.overtaken_y2 %}
+                {% if ctx_on_x1 is not none or ctx_on_y1 is not none or ctx_on_x2 is not none or ctx_on_y2 is not none
+                %}
+                <div class="text-muted small">({{ ctx_on_x1 is not none and "%.1f"|format(ctx_on_x1) or '-' }}, {{
+                  ctx_on_y1 is not none and "%.1f"|format(ctx_on_y1) or '-' }}) → ({{ ctx_on_x2 is not none and
+                  "%.1f"|format(ctx_on_x2) or '-' }}, {{ ctx_on_y2 is not none and "%.1f"|format(ctx_on_y2) or '-' }})
+                </div>
+                {% else %}
+                -
+                {% endif %}
+              </td>
+              <td>
+                {% if row.overtaken_speed_km_h is not none %}
+                <div>{{ "%.1f"|format(row.overtaken_speed_km_h) }} km/h</div>
+                {% endif %}
+                {% if row.overtaken_pixel_speed is not none %}
+                <div class="text-muted small">{{ "%.1f"|format(row.overtaken_pixel_speed) }} px/s</div>
+                {% endif %}
+                {% if row.overtaken_pixel_speed_frame is not none %}
+                <div class="text-muted small">{{ "%.1f"|format(row.overtaken_pixel_speed_frame) }} px/f</div>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.clearance_distance_cm is not none %}
+                <div>{{ "%.0f"|format(row.clearance_distance_cm) }} cm</div>
+                {% endif %}
+                {% if row.clearance_distance_m is not none %}
+                <div class="text-muted small">{{ "%.2f"|format(row.clearance_distance_m) }} m</div>
+                {% endif %}
+                {% if row.clearance_distance_px is not none %}
+                <div class="text-muted small">{{ "%.0f"|format(row.clearance_distance_px) }} px</div>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+              <td colspan="13" class="text-center text-muted py-3">追い越し側/追い越され側グループのコンテキストデータがまだ登録されていません。</td>
+            </tr>
+            {% endif %}
           </tbody>
         </table>
       </div>
     </div>
-    {% endfor %}
-    {% endif %}
   </div>
-</div>
 
-<div class="card shadow-sm mt-4">
-  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <span>グループ出現フレーム コンテキスト一覧</span>
-    <span class="small text-muted">選択したRunの追い越しイベントに紐づく、追い越し側/追い越され側グループが映る全フレームのBBOXと速度・距離を確認できます。</span>
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <button type="button" class="btn btn-outline-primary btn-sm" id="manualDbCheckButton"
+      data-check-url="{{ url_for('main.manual_overtake_db_link_check') }}" data-default-label="手動追い越しDB連携確認"
+      data-sample-limit="5">
+      手動追い越しDB連携確認
+    </button>
+    <div id="manualDbCheckSummary" class="small flex-grow-1 text-muted"></div>
   </div>
-  <div class="card-body">
-    <div class="table-responsive">
-      <table class="table table-sm table-striped align-middle mb-0">
-        <thead class="table-light">
-          <tr>
-            <th scope="col">イベントID</th>
-            <th scope="col">Run</th>
-            <th scope="col">動画名</th>
-            <th scope="col">オフセット</th>
-            <th scope="col">フレーム</th>
-            <th scope="col">動画時間(s)</th>
-            <th scope="col">追い越し側 Group/Track</th>
-            <th scope="col">追い越し側BBOX(x1,y1,x2,y2)</th>
-            <th scope="col">追い越し側 速度</th>
-            <th scope="col">追い越され側 Group/Track</th>
-            <th scope="col">追い越され側BBOX(x1,y1,x2,y2)</th>
-            <th scope="col">追い越され側 速度</th>
-            <th scope="col">離隔距離</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if context_rows %}
-          {% for row in context_rows %}
-          <tr>
-            <td>{{ row.manual_event_id }}</td>
-            <td>{{ row.run_id }}</td>
-            <td>{{ row.video_filename or '-' }}</td>
-            <td>{{ row.offset_frames }}</td>
-            <td>{{ row.frame_num }}</td>
-            <td>{{ row.video_time_s is not none and "%.2f"|format(row.video_time_s) or '-' }}</td>
-            <td>
-              <div>Group {{ row.overtaker_group_id }}</div>
-              <div class="text-muted small">Track {{ row.overtaker_track_id if row.overtaker_track_id is not none else
-                '-' }}</div>
-            </td>
-            <td>
-              {% set ctx_ot_x1 = row.overtaker_x1 %}
-              {% set ctx_ot_y1 = row.overtaker_y1 %}
-              {% set ctx_ot_x2 = row.overtaker_x2 %}
-              {% set ctx_ot_y2 = row.overtaker_y2 %}
-              {% if ctx_ot_x1 is not none or ctx_ot_y1 is not none or ctx_ot_x2 is not none or ctx_ot_y2 is not none %}
-              <div class="text-muted small">({{ ctx_ot_x1 is not none and "%.1f"|format(ctx_ot_x1) or '-' }}, {{
-                ctx_ot_y1 is not none and "%.1f"|format(ctx_ot_y1) or '-' }}) → ({{ ctx_ot_x2 is not none and
-                "%.1f"|format(ctx_ot_x2) or '-' }}, {{ ctx_ot_y2 is not none and "%.1f"|format(ctx_ot_y2) or '-' }})
-              </div>
-              {% else %}
-              -
-              {% endif %}
-            </td>
-            <td>
-              {% if row.overtaker_speed_km_h is not none %}
-              <div>{{ "%.1f"|format(row.overtaker_speed_km_h) }} km/h</div>
-              {% endif %}
-              {% if row.overtaker_pixel_speed is not none %}
-              <div class="text-muted small">{{ "%.1f"|format(row.overtaker_pixel_speed) }} px/s</div>
-              {% endif %}
-              {% if row.overtaker_pixel_speed_frame is not none %}
-              <div class="text-muted small">{{ "%.1f"|format(row.overtaker_pixel_speed_frame) }} px/f</div>
-              {% endif %}
-            </td>
-            <td>
-              <div>Group {{ row.overtaken_group_id }}</div>
-              <div class="text-muted small">Track {{ row.overtaken_track_id if row.overtaken_track_id is not none else
-                '-' }}</div>
-            </td>
-            <td>
-              {% set ctx_on_x1 = row.overtaken_x1 %}
-              {% set ctx_on_y1 = row.overtaken_y1 %}
-              {% set ctx_on_x2 = row.overtaken_x2 %}
-              {% set ctx_on_y2 = row.overtaken_y2 %}
-              {% if ctx_on_x1 is not none or ctx_on_y1 is not none or ctx_on_x2 is not none or ctx_on_y2 is not none %}
-              <div class="text-muted small">({{ ctx_on_x1 is not none and "%.1f"|format(ctx_on_x1) or '-' }}, {{
-                ctx_on_y1 is not none and "%.1f"|format(ctx_on_y1) or '-' }}) → ({{ ctx_on_x2 is not none and
-                "%.1f"|format(ctx_on_x2) or '-' }}, {{ ctx_on_y2 is not none and "%.1f"|format(ctx_on_y2) or '-' }})
-              </div>
-              {% else %}
-              -
-              {% endif %}
-            </td>
-            <td>
-              {% if row.overtaken_speed_km_h is not none %}
-              <div>{{ "%.1f"|format(row.overtaken_speed_km_h) }} km/h</div>
-              {% endif %}
-              {% if row.overtaken_pixel_speed is not none %}
-              <div class="text-muted small">{{ "%.1f"|format(row.overtaken_pixel_speed) }} px/s</div>
-              {% endif %}
-              {% if row.overtaken_pixel_speed_frame is not none %}
-              <div class="text-muted small">{{ "%.1f"|format(row.overtaken_pixel_speed_frame) }} px/f</div>
-              {% endif %}
-            </td>
-            <td>
-              {% if row.clearance_distance_cm is not none %}
-              <div>{{ "%.0f"|format(row.clearance_distance_cm) }} cm</div>
-              {% endif %}
-              {% if row.clearance_distance_m is not none %}
-              <div class="text-muted small">{{ "%.2f"|format(row.clearance_distance_m) }} m</div>
-              {% endif %}
-              {% if row.clearance_distance_px is not none %}
-              <div class="text-muted small">{{ "%.0f"|format(row.clearance_distance_px) }} px</div>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-          {% else %}
-          <tr>
-            <td colspan="13" class="text-center text-muted py-3">追い越し側/追い越され側グループのコンテキストデータがまだ登録されていません。</td>
-          </tr>
-          {% endif %}
-        </tbody>
-      </table>
+
+  <div id="manualViewMessage" class="alert alert-info small d-none"></div>
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+    <div class="input-group input-group-sm" style="max-width: 320px;">
+      <span class="input-group-text">イベント検索</span>
+      <input type="search" id="manualViewSearch" class="form-control" placeholder="Run / Group / Track などのキーワード">
     </div>
+    <div id="manualViewSearchSummary" class="small text-muted"></div>
   </div>
-</div>
 
-<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-  <button type="button" class="btn btn-outline-primary btn-sm" id="manualDbCheckButton"
-    data-check-url="{{ url_for('main.manual_overtake_db_link_check') }}" data-default-label="手動追い越しDB連携確認"
-    data-sample-limit="5">
-    手動追い越しDB連携確認
-  </button>
-  <div id="manualDbCheckSummary" class="small flex-grow-1 text-muted"></div>
-</div>
-
-<div id="manualViewMessage" class="alert alert-info small d-none"></div>
-
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-  <div class="input-group input-group-sm" style="max-width: 320px;">
-    <span class="input-group-text">イベント検索</span>
-    <input type="search" id="manualViewSearch" class="form-control" placeholder="Run / Group / Track などのキーワード">
+  <div class="table-responsive">
+    <table id="manualViewTable" class="table table-hover table-striped table-sm align-middle"
+      data-delete-url-base="{{ url_for('main.manual_overtake_delete', manual_event_id=0)[:-1] }}"
+      data-scale-info-base="{{ url_for('main.manual_overtake_scale_info', manual_event_id=0)[:-1] }}"
+      data-scale-image-base="{{ url_for('main.manual_overtake_scale_image', manual_event_id=0)[:-1] }}"
+      data-snapshot-info-base="{{ url_for('main.manual_overtake_snapshot_info', manual_event_id=0)[:-1] }}"
+      data-snapshot-image-base="{{ url_for('main.manual_overtake_snapshot_image', manual_event_id=0)[:-1] }}">
+      <thead class="table-light">
+        <tr>
+          <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">イベント概要</th>
+          <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">追い越し側</th>
+          <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">追い越され側</th>
+          <th scope="col" class="text-nowrap align-top" style="min-width: 240px;">Distance / scale</th>
+          <th scope="col" class="text-nowrap align-top" style="min-width: 140px;">操作</th>
+        </tr>
+      </thead>
+      <tbody id="manualViewBody">
+        {% if events %}
+        {% for event in events %}
+        <tr data-event-row="1">
+          <td class="align-top">
+            <div class="fw-bold">ID {{ event.manual_event_id }}</div>
+            <div class="small text-muted">Run {{ event.run_id }} / Frame {{ event.frame_num }}</div>
+            <div class="small">{{ event.video_filename or '-' }}</div>
+            <div class="small text-muted">{{ event.video_time_s is not none and "%.2f秒"|format(event.video_time_s) or
+              "動画時間 -" }}</div>
+            <div class="small text-muted">登録: {{ event.created_at or '-' }}</div>
+            {% if event.notes %}
+            <div class="badge bg-light text-dark mt-1">メモ: {{ event.notes }}</div>
+            {% endif %}
+          </td>
+          <td class="align-top">
+            <div class="fw-bold">Group {{ event.overtaker_group_id }}</div>
+            <div class="small text-muted">{{ event.overtaker_class_name or '-' }}</div>
+            <div class="small text-muted">Track {{ event.overtaker_track_id if event.overtaker_track_id is not none else
+              '-' }}</div>
+            {% set ot_mx = event.overtaker_measure_x %}
+            {% set ot_my = event.overtaker_measure_y %}
+            <div class="small text-muted">測定点: {{ ot_mx is not none and "%.1f"|format(ot_mx) or '-' }}, {{ ot_my is not
+              none and "%.1f"|format(ot_my) or '-' }}</div>
+            {% set ot_x1 = event.overtaker_x1 %}
+            {% set ot_y1 = event.overtaker_y1 %}
+            {% set ot_x2 = event.overtaker_x2 %}
+            {% set ot_y2 = event.overtaker_y2 %}
+            <div class="small text-muted">BBOX: {% if ot_x1 is not none or ot_y1 is not none or ot_x2 is not none or
+              ot_y2
+              is not none %}({{ ot_x1 is not none and "%.1f"|format(ot_x1) or '-' }}, {{ ot_y1 is not none and
+              "%.1f"|format(ot_y1) or '-' }}) → ({{ ot_x2 is not none and "%.1f"|format(ot_x2) or '-' }}, {{ ot_y2 is
+              not
+              none and "%.1f"|format(ot_y2) or '-' }}){% else %}-{% endif %}</div>
+            <div class="mt-1">
+              <span class="badge bg-primary text-light">{{ event.overtaker_speed_km_h is not none and "%.1f
+                km/h"|format(event.overtaker_speed_km_h) or "速度 -" }}</span>
+              {% if event.overtaker_pixel_speed is not none %}
+              <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaker_pixel_speed) }}
+                px/s</span>
+              {% endif %}
+              {% if event.overtaker_pixel_speed_frame is not none %}
+              <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaker_pixel_speed_frame) }}
+                px/f</span>
+              {% endif %}
+            </div>
+          </td>
+          <td class="align-top">
+            <div class="fw-bold">Group {{ event.overtaken_group_id }}</div>
+            <div class="small text-muted">{{ event.overtaken_class_name or '-' }}</div>
+            <div class="small text-muted">Track {{ event.overtaken_track_id if event.overtaken_track_id is not none else
+              '-' }}</div>
+            {% set on_mx = event.overtaken_measure_x %}
+            {% set on_my = event.overtaken_measure_y %}
+            <div class="small text-muted">測定点: {{ on_mx is not none and "%.1f"|format(on_mx) or '-' }}, {{ on_my is not
+              none and "%.1f"|format(on_my) or '-' }}</div>
+            {% set on_x1 = event.overtaken_x1 %}
+            {% set on_y1 = event.overtaken_y1 %}
+            {% set on_x2 = event.overtaken_x2 %}
+            {% set on_y2 = event.overtaken_y2 %}
+            <div class="small text-muted">BBOX: {% if on_x1 is not none or on_y1 is not none or on_x2 is not none or
+              on_y2
+              is not none %}({{ on_x1 is not none and "%.1f"|format(on_x1) or '-' }}, {{ on_y1 is not none and
+              "%.1f"|format(on_y1) or '-' }}) → ({{ on_x2 is not none and "%.1f"|format(on_x2) or '-' }}, {{ on_y2 is
+              not
+              none and "%.1f"|format(on_y2) or '-' }}){% else %}-{% endif %}</div>
+            <div class="mt-1">
+              <span class="badge bg-primary text-light">{{ event.overtaken_speed_km_h is not none and "%.1f
+                km/h"|format(event.overtaken_speed_km_h) or "速度 -" }}</span>
+              {% if event.overtaken_pixel_speed is not none %}
+              <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaken_pixel_speed) }}
+                px/s</span>
+              {% endif %}
+              {% if event.overtaken_pixel_speed_frame is not none %}
+              <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaken_pixel_speed_frame) }}
+                px/f</span>
+              {% endif %}
+            </div>
+          </td>
+          <td class="align-top">
+            <div>
+              <span class="fw-bold">接近距離:</span>
+              {{ event.approach_distance_m is not none and "%.2f m"|format(event.approach_distance_m) or '-' }}
+            </div>
+            <div>
+              <span class="fw-bold">離隔距離:</span>
+              {% if event.clearance_distance_cm is not none %}
+              {{ "%.0f cm"|format(event.clearance_distance_cm) }}
+              {% elif event.clearance_distance_m is not none %}
+              {{ "%.2f m"|format(event.clearance_distance_m) }}
+              {% else %}
+              -
+              {% endif %}
+              {% if event.clearance_distance_px is not none %}
+              <span class="text-muted small ms-1">({{ "%.0f"|format(event.clearance_distance_px) }} px)</span>
+              {% endif %}
+              {% if event.clearance_distance_px_ratio is not none %}
+              <span class="badge bg-light text-dark border ms-1">比率 {{ "%.1f"|format(event.clearance_distance_px_ratio)
+                }}%</span>
+              {% endif %}
+            </div>
+            <div class="small text-muted mt-2">追い越し側 白線距離:</div>
+            <div class="small">
+              {{ event.overtaker_line_distance_cm is not none and "%.0f cm"|format(event.overtaker_line_distance_cm) or
+              event.overtaker_line_distance_m is not none and "%.2f m"|format(event.overtaker_line_distance_m) or '-' }}
+              / {{ event.overtaker_line_distance_px is not none and "%.0f px"|format(event.overtaker_line_distance_px)
+              or
+              '-' }}
+              {% if event.overtaker_line_distance_px_ratio is not none %}
+              <span class="text-muted">(比率 {{ "%.1f"|format(event.overtaker_line_distance_px_ratio) }}%)</span>
+              {% endif %}
+            </div>
+            <div class="small text-muted mt-2">追い越され側 白線距離:</div>
+            <div class="small">
+              {{ event.overtaken_line_distance_cm is not none and "%.0f cm"|format(event.overtaken_line_distance_cm) or
+              event.overtaken_line_distance_m is not none and "%.2f m"|format(event.overtaken_line_distance_m) or '-' }}
+              / {{ event.overtaken_line_distance_px is not none and "%.0f px"|format(event.overtaken_line_distance_px)
+              or
+              '-' }}
+              {% if event.overtaken_line_distance_px_ratio is not none %}
+              <span class="text-muted">(比率 {{ "%.1f"|format(event.overtaken_line_distance_px_ratio) }}%)</span>
+              {% endif %}
+            </div>
+          </td>
+          <td class="text-end text-nowrap align-top">
+            <div class="d-flex flex-column gap-2 align-items-end">
+              <button type="button" class="btn btn-outline-success btn-sm"
+                data-snapshot-preview="{{ event.manual_event_id }}">追い越し写真</button>
+              <button type="button" class="btn btn-outline-primary btn-sm"
+                data-scale-preview="{{ event.manual_event_id }}">View scale</button>
+              <button type="button" class="btn btn-outline-danger btn-sm"
+                data-manual-delete="{{ event.manual_event_id }}">削除</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        <tr data-no-match-row class="d-none">
+          <td colspan="5" class="text-center text-muted py-4">検索条件に一致する手動追い越しイベントがありません。</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="text-center text-muted py-4">該当する手動追い越しイベントがありません。</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
   </div>
-  <div id="manualViewSearchSummary" class="small text-muted"></div>
-</div>
-
-<div class="table-responsive">
-  <table id="manualViewTable" class="table table-hover table-striped table-sm align-middle"
-    data-delete-url-base="{{ url_for('main.manual_overtake_delete', manual_event_id=0)[:-1] }}"
-    data-scale-info-base="{{ url_for('main.manual_overtake_scale_info', manual_event_id=0)[:-1] }}"
-    data-scale-image-base="{{ url_for('main.manual_overtake_scale_image', manual_event_id=0)[:-1] }}"
-    data-snapshot-info-base="{{ url_for('main.manual_overtake_snapshot_info', manual_event_id=0)[:-1] }}"
-    data-snapshot-image-base="{{ url_for('main.manual_overtake_snapshot_image', manual_event_id=0)[:-1] }}">
-    <thead class="table-light">
-      <tr>
-        <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">イベント概要</th>
-        <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">追い越し側</th>
-        <th scope="col" class="text-nowrap align-top" style="min-width: 220px;">追い越され側</th>
-        <th scope="col" class="text-nowrap align-top" style="min-width: 240px;">Distance / scale</th>
-        <th scope="col" class="text-nowrap align-top" style="min-width: 140px;">操作</th>
-      </tr>
-    </thead>
-    <tbody id="manualViewBody">
-      {% if events %}
-      {% for event in events %}
-      <tr data-event-row="1">
-        <td class="align-top">
-          <div class="fw-bold">ID {{ event.manual_event_id }}</div>
-          <div class="small text-muted">Run {{ event.run_id }} / Frame {{ event.frame_num }}</div>
-          <div class="small">{{ event.video_filename or '-' }}</div>
-          <div class="small text-muted">{{ event.video_time_s is not none and "%.2f秒"|format(event.video_time_s) or
-            "動画時間 -" }}</div>
-          <div class="small text-muted">登録: {{ event.created_at or '-' }}</div>
-          {% if event.notes %}
-          <div class="badge bg-light text-dark mt-1">メモ: {{ event.notes }}</div>
-          {% endif %}
-        </td>
-        <td class="align-top">
-          <div class="fw-bold">Group {{ event.overtaker_group_id }}</div>
-          <div class="small text-muted">{{ event.overtaker_class_name or '-' }}</div>
-          <div class="small text-muted">Track {{ event.overtaker_track_id if event.overtaker_track_id is not none else
-            '-' }}</div>
-          {% set ot_mx = event.overtaker_measure_x %}
-          {% set ot_my = event.overtaker_measure_y %}
-          <div class="small text-muted">測定点: {{ ot_mx is not none and "%.1f"|format(ot_mx) or '-' }}, {{ ot_my is not
-            none and "%.1f"|format(ot_my) or '-' }}</div>
-          {% set ot_x1 = event.overtaker_x1 %}
-          {% set ot_y1 = event.overtaker_y1 %}
-          {% set ot_x2 = event.overtaker_x2 %}
-          {% set ot_y2 = event.overtaker_y2 %}
-          <div class="small text-muted">BBOX: {% if ot_x1 is not none or ot_y1 is not none or ot_x2 is not none or ot_y2
-            is not none %}({{ ot_x1 is not none and "%.1f"|format(ot_x1) or '-' }}, {{ ot_y1 is not none and
-            "%.1f"|format(ot_y1) or '-' }}) → ({{ ot_x2 is not none and "%.1f"|format(ot_x2) or '-' }}, {{ ot_y2 is not
-            none and "%.1f"|format(ot_y2) or '-' }}){% else %}-{% endif %}</div>
-          <div class="mt-1">
-            <span class="badge bg-primary text-light">{{ event.overtaker_speed_km_h is not none and "%.1f
-              km/h"|format(event.overtaker_speed_km_h) or "速度 -" }}</span>
-            {% if event.overtaker_pixel_speed is not none %}
-            <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaker_pixel_speed) }}
-              px/s</span>
-            {% endif %}
-            {% if event.overtaker_pixel_speed_frame is not none %}
-            <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaker_pixel_speed_frame) }}
-              px/f</span>
-            {% endif %}
-          </div>
-        </td>
-        <td class="align-top">
-          <div class="fw-bold">Group {{ event.overtaken_group_id }}</div>
-          <div class="small text-muted">{{ event.overtaken_class_name or '-' }}</div>
-          <div class="small text-muted">Track {{ event.overtaken_track_id if event.overtaken_track_id is not none else
-            '-' }}</div>
-          {% set on_mx = event.overtaken_measure_x %}
-          {% set on_my = event.overtaken_measure_y %}
-          <div class="small text-muted">測定点: {{ on_mx is not none and "%.1f"|format(on_mx) or '-' }}, {{ on_my is not
-            none and "%.1f"|format(on_my) or '-' }}</div>
-          {% set on_x1 = event.overtaken_x1 %}
-          {% set on_y1 = event.overtaken_y1 %}
-          {% set on_x2 = event.overtaken_x2 %}
-          {% set on_y2 = event.overtaken_y2 %}
-          <div class="small text-muted">BBOX: {% if on_x1 is not none or on_y1 is not none or on_x2 is not none or on_y2
-            is not none %}({{ on_x1 is not none and "%.1f"|format(on_x1) or '-' }}, {{ on_y1 is not none and
-            "%.1f"|format(on_y1) or '-' }}) → ({{ on_x2 is not none and "%.1f"|format(on_x2) or '-' }}, {{ on_y2 is not
-            none and "%.1f"|format(on_y2) or '-' }}){% else %}-{% endif %}</div>
-          <div class="mt-1">
-            <span class="badge bg-primary text-light">{{ event.overtaken_speed_km_h is not none and "%.1f
-              km/h"|format(event.overtaken_speed_km_h) or "速度 -" }}</span>
-            {% if event.overtaken_pixel_speed is not none %}
-            <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaken_pixel_speed) }}
-              px/s</span>
-            {% endif %}
-            {% if event.overtaken_pixel_speed_frame is not none %}
-            <span class="badge bg-secondary text-light ms-1">{{ "%.1f"|format(event.overtaken_pixel_speed_frame) }}
-              px/f</span>
-            {% endif %}
-          </div>
-        </td>
-        <td class="align-top">
-          <div>
-            <span class="fw-bold">接近距離:</span>
-            {{ event.approach_distance_m is not none and "%.2f m"|format(event.approach_distance_m) or '-' }}
-          </div>
-          <div>
-            <span class="fw-bold">離隔距離:</span>
-            {% if event.clearance_distance_cm is not none %}
-            {{ "%.0f cm"|format(event.clearance_distance_cm) }}
-            {% elif event.clearance_distance_m is not none %}
-            {{ "%.2f m"|format(event.clearance_distance_m) }}
-            {% else %}
-            -
-            {% endif %}
-            {% if event.clearance_distance_px is not none %}
-            <span class="text-muted small ms-1">({{ "%.0f"|format(event.clearance_distance_px) }} px)</span>
-            {% endif %}
-            {% if event.clearance_distance_px_ratio is not none %}
-            <span class="badge bg-light text-dark border ms-1">比率 {{ "%.1f"|format(event.clearance_distance_px_ratio)
-              }}%</span>
-            {% endif %}
-          </div>
-          <div class="small text-muted mt-2">追い越し側 白線距離:</div>
-          <div class="small">
-            {{ event.overtaker_line_distance_cm is not none and "%.0f cm"|format(event.overtaker_line_distance_cm) or
-            event.overtaker_line_distance_m is not none and "%.2f m"|format(event.overtaker_line_distance_m) or '-' }}
-            / {{ event.overtaker_line_distance_px is not none and "%.0f px"|format(event.overtaker_line_distance_px) or
-            '-' }}
-            {% if event.overtaker_line_distance_px_ratio is not none %}
-            <span class="text-muted">(比率 {{ "%.1f"|format(event.overtaker_line_distance_px_ratio) }}%)</span>
-            {% endif %}
-          </div>
-          <div class="small text-muted mt-2">追い越され側 白線距離:</div>
-          <div class="small">
-            {{ event.overtaken_line_distance_cm is not none and "%.0f cm"|format(event.overtaken_line_distance_cm) or
-            event.overtaken_line_distance_m is not none and "%.2f m"|format(event.overtaken_line_distance_m) or '-' }}
-            / {{ event.overtaken_line_distance_px is not none and "%.0f px"|format(event.overtaken_line_distance_px) or
-            '-' }}
-            {% if event.overtaken_line_distance_px_ratio is not none %}
-            <span class="text-muted">(比率 {{ "%.1f"|format(event.overtaken_line_distance_px_ratio) }}%)</span>
-            {% endif %}
-          </div>
-        </td>
-        <td class="text-end text-nowrap align-top">
-          <div class="d-flex flex-column gap-2 align-items-end">
-            <button type="button" class="btn btn-outline-success btn-sm"
-              data-snapshot-preview="{{ event.manual_event_id }}">追い越し写真</button>
-            <button type="button" class="btn btn-outline-primary btn-sm"
-              data-scale-preview="{{ event.manual_event_id }}">View scale</button>
-            <button type="button" class="btn btn-outline-danger btn-sm"
-              data-manual-delete="{{ event.manual_event_id }}">削除</button>
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-      <tr data-no-match-row class="d-none">
-        <td colspan="5" class="text-center text-muted py-4">検索条件に一致する手動追い越しイベントがありません。</td>
-      </tr>
-      {% else %}
-      <tr>
-        <td colspan="5" class="text-center text-muted py-4">該当する手動追い越しイベントがありません。</td>
-      </tr>
-      {% endif %}
-    </tbody>
-  </table>
-</div>
 
 </div>
 
@@ -1047,10 +1055,14 @@
         noteParts.push(`残り ${pendingTotal} 件`);
       }
 
-      const processing = pendingTotal > 0;
+      const processing = (pendingTotal > 0) && timelineProcessing;
+      // When pending items depend on a manual trigger, show a waiting message if not processing
       const message = processing
         ? '手動追い越しで後処理の進捗を表示しています...'
-        : '手動追い越し後処理の履歴を表示しています。';
+        : (pendingTotal > 0
+          ? `手動後処理待ちが ${pendingTotal} 件あります。「手動追い越しで後処理」ボタンで実行できます。`
+          : '手動追い越し後処理の履歴を表示しています。');
+
 
       return {
         visible: true,
@@ -2042,9 +2054,10 @@
         });
       });
 
-      if (statusUrl) {
-        refreshTimelineStatus(statusUrl, { force: true });
-      }
+      // if (statusUrl) {
+      //   refreshTimelineStatus(statusUrl, { force: true });
+      // }
+
     }
 
     if (runSelect) {

@@ -13,8 +13,11 @@ from datetime import datetime
 import tempfile
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from ultralytics import YOLO
-from dotenv import load_dotenv
 from tqdm import tqdm
+from dotenv import load_dotenv
+
+# .envを最優先で読み込む（db_managerの初期化に必要）
+load_dotenv()
 
 from .db_manager import (
     MAIN_DB_PATH,
@@ -25,24 +28,25 @@ from .db_manager import (
     update_process_log,
     log_error,
     init_db,
+    delete_runs_for_video,
+    get_manual_events_for_run,
+    restore_manual_events,
+    update_run_profile,
 )
-from .all_save import create_all_save, create_csv_bundle
-from .group_id import assign_group_ids
-from .speed import assign_kinematics
-from .overtake import assign_overtake, summarize_run_overtakes
-from .approach_distance import assign_approach_and_clearance
-from .lane_distance import assign_lane_distance
-from .inter_vehicle_distance import analyze_proximity
-from .ttc_calculator import assign_ttc
-from .folder_config import load_folder_settings_with_flag
-from .class_filters import is_vehicle_class
 from .resource_monitor import (
     capture_system_metrics,
     configure_cuda_memory_budget,
     recommend_parallelism,
 )
-
-load_dotenv()
+from .class_filters import is_vehicle_class, vehicle_allowed_classes
+from .group_id import assign_group_ids
+from .kinematics_analyzer import assign_kinematics
+from .overtake import assign_overtake, summarize_run_overtakes, _export_overtake_snapshots
+from .approach_distance import assign_approach_and_clearance
+from .lane_distance import assign_lane_distance
+from .inter_vehicle_distance import analyze_proximity
+from .ttc_calculator import assign_ttc
+from .folder_config import load_folder_settings_with_flag
 MODEL_FILES_PATH = os.getenv("Model_files", "models").strip('"')
 OPT_FILES_PATH = os.getenv("Opt_files", "output").strip('"')
 
@@ -578,9 +582,9 @@ def run_postprocess_pipeline_sync(run_id: int) -> tuple[List[str], List[str]]:
     steps: List[tuple[str, Callable[[int], None]]] = [
         ("グループID", assign_group_ids),
         ("運動学", assign_kinematics),
+        ("白線距離", assign_lane_distance),
         ("追い越し", assign_overtake),
         ("接近/離隔", assign_approach_and_clearance),
-        ("白線距離", assign_lane_distance),
         ("車両間距離", analyze_proximity),
         ("TTC", assign_ttc),
     ]
@@ -594,8 +598,79 @@ def run_postprocess_pipeline_sync(run_id: int) -> tuple[List[str], List[str]]:
             else:
                 completed.append(label)
         except Exception as exc:  # noqa: BLE001
+            import traceback
+            traceback.print_exc()
             errors.append(f"{label}: {exc}")
     return completed, errors
+
+def regenerate_manual_snapshots(
+    run_id: int, 
+    events: list, 
+    output_folder: str, 
+    video_filename: str, 
+    source_path: str, 
+    folder_alias: str, 
+    calibration_profile: str
+):
+    """
+    バックアップされた手動イベントデータからスナップショットリクエストを構築し、
+    新しい出力フォルダに画像を再生成する。
+    """
+    if not events:
+        return
+
+    snapshot_requests = []
+    for e in events:
+        # DBカラムからスナップショットリクエスト形式へ変換
+        # 必須: frame, car_group, bike_group, measures, boxes
+        
+        # 座標データが存在しない場合はスキップ (最低限 boxが必要)
+        if e.get('overtaker_x1') is None or e.get('overtaken_x1') is None:
+            continue
+
+        req = {
+            "frame": e.get("frame_num"),
+            "car_group": e.get("overtaker_group_id"),
+            "bike_group": e.get("overtaken_group_id"),
+            
+            # Measures (tuple or list)
+            "car_measure": (e.get("overtaker_measure_x"), e.get("overtaker_measure_y")) if e.get("overtaker_measure_x") is not None else None,
+            "bike_measure": (e.get("overtaken_measure_x"), e.get("overtaken_measure_y")) if e.get("overtaken_measure_x") is not None else None,
+            
+            # Distances
+            "clearance_cm": e.get("clearance_distance_cm"),
+            "clearance_m": e.get("clearance_distance_m"),
+            "clearance_px": e.get("clearance_distance_px"),
+            "approach_m": e.get("approach_distance_m"),
+            "approach_px": e.get("approach_distance_px"),
+            
+            # Line Distances
+            "l_line_distance": e.get("overtaken_left_line_distance_m"), 
+            "r_line_distance": e.get("overtaken_right_line_distance_m"),
+            
+            # Boxes (x1, y1, x2, y2)
+            "car_box": (
+                e.get("overtaker_x1"), e.get("overtaker_y1"), 
+                e.get("overtaker_x2"), e.get("overtaker_y2")
+            ),
+            "bike_box": (
+                e.get("overtaken_x1"), e.get("overtaken_y1"), 
+                e.get("overtaken_x2"), e.get("overtaken_y2")
+            ),
+        }
+        snapshot_requests.append(req)
+
+    if snapshot_requests:
+        print(f"[YOLO] 手動イベントのスナップショットを再生成します ({len(snapshot_requests)} 枚)...")
+        _export_overtake_snapshots(
+            run_id,
+            snapshot_requests,
+            output_folder=output_folder,
+            video_filename=video_filename,
+            source_path=source_path,
+            folder_alias=folder_alias,
+            calibration_profile=calibration_profile
+        )
 
 def process_video(
     video_path: str,
@@ -609,6 +684,8 @@ def process_video(
     road_type: Optional[str] = None,
     vehicle_model: Optional[str] = None,
     tire_model: Optional[str] = None,
+    overwrite: bool = False,
+    force_video_id: Optional[int] = None,
 ):
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"動画ファイルが見つかりません: {video_path}")
@@ -618,10 +695,10 @@ def process_video(
     video_name, _ = os.path.splitext(filename)
     start_dt = datetime.now()
 
-    init_db()
+    # init_db() # This is now handled by the context manager and pragmas
 
     run_id = None
-    conn = None
+    # conn = None # Handled by context manager
     class_cache: Dict[str, int] = {}
     model_detection_counts: Dict[str, int] = defaultdict(int)
     try:
@@ -630,15 +707,51 @@ def process_video(
         conn.execute("PRAGMA foreign_keys=ON;")
         
         duration, fps, total_frames = get_video_properties(abs_video_path)
-        video_id = get_or_create_video_id(
-            conn,
-            filename,
-            duration,
-            fps,
-            source_path=abs_video_path,
-            road_type=road_type,
-            collection_year=process_year,
-        )
+        
+        if force_video_id:
+            video_id = force_video_id
+            # 存在確認
+            check = conn.execute("SELECT 1 FROM Video WHERE video_id = ?", (video_id,)).fetchone()
+            if not check:
+                print(f"[警告] force_video_id={video_id} がVideoテーブルに存在しません。")
+        else:
+            video_id = get_or_create_video_id(
+                conn,
+                filename,
+                duration,
+                fps,
+                source_path=abs_video_path,
+                road_type=road_type,
+                collection_year=process_year,
+            )
+
+        # Overwrite Logic
+        backed_up_profile = None
+        backed_up_manual_events = []
+
+        if overwrite:
+            print(f"[YOLO] 上書きモード: video_id={video_id} の過去データを削除します。")
+            
+            # バックアップ処理
+            try:
+                # 最新のRun IDを取得
+                cursor = conn.execute("SELECT run_id, calibration_profile FROM ProcessLog WHERE video_id = ? ORDER BY run_id DESC LIMIT 1", (video_id,))
+                row = cursor.fetchone()
+                if row:
+                    old_run_id, old_profile = row
+                    if old_profile:
+                        backed_up_profile = old_profile
+                        print(f"[YOLO] バックアップ: プロファイル '{old_profile}' を一時保存しました。")
+                    
+                    # 手動イベントのバックアップ
+                    events = get_manual_events_for_run(old_run_id)
+                    if events:
+                        backed_up_manual_events = events
+                        print(f"[YOLO] バックアップ: 手動追い越しイベント {len(events)} 件を一時保存しました。")
+            except Exception as e:
+                print(f"[YOLO] 警告: データバックアップ中にエラーが発生しました: {e}")
+
+            delete_runs_for_video(conn, video_id)
 
         timestamp = start_dt.strftime("%Y%m%d_%H%M%S")
         base_output_root = os.path.abspath(OPT_FILES_PATH) if OPT_FILES_PATH else os.getcwd()
@@ -663,6 +776,36 @@ def process_video(
             location_id=location_id,
         )
         conn.commit()
+
+        # リストア処理 (Run ID確定後)
+        if backed_up_profile:
+            try:
+                update_run_profile(run_id, backed_up_profile)
+                print(f"[YOLO] リストア: プロファイル '{backed_up_profile}' を適用しました。")
+            except Exception as e:
+                print(f"[YOLO] 警告: プロファイルのリストアに失敗しました: {e}")
+
+        if backed_up_manual_events:
+            try:
+                restored_count = restore_manual_events(run_id, backed_up_manual_events)
+                print(f"[YOLO] リストア: 手動追い越しイベント {restored_count} 件を復元しました。")
+
+                # 手動イベントのスナップショットを再生成 (新しい出力先へ)
+                try:
+                    regenerate_manual_snapshots(
+                        run_id, 
+                        backed_up_manual_events, 
+                        output_folder=out_folder,
+                        video_filename=video_name,
+                        source_path=abs_video_path,
+                        folder_alias=effective_alias,
+                        calibration_profile=backed_up_profile
+                    )
+                except Exception as snap_err:
+                    print(f"[YOLO] 警告: 手動追い越しスナップショットの再生成に失敗しました: {snap_err}")
+
+            except Exception as e:
+                print(f"[YOLO] 警告: 手動追い越しイベントのリストアに失敗しました: {e}")
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
@@ -739,8 +882,36 @@ def process_video(
                 print(f"[YOLO] {model_name} でトラッカー設定 '{tracker_config}' を使用します。")
             try:
                 model.fuse()
-            except AttributeError:
+            except (AttributeError, RuntimeError):
                 pass
+
+            inference_kwargs = tracker_kwargs.copy()
+            if "best" in model_name_lower:
+                # ユーザー要望: ナンバープレート(ID:1)の検出自体を行わないようにフィルタ
+                # ID:0=Tire, ID:2=Bicycle_Tires
+                inference_kwargs["classes"] = [0, 2]
+                print(f"[YOLO] {model_name} は classes=[0, 2] (Tire, Bicycle_Tires) で推論します。")
+            else:
+                 # 標準モデル (yolov8x等) の場合
+                 # class_filters.py で定義された許可クラスのみを推論対象にする
+                 # これにより "person" (ID:0) 等のログ出力を抑制し、推論負荷を下げる
+                 allowed_names = vehicle_allowed_classes()
+                 target_ids = []
+                 found_names = []
+                 
+                 # model.names は {0: 'person', 1: 'bicycle', ...} の辞書
+                 if hasattr(model, "names"):
+                     for cid, cname in model.names.items():
+                         if cname.lower() in allowed_names:
+                             target_ids.append(cid)
+                             found_names.append(cname)
+                 
+                 if target_ids:
+                     inference_kwargs["classes"] = target_ids
+                     print(f"[YOLO] {model_name} は以下のクラスのみ推論します: {found_names} (IDs: {target_ids})")
+                 else:
+                     # マッチするクラスが無い場合は全クラス推論 (あるいは警告)
+                     print(f"[警告] {model_name} で許可クラス {allowed_names} に一致するクラスIDが見つかりませんでした。全クラスで推論します。")
 
             results = model.track(
                 source=abs_video_path,
@@ -750,7 +921,7 @@ def process_video(
                 persist=True,
                 batch=tuned_frames,
                 half=False,
-                **tracker_kwargs,
+                **inference_kwargs,
             )
 
             frame_num = 0
@@ -787,14 +958,26 @@ def process_video(
                         if not class_name:
                             class_name = str(raw_class_name)
 
+                        if class_name.lower() == "person":
+                            continue
+
                         if is_vehicle_detector and not is_vehicle_class(class_name):
                             continue
 
+                        # ユーザー要望: 'best'モデルの場合はタイヤ関連クラスのみ保存する
+                        if "best" in model_name_lower:
+                            # 許可するクラス名リスト (表記ゆれ考慮)
+                            allowed_best_classes = ["tire", "tyre", "wheel", "bicycle_tire", "bicycle tire", "bicycle_tires", "bicycle tires"]
+                            if class_name.lower() not in allowed_best_classes:
+                                continue
+
                         cache_key = class_name.lower()
-                        class_id = class_cache.get(cache_key)
-                        if class_id is None:
-                            class_id = get_or_create_class_id(conn, class_name)
-                            class_cache[cache_key] = class_id
+                        # ユーザー要望により独自IDではなくYOLOの生クラスIDを使用
+                        class_id = class_ids_int[i]
+                        # class_id = class_cache.get(cache_key)
+                        # if class_id is None:
+                        #     class_id = get_or_create_class_id(conn, class_name)
+                        #     class_cache[cache_key] = class_id
 
                         detections_buffer.append((
                             run_id,
@@ -844,7 +1027,7 @@ def process_video(
         conn.commit()
 
         end_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        update_process_log(run_id, end_dt, total_det, "completed")
+        update_process_log(conn, run_id, "completed")
 
         with open(os.path.join(out_folder, "summary.txt"), "w", encoding="utf-8") as f:
             f.write(f"Run ID: {run_id}\n")
@@ -867,8 +1050,8 @@ def process_video(
         print(f"エラー発生: {e}")
         if run_id:
             end_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            update_process_log(run_id, end_dt, 0, "error")
-            log_error(run_id, str(e))
+            update_process_log(conn, run_id, "error", str(e))
+            log_error(conn, run_id, str(e))
         if conn:
             conn.rollback()
         raise e
@@ -938,6 +1121,7 @@ def process_video_folder(
     default_road_type: Optional[str] = None,
     default_vehicle_model: Optional[str] = None,
     default_tire_model: Optional[str] = None,
+    overwrite: bool = False,
 ) -> FolderProcessingResult:
     """指定フォルダ内（必要に応じてサブフォルダも含む）の動画ファイルへ一括でYOLO推論を実施する。"""
     if not os.path.isdir(folder_path):
@@ -1010,6 +1194,7 @@ def process_video_folder(
                 road_type=resolved_settings.road_type,
                 vehicle_model=resolved_settings.vehicle_model,
                 tire_model=resolved_settings.tire_model,
+                overwrite=overwrite,
             )
             run_id = video_result.run_id
             result['run_id'] = str(run_id)
@@ -1071,6 +1256,8 @@ def process_video_folder(
                     print(f"[!] Run ID {run_id} の追い越し集計に失敗: {e}")
 
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             message = f"{exc}"
             print(f"[!] {video_path} の処理でエラー: {message}")
             result['error'] = message

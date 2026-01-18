@@ -1,0 +1,536 @@
+﻿
+============================================================
+現在のDB: db/my_app_data.db
+Size: 116.0 KB
+============================================================
+
+--- テーブル一覧 (11 tables) ---
+
+### ClassMaster (0 rows)
+    class_id: INTEGER [PK]
+    class_name: TEXT
+
+### Detection (60 rows)
+    auto_id: INTEGER [PK]
+    run_id: INTEGER
+    video_id: INTEGER
+    class_id: INTEGER
+    frame_num: INTEGER
+    model_name: TEXT
+    class_name: TEXT
+    confidence: REAL
+    track_id: INTEGER
+    x1: REAL
+    y1: REAL
+    x2: REAL
+    y2: REAL
+    speed_km_h: REAL
+    lane_position_flag: TEXT
+    distance_m: REAL
+    group_id: INTEGER
+    front_distance_m: REAL
+    ttc_s: REAL
+    acceleration_m_s2: REAL
+    acceleration_state: TEXT
+    approach_partner_group_id: INTEGER
+    approach_distance_m: REAL
+    clearance_distance_m: REAL
+    travel_direction: TEXT
+    l_line_distance_m: REAL
+    r_line_distance_m: REAL
+    line_distance_m: REAL
+    overtake: INTEGER
+    overtake_after: INTEGER
+    overtake_by: TEXT
+
+### ManualContextBacklog (0 rows)
+    backlog_id: INTEGER [PK]
+    run_id: INTEGER
+    frame_num: INTEGER
+    manual_event_id: INTEGER
+    status: TEXT
+    created_at: TEXT
+    updated_at: TEXT
+    retry_count: INTEGER
+    error_message: TEXT
+    payload_json: TEXT
+
+### ManualOvertakeEvents (0 rows)
+    manual_event_id: INTEGER [PK]
+    run_id: INTEGER
+    frame_num: INTEGER
+    video_time_s: REAL
+    overtaker_group_id: INTEGER
+    overtaker_track_id: INTEGER
+    overtaker_class_name: TEXT
+    overtaker_speed_km_h: REAL
+    overtaker_pixel_speed: REAL
+    overtaker_pixel_speed_frame: REAL
+    overtaken_group_id: INTEGER
+    overtaken_track_id: INTEGER
+    overtaken_class_name: TEXT
+    overtaken_speed_km_h: REAL
+    overtaken_pixel_speed: REAL
+    overtaken_pixel_speed_frame: REAL
+    approach_distance_m: REAL
+    approach_distance_px: REAL
+    clearance_distance_m: REAL
+    clearance_distance_cm: REAL
+    clearance_distance_px: REAL
+    clearance_distance_px_ratio: REAL
+    overtaker_line_distance_m: REAL
+    overtaker_line_distance_cm: REAL
+    overtaker_line_distance_px: REAL
+    overtaker_line_distance_px_ratio: REAL
+    overtaken_line_distance_m: REAL
+    overtaken_line_distance_cm: REAL
+    overtaken_line_distance_px: REAL
+    overtaken_line_distance_px_ratio: REAL
+    overtaker_left_line_distance_m: REAL
+    overtaker_left_line_distance_cm: REAL
+    overtaker_left_line_distance_px: REAL
+    overtaker_right_line_distance_m: REAL
+    overtaker_right_line_distance_cm: REAL
+    overtaker_right_line_distance_px: REAL
+    overtaken_left_line_distance_m: REAL
+    overtaken_left_line_distance_cm: REAL
+    overtaken_left_line_distance_px: REAL
+    overtaken_right_line_distance_m: REAL
+    overtaken_right_line_distance_cm: REAL
+    overtaken_right_line_distance_px: REAL
+    overtaker_measure_x: REAL
+    overtaker_measure_y: REAL
+    overtaken_measure_x: REAL
+    overtaken_measure_y: REAL
+    overtaker_x1: REAL
+    overtaker_y1: REAL
+    overtaker_x2: REAL
+    overtaker_y2: REAL
+    overtaken_x1: REAL
+    overtaken_y1: REAL
+    overtaken_x2: REAL
+    overtaken_y2: REAL
+    lane_width_m: REAL
+    lane_width_px_reference: REAL
+    lane_width_cm_per_px: REAL
+    context_frames: TEXT
+    notes: TEXT
+    created_at: TEXT
+    updated_at: TEXT
+
+### ManualOvertakeTimeline (0 rows)
+    timeline_id: INTEGER [PK]
+    run_id: INTEGER
+    frame_num: INTEGER
+    overtaker_group_id: INTEGER
+    overtaken_group_id: INTEGER
+    manual_event_id: INTEGER
+    notes: TEXT
+    is_deleted: INTEGER
+    created_at: TEXT
+
+### ManualRunProgress (0 rows)
+    run_id: INTEGER [PK]
+    manual_status: TEXT
+    last_visited_at: TEXT
+    last_annotated_at: TEXT
+
+### OvertakeEvents (0 rows)
+    event_id: INTEGER [PK]
+    run_id: INTEGER
+    event_frame_num: INTEGER
+    overtaker_group_id: INTEGER
+    overtaken_group_id: INTEGER
+    overtaker_auto_id: INTEGER
+    overtaken_auto_id: INTEGER
+    approach_distance_px: REAL
+    approach_distance_m: REAL
+    clearance_distance_px: REAL
+    clearance_distance_m: REAL
+    clearance_distance_cm: REAL
+    l_line_distance: REAL
+    l_line_distance_m: REAL
+    l_line_distance_cm: REAL
+    r_line_distance: REAL
+    r_line_distance_m: REAL
+    r_line_distance_cm: REAL
+    line_distance: REAL
+    line_distance_m: REAL
+    line_distance_cm: REAL
+    speed_profile_json: TEXT
+
+### ProcessLog (165 rows)
+    run_id: INTEGER [PK]
+    video_id: INTEGER
+    process_start: TEXT
+    process_end: TEXT
+    output_folder: TEXT
+    status: TEXT
+    error_message: TEXT
+    folder_alias: TEXT
+    calibration_profile: TEXT
+    process_year: INTEGER
+    location_id: INTEGER
+    is_folder_batch: INTEGER
+    base_video_id: INTEGER
+
+### TrafficCount (0 rows)
+    count_id: INTEGER [PK]
+    run_id: INTEGER
+    line_name: TEXT
+    object_type: TEXT
+    direction: TEXT
+    count: INTEGER
+    created_at: TEXT
+
+### Video (165 rows)
+    video_id: INTEGER [PK]
+    filename: TEXT
+    upload_datetime: TEXT
+    fps: REAL
+    duration: REAL
+    source_path: TEXT
+    collection_year: INTEGER
+    road_type: TEXT
+    location_point: INTEGER
+    recorded_date: TEXT
+
+--- ビュー (1 views) ---
+  Run
+
+============================================================
+バックアップDB: db/my_app_data.db.backup_20260117_102900
+Size: 753304.0 KB
+============================================================
+
+--- テーブル一覧 (16 tables) ---
+
+### Class (34 rows)
+    class_id: INTEGER [PK]
+    class_name: TEXT
+
+### ClassMaster (9 rows)
+    class_id: INTEGER [PK]
+    class_name: TEXT
+
+### Detection (2730044 rows)
+    auto_id: INTEGER [PK]
+    run_id: INTEGER
+    video_id: INTEGER
+    class_id: INTEGER
+    frame_num: INTEGER
+    x1: REAL
+    y1: REAL
+    x2: REAL
+    y2: REAL
+    measure_x: REAL
+    measure_y: REAL
+    model_name: TEXT
+    track_id: INTEGER
+    confidence: REAL
+    group_id: INTEGER
+    approach_partner_group_id: INTEGER
+    approach_distance_m: REAL
+    approach_distance_px: REAL
+    clearance_distance_m: REAL
+    clearance_distance_cm: REAL
+    clearance_distance_px: REAL
+    pixel_speed: REAL
+    pixel_speed_frame: REAL
+    speed_km_h: REAL
+    overtake: INTEGER
+    overtake_after: INTEGER
+    overtake_window_offset: INTEGER
+    overtake_by: INTEGER
+    overtake_by_second: INTEGER
+    oncoming_flag: INTEGER
+    l_line_distance: REAL
+    l_line_distance_m: REAL
+    l_line_distance_cm: REAL
+    r_line_distance: REAL
+    r_line_distance_m: REAL
+    r_line_distance_cm: REAL
+    line_distance: REAL
+    line_distance_m: REAL
+    line_distance_cm: REAL
+    lane_position_flag: TEXT
+    front_distance_m: REAL
+    front_vehicle_id: INTEGER
+    travel_direction: TEXT
+    scale_pixels_per_meter: REAL
+    x_pixels_per_meter: REAL
+    acceleration_m_s2: REAL
+    acceleration_state: TEXT
+    ttc_s: REAL
+    obj_id: INTEGER
+
+### LocationSetting (0 rows)
+    location_id: INTEGER [PK]
+    location_name: TEXT
+    setting_mode: TEXT
+    created_at: TEXT
+
+### ManualContextBacklog (9 rows)
+    backlog_id: INTEGER [PK]
+    run_id: INTEGER
+    frame_num: INTEGER
+    manual_event_id: INTEGER
+    status: TEXT
+    created_at: TEXT
+    updated_at: TEXT
+    retry_count: INTEGER
+    error_message: TEXT
+    payload_json: TEXT
+
+### ManualOvertakeContext (11756 rows)
+    context_id: INTEGER [PK]
+    manual_event_id: INTEGER
+    offset_frames: INTEGER
+    frame_num: INTEGER
+    video_time_s: REAL
+    overtaker_group_id: INTEGER
+    overtaker_auto_id: INTEGER
+    overtaker_class_name: TEXT
+    overtaker_confidence: REAL
+    overtaker_track_id: INTEGER
+    overtaker_x1: REAL
+    overtaker_y1: REAL
+    overtaker_x2: REAL
+    overtaker_y2: REAL
+    overtaker_measure_x: REAL
+    overtaker_measure_y: REAL
+    overtaker_speed_km_h: REAL
+    overtaker_pixel_speed: REAL
+    overtaker_pixel_speed_frame: REAL
+    overtaker_travel_direction: TEXT
+    overtaken_group_id: INTEGER
+    overtaken_auto_id: INTEGER
+    overtaken_class_name: TEXT
+    overtaken_confidence: REAL
+    overtaken_track_id: INTEGER
+    overtaken_x1: REAL
+    overtaken_y1: REAL
+    overtaken_x2: REAL
+    overtaken_y2: REAL
+    overtaken_measure_x: REAL
+    overtaken_measure_y: REAL
+    overtaken_speed_km_h: REAL
+    overtaken_pixel_speed: REAL
+    overtaken_pixel_speed_frame: REAL
+    overtaken_travel_direction: TEXT
+    created_at: TEXT
+    overtaker_line_distance_m: REAL
+    overtaker_line_distance_px: REAL
+    overtaker_line_distance_cm: REAL
+    overtaker_left_line_distance_m: REAL
+    overtaker_left_line_distance_px: REAL
+    overtaker_left_line_distance_cm: REAL
+    overtaker_right_line_distance_m: REAL
+    overtaker_right_line_distance_px: REAL
+    overtaker_right_line_distance_cm: REAL
+    overtaken_line_distance_m: REAL
+    overtaken_line_distance_px: REAL
+    overtaken_line_distance_cm: REAL
+    overtaken_left_line_distance_m: REAL
+    overtaken_left_line_distance_px: REAL
+    overtaken_left_line_distance_cm: REAL
+    overtaken_right_line_distance_m: REAL
+    overtaken_right_line_distance_px: REAL
+    overtaken_right_line_distance_cm: REAL
+    clearance_distance_m: REAL
+    clearance_distance_cm: REAL
+    clearance_distance_px: REAL
+    lane_width_px_reference: REAL
+    lane_width_cm_per_px: REAL
+    lane_width_m: REAL
+
+### ManualOvertakeContextBacklog (74 rows)
+    backlog_id: INTEGER [PK]
+    manual_event_id: INTEGER
+    run_id: INTEGER
+    frame_num: INTEGER
+    event_payload_json: TEXT
+    context_frames_json: TEXT
+    created_at: TEXT
+    processed_at: TEXT
+    status: TEXT
+    error_message: TEXT
+
+### ManualOvertakeEvents (66 rows)
+    manual_event_id: INTEGER [PK]
+    run_id: INTEGER
+    frame_num: INTEGER
+    video_time_s: REAL
+    overtaker_group_id: INTEGER
+    overtaker_auto_id: INTEGER
+    overtaker_class_name: TEXT
+    overtaker_confidence: REAL
+    overtaker_track_id: INTEGER
+    overtaker_x1: REAL
+    overtaker_y1: REAL
+    overtaker_x2: REAL
+    overtaker_y2: REAL
+    overtaker_measure_x: REAL
+    overtaker_measure_y: REAL
+    overtaker_speed_km_h: REAL
+    overtaker_pixel_speed: REAL
+    overtaker_pixel_speed_frame: REAL
+    overtaker_travel_direction: TEXT
+    overtaker_speed_km_h_m30: REAL
+    overtaker_speed_km_h_p30: REAL
+    overtaker_pixel_speed_m30: REAL
+    overtaker_pixel_speed_p30: REAL
+    overtaker_pixel_speed_frame_m30: REAL
+    overtaker_pixel_speed_frame_p30: REAL
+    overtaker_line_distance_m: REAL
+    overtaker_line_distance_px: REAL
+    overtaker_line_distance_cm: REAL
+    overtaker_left_line_distance_m: REAL
+    overtaker_left_line_distance_px: REAL
+    overtaker_left_line_distance_cm: REAL
+    overtaker_right_line_distance_m: REAL
+    overtaker_right_line_distance_px: REAL
+    overtaker_right_line_distance_cm: REAL
+    overtaken_group_id: INTEGER
+    overtaken_auto_id: INTEGER
+    overtaken_class_name: TEXT
+    overtaken_confidence: REAL
+    overtaken_track_id: INTEGER
+    overtaken_x1: REAL
+    overtaken_y1: REAL
+    overtaken_x2: REAL
+    overtaken_y2: REAL
+    overtaken_measure_x: REAL
+    overtaken_measure_y: REAL
+    overtaken_speed_km_h: REAL
+    overtaken_pixel_speed: REAL
+    overtaken_pixel_speed_frame: REAL
+    overtaken_travel_direction: TEXT
+    overtaken_speed_km_h_m30: REAL
+    overtaken_speed_km_h_p30: REAL
+    overtaken_pixel_speed_m30: REAL
+    overtaken_pixel_speed_p30: REAL
+    overtaken_pixel_speed_frame_m30: REAL
+    overtaken_pixel_speed_frame_p30: REAL
+    approach_distance_m: REAL
+    approach_distance_px: REAL
+    clearance_distance_m: REAL
+    clearance_distance_cm: REAL
+    clearance_distance_px: REAL
+    overtaken_line_distance_m: REAL
+    overtaken_line_distance_px: REAL
+    overtaken_line_distance_cm: REAL
+    overtaken_left_line_distance_m: REAL
+    overtaken_left_line_distance_px: REAL
+    overtaken_left_line_distance_cm: REAL
+    overtaken_right_line_distance_m: REAL
+    overtaken_right_line_distance_px: REAL
+    overtaken_right_line_distance_cm: REAL
+    notes: TEXT
+    created_at: TEXT
+    lane_width_px_reference: REAL
+    lane_width_cm_per_px: REAL
+    lane_width_m: REAL
+    clearance_distance_px_ratio: REAL
+    overtaker_line_distance_px_ratio: REAL
+    overtaken_line_distance_px_ratio: REAL
+    context_frames: TEXT
+    updated_at: TEXT
+
+### ManualOvertakeTimeline (47 rows)
+    timeline_id: INTEGER [PK]
+    run_id: INTEGER
+    frame_num: INTEGER
+    overtaker_group_id: INTEGER
+    overtaken_group_id: INTEGER
+    notes: TEXT
+    created_at: TEXT
+    updated_at: TEXT
+    last_event_id: INTEGER
+    last_processed_at: TEXT
+    manual_event_id: INTEGER
+
+### ManualRunProgress (102 rows)
+    run_id: INTEGER [PK]
+    last_visit_at: TEXT
+    last_review_at: TEXT
+    last_annotation_at: TEXT
+    created_at: TEXT
+    updated_at: TEXT
+    manual_status: TEXT
+
+### OvertakeEvents (40 rows)
+    overtake_event_id: INTEGER [PK]
+    run_id: INTEGER
+    event_frame_num: INTEGER
+    overtaker_group_id: INTEGER
+    overtaken_group_id: INTEGER
+    overtaker_auto_id: INTEGER
+    overtaken_auto_id: INTEGER
+    approach_distance_px: REAL
+    approach_distance_m: REAL
+    clearance_distance_px: REAL
+    clearance_distance_m: REAL
+    clearance_distance_cm: REAL
+    l_line_distance: REAL
+    l_line_distance_m: REAL
+    l_line_distance_cm: REAL
+    r_line_distance: REAL
+    r_line_distance_m: REAL
+    r_line_distance_cm: REAL
+    line_distance: REAL
+    line_distance_m: REAL
+    line_distance_cm: REAL
+    speed_profile_json: TEXT
+
+### ProcessLog (334 rows)
+    run_id: INTEGER [PK]
+    video_id: INTEGER
+    process_start: TEXT
+    process_end: TEXT
+    total_detections: INTEGER
+    status: TEXT
+    output_folder: TEXT
+    calibration_profile: TEXT
+    folder_alias: TEXT
+    is_folder_batch: INTEGER
+    process_year: INTEGER
+    location_id: INTEGER
+    error_message: TEXT
+    base_video_id: INTEGER
+
+### ProximityData (2467010 rows)
+    proximity_id: INTEGER [PK]
+    run_id: INTEGER
+    frame_num: INTEGER
+    vehicle_a_id: INTEGER
+    vehicle_b_id: INTEGER
+    class_a: TEXT
+    class_b: TEXT
+    direct_distance_m: REAL
+    lateral_distance_m: REAL
+    longitudinal_distance_m: REAL
+
+### TrafficCount (330 rows)
+    count_id: INTEGER [PK]
+    run_id: INTEGER
+    line_name: TEXT
+    object_type: TEXT
+    direction: TEXT
+    count: INTEGER
+    created_at: TEXT
+
+### Video (204 rows)
+    video_id: INTEGER [PK]
+    filename: TEXT
+    upload_datetime: TEXT
+    fps: REAL
+    duration: REAL
+    source_path: TEXT
+    location_point: INTEGER
+    recorded_date: TEXT
+    road_type: TEXT
+    collection_year: INTEGER
+
+--- ビュー (1 views) ---
+  Run

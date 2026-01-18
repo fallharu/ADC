@@ -218,9 +218,67 @@ def create_detection_excel(run_id: int) -> str:
         if rows:
             worksheet.autofilter(header_row, 0, data_start_row + len(rows) - 1, len(EXCEL_FIELDS) - 1)
         worksheet.freeze_panes(data_start_row, 0)
+        
+        # --- 追い越しまとめ Sheet ---
+        summary_sheet = workbook.add_worksheet("追い越しまとめ")
+        
+        # Summary Headers
+        summary_fields = [
+            ("run_id", "Run ID"),
+            ("video_filename", "動画ファイル"),
+            ("frame_num", "フレーム"),
+            ("group_id", "自グループID"),
+            ("class_name", "自クラス"),
+            ("approach_partner_group_id", "相手グループID"),
+            ("clearance_distance_m", "離隔距離(m)"),
+            ("clearance_distance_cm", "離隔距離(cm)"),
+            ("approach_distance_m", "接近距離(m)"),
+            ("overtake", "追い越しフラグ"),
+            ("line_distance", "白線距離(m)"), # Addedcontext
+        ]
+        
+        # Write Headers
+        for col_idx, (key, label) in enumerate(summary_fields):
+            summary_sheet.write(0, col_idx, label, header_format)
+            summary_sheet.set_column(col_idx, col_idx, 15)
+            
+        # Filter and Write Data
+        sum_row_idx = 1
+        for record in rows:
+            # Condition: Has clearance_distance_m OR is marked as overtake
+            # User request: "collect those where clearance distance is available"
+            # But sometimes overtake=1 has clearance=None if outside range?
+            # Let's prioritize clearance_distance_m availability.
+            has_clearance = record["clearance_distance_m"] is not None
+            is_overtake = int(record["overtake"] or 0) == 1
+            
+            if has_clearance or is_overtake:
+                for col_idx, (key, label) in enumerate(summary_fields):
+                    val = record[key]
+                    
+                    # Formatting logic similar to main sheet
+                    if key == "overtake":
+                        val = "あり" if int(val or 0) == 1 else "-"
+                    elif key == "clearance_distance_cm":
+                        # If raw is None but m is present?
+                        # DB has clearance_distance_cm usually.
+                        # Using raw record value
+                        val = _format_float(val, record)
+                    elif key in ["clearance_distance_m", "approach_distance_m", "line_distance"]:
+                        val = _format_float(val, record)
+                    elif key in ["run_id", "frame_num", "group_id", "approach_partner_group_id"]:
+                        val = _format_int(val, record)
+                    else:
+                        val = val if val is not None else "-"
+                        
+                    summary_sheet.write(sum_row_idx, col_idx, val, default_format)
+                sum_row_idx += 1
+                
+        if sum_row_idx > 1:
+            summary_sheet.autofilter(0, 0, sum_row_idx - 1, len(summary_fields) - 1)
     finally:
         workbook.close()
-
+    
     return excel_path
 
 

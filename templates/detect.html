@@ -71,6 +71,10 @@
               checked>
             <label class="form-check-label" for="singleUseStored">サブフォルダ設定（場所・年度・道路タイプ）を優先して使用</label>
           </div>
+          <div class="mb-3 form-check">
+            <input type="checkbox" class="form-check-input" id="singleOverwrite" name="single_overwrite" value="1">
+            <label class="form-check-label text-danger" for="singleOverwrite">既存の実行結果を上書きする (過去データを削除)</label>
+          </div>
           <div class="row g-3">
             <div class="col-md-6">
               <label for="singleYear" class="form-label">年度 (任意)</label>
@@ -87,6 +91,15 @@
                 {% endfor %}
               </select>
               <div class="form-text">場所は「場所設定」から登録したIDを選択してください。</div>
+            </div>
+            <div class="col-md-6">
+              <label for="singleRoadType" class="form-label">道路種別 (任意)</label>
+              <select class="form-select" id="singleRoadType" name="single_road_type">
+                <option value="">選択しない</option>
+                <option value="拡幅">拡幅</option>
+                <option value="未拡幅">未拡幅</option>
+              </select>
+              <div class="form-text">拡幅/未拡幅を設定できます。</div>
             </div>
             <div class="col-md-6">
               <label for="singleVehicleModel" class="form-label">車両検出モデル (Vehicle)</label>
@@ -172,6 +185,15 @@
               <div class="form-text">設定モード込みで登録した場所IDを適用します。</div>
             </div>
             <div class="col-md-6">
+              <label for="batchRoadType" class="form-label">道路種別 (任意)</label>
+              <select class="form-select" id="batchRoadType" name="batch_road_type">
+                <option value="">選択しない</option>
+                <option value="拡幅">拡幅</option>
+                <option value="未拡幅">未拡幅</option>
+              </select>
+              <div class="form-text">拡幅/未拡幅を設定します。</div>
+            </div>
+            <div class="col-md-6">
               <label for="batchVehicleModel" class="form-label">車両検出モデル (登録用)</label>
               <select class="form-select" id="batchVehicleModel" name="batch_vehicle_model">
                 <option value="">自動 (Auto)</option>
@@ -203,6 +225,10 @@
               value="1">
             <label class="form-check-label" for="batchAutoPostprocess">処理完了後に後処理パイプラインを自動実行する</label>
             <div class="form-text">フォルダごとの既定設定として保存されます。</div>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="batchOverwrite" name="batch_overwrite" value="1">
+            <label class="form-check-label text-danger" for="batchOverwrite">既存の実行結果を上書きする (過去データを削除)</label>
           </div>
           <div class="form-check mb-3">
             <input class="form-check-input" type="checkbox" id="batchCsv" name="batch_csv">

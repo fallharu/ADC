@@ -1,4 +1,3 @@
-# 役割: 車両とタイヤを紐付け、共通のgroup_idを割り当てる
 import math
 import os
 import sqlite3
@@ -15,14 +14,13 @@ from .perf_utils import resolve_worker_count
 
 def _normalize_track_id(raw: object) -> Optional[int]:
     """トラックIDを正規化して整数に変換する。無効値は None を返す。"""
-
     if raw is None:
         return None
 
     if isinstance(raw, (bytes, bytearray)):
         try:
             raw = raw.decode()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     if isinstance(raw, str):
@@ -44,7 +42,11 @@ def _normalize_track_id(raw: object) -> Optional[int]:
     if math.isnan(value) or math.isinf(value):
         return None
 
+    # ここ重要: 端数がある値を round で別IDに化けさせない
     track_int = int(round(value))
+    if abs(value - track_int) > 1e-6:
+        return None
+
     if track_int < 0:
         return None
     return track_int
@@ -52,181 +54,125 @@ def _normalize_track_id(raw: object) -> Optional[int]:
 
 def assign_group_ids(run_id: int):
     start_time = time.time()
+
+    # 1) まず run の group_id を全消去
     with sqlite3.connect(MAIN_DB_PATH) as conn:
         c = conn.cursor()
         c.execute("UPDATE Detection SET group_id = NULL WHERE run_id = ?", (run_id,))
         conn.commit()
 
+        # ★変更点: 最初の採番は best(タイヤ) を除外（＝車両側だけ）
         df_tracks = pd.read_sql_query(
             """
-            SELECT auto_id, track_id
+            SELECT auto_id, track_id, frame_num, x1, y1, x2, y2, class_id
             FROM Detection
-            WHERE run_id = ? AND LOWER(model_name) != 'best'
+            WHERE run_id = ?
+              AND LOWER(model_name) != 'best'
+            ORDER BY frame_num
             """,
             conn,
             params=(run_id,),
         )
 
     if df_tracks.empty:
-        print(
-            f"Run ID {run_id}: モデル 'best' 以外の検出が見つからなかったため、グループ割当をスキップします。"
-        )
+        print(f"Run ID {run_id}: 検出データがないため、グループ割当をスキップします。")
         return time.time() - start_time
 
-    df_tracks['track_key'] = df_tracks['track_id'].apply(_normalize_track_id)
-    if not df_tracks['track_key'].notna().any():
+    df_tracks["track_key"] = df_tracks["track_id"].apply(_normalize_track_id)
+
+    # track_id が一切取れていない場合、今のやり方だと「全行=別グループ」で爆発するので止める
+    if not df_tracks["track_key"].notna().any():
         print(
-            f"Run ID {run_id}: 有効な track_id を持つ車両検出がありません。"
-            " すべての車両検出へ個別の group_id を割り当てます。"
+            f"Run ID {run_id}: 有効な track_id がありません。"
+            " 追跡IDがDBに保存されているか、推論側でtrack_idの書き込みを確認してください。"
         )
+        # この場合は group_id を入れない方が安全（爆発回避）
+        return time.time() - start_time
 
-    track_to_group: Dict[int, int] = {}
-    next_group_id = 1
+    # 2) track_id があるものは track_id -> group_id で確定
+    track_vals = sorted(pd.unique(df_tracks.loc[df_tracks["track_key"].notna(), "track_key"]))
+    track_to_group: Dict[int, int] = {int(tv): i + 1 for i, tv in enumerate(track_vals)}
+    next_group_id = len(track_to_group) + 1
 
-    def allocate_group_id(track_value: Optional[int]) -> int:
-        nonlocal next_group_id
+    df_tracks["group_id"] = df_tracks["track_key"].map(track_to_group)
 
-        if track_value is not None:
-            if track_value not in track_to_group:
-                track_to_group[track_value] = next_group_id
+    # 3) track_id が欠落した行は「近傍の最近グループ」へ吸収（なければ新規）
+    #    ※これで「欠落1行ごとに増殖」をかなり抑えられます
+    RECONNECT_FRAME_GAP = 10
+    RECONNECT_DISTANCE_PX = 150
+
+    df_tracks["center_x"] = (df_tracks["x1"] + df_tracks["x2"]) / 2
+    df_tracks["center_y"] = (df_tracks["y1"] + df_tracks["y2"]) / 2
+
+    # class_id -> {gid: (last_frame, cx, cy)}
+    last_seen: Dict[int, Dict[int, Tuple[int, float, float]]] = {}
+
+    for i, row in df_tracks.iterrows():
+        frame = int(row["frame_num"])
+        cls = int(row["class_id"])
+        cx = float(row["center_x"])
+        cy = float(row["center_y"])
+
+        cls_map = last_seen.setdefault(cls, {})
+
+        # 古い候補を掃除
+        cutoff = frame - RECONNECT_FRAME_GAP
+        for gid in list(cls_map.keys()):
+            if cls_map[gid][0] < cutoff:
+                del cls_map[gid]
+
+        gid = row["group_id"]
+        if pd.isna(gid):
+            best_gid = None
+            best_dist = None
+            for cand_gid, (lf, lx, ly) in cls_map.items():
+                gap = frame - lf
+                if gap <= 0 or gap > RECONNECT_FRAME_GAP:
+                    continue
+                dist = math.hypot(cx - lx, cy - ly)
+                if dist <= RECONNECT_DISTANCE_PX and (best_dist is None or dist < best_dist):
+                    best_dist = dist
+                    best_gid = cand_gid
+
+            if best_gid is not None:
+                gid = best_gid
+            else:
+                gid = next_group_id
                 next_group_id += 1
-            return track_to_group[track_value]
 
-        generated_id = next_group_id
-        next_group_id += 1
-        return generated_id
+            df_tracks.at[i, "group_id"] = int(gid)
 
-    df_tracks['group_id'] = df_tracks['track_key'].apply(allocate_group_id).astype(int)
-    vehicle_updates = df_tracks[['group_id', 'auto_id']].values.tolist()
-    missing_track_rows = int(df_tracks['track_key'].isna().sum())
-    unique_track_groups = len(track_to_group)
-    total_vehicle_rows = len(df_tracks)
+        gid_int = int(gid)
+        cls_map[gid_int] = (frame, cx, cy)
 
+    df_tracks["group_id"] = df_tracks["group_id"].astype(int)
+
+    # 4) DBへ反映（車両側だけ）
+    vehicle_updates = df_tracks[["group_id", "auto_id"]].values.tolist()
     with sqlite3.connect(MAIN_DB_PATH) as conn:
         c = conn.cursor()
         c.executemany("UPDATE Detection SET group_id = ? WHERE auto_id = ?", vehicle_updates)
         conn.commit()
-        print(
-            f"Run ID {run_id}: {unique_track_groups} 件の track_id から "
-            f"{total_vehicle_rows} 件の車両検出へ group_id を割り当てました。"
+
+        unique_groups = int(df_tracks["group_id"].nunique())
+        print(f"Run ID {run_id}: 車両側へ group_id を割り当てました（ユニーク {unique_groups}）。")
+
+        # ★重要: タイヤ側(best)はここでは group_id を付けない（増殖の元を断つ）
+        c.execute(
+            "UPDATE Detection SET group_id = NULL WHERE run_id = ? AND LOWER(model_name) = 'best'",
+            (run_id,),
         )
-        if missing_track_rows:
-            print(
-                f"Run ID {run_id}: track_id が欠落している車両検出が {missing_track_rows} 件あり、"
-                "個別の group_id を新規採番しました。"
-            )
+        conn.commit()
 
-        # --- 途切れたトラックの再接続ロジック ---
-        RECONNECT_FRAME_GAP = 10  # フレーム以内なら再接続を試みる
-        RECONNECT_DISTANCE_PX = 150  # ピクセル以内なら同一物体とみなす
-
-        df_for_reconnect = pd.read_sql_query(
-            """
-            SELECT d.auto_id, d.frame_num, d.group_id,
-                   d.x1, d.y1, d.x2, d.y2,
-                   c.class_name
-            FROM Detection d
-            JOIN Class c ON d.class_id = c.class_id
-            WHERE d.run_id = ? AND d.group_id IS NOT NULL AND LOWER(d.model_name) != 'best'
-            ORDER BY d.frame_num
-            """,
-            conn,
-            params=(run_id,),
-        )
-
-        if not df_for_reconnect.empty:
-            df_for_reconnect['center_x'] = (df_for_reconnect['x1'] + df_for_reconnect['x2']) / 2
-            df_for_reconnect['center_y'] = (df_for_reconnect['y1'] + df_for_reconnect['y2']) / 2
-            df_for_reconnect['class_lower'] = df_for_reconnect['class_name'].str.lower()
-
-            # グループごとの最終フレーム情報を取得
-            group_last_frame: Dict[int, dict] = {}
-            group_merge_map: Dict[int, int] = {}  # old_group_id -> new_group_id
-
-            for _, row in df_for_reconnect.iterrows():
-                gid = int(row['group_id'])
-                frame = int(row['frame_num'])
-                cx, cy = row['center_x'], row['center_y']
-                cls = row['class_lower']
-
-                # このグループの最終情報を更新
-                if gid not in group_last_frame:
-                    group_last_frame[gid] = {
-                        'last_frame': frame,
-                        'center_x': cx,
-                        'center_y': cy,
-                        'class': cls,
-                    }
-                else:
-                    group_last_frame[gid]['last_frame'] = frame
-                    group_last_frame[gid]['center_x'] = cx
-                    group_last_frame[gid]['center_y'] = cy
-
-            # 2回目のパス: 再接続候補を探す
-            for _, row in df_for_reconnect.iterrows():
-                gid = int(row['group_id'])
-                frame = int(row['frame_num'])
-                cx, cy = row['center_x'], row['center_y']
-                cls = row['class_lower']
-
-                # 現在のグループがマージ対象なら実際のグループIDを取得
-                actual_gid = group_merge_map.get(gid, gid)
-
-                # 他のグループの「最終フレーム」と比較
-                for other_gid, info in group_last_frame.items():
-                    if other_gid == actual_gid:
-                        continue
-                    actual_other_gid = group_merge_map.get(other_gid, other_gid)
-                    if actual_other_gid == actual_gid:
-                        continue
-
-                    # クラスが一致するか
-                    if info['class'] != cls:
-                        continue
-
-                    # フレーム差がしきい値以内か
-                    frame_gap = frame - info['last_frame']
-                    if frame_gap <= 0 or frame_gap > RECONNECT_FRAME_GAP:
-                        continue
-
-                    # 位置が近いか
-                    dist = math.sqrt((cx - info['center_x'])**2 + (cy - info['center_y'])**2)
-                    if dist > RECONNECT_DISTANCE_PX:
-                        continue
-
-                    # 再接続: 古いグループを新しいグループにマージ
-                    # gid を other_gid にマージ
-                    group_merge_map[gid] = actual_other_gid
-                    break
-
-            # マージマップを適用
-            if group_merge_map:
-                # 推移的なマージを解決
-                def resolve_merge(gid: int) -> int:
-                    visited = set()
-                    while gid in group_merge_map and gid not in visited:
-                        visited.add(gid)
-                        gid = group_merge_map[gid]
-                    return gid
-
-                reconnect_updates: List[Tuple[int, int]] = []
-                for _, row in df_for_reconnect.iterrows():
-                    old_gid = int(row['group_id'])
-                    new_gid = resolve_merge(old_gid)
-                    if new_gid != old_gid:
-                        reconnect_updates.append((new_gid, int(row['auto_id'])))
-
-                if reconnect_updates:
-                    c.executemany("UPDATE Detection SET group_id = ? WHERE auto_id = ?", reconnect_updates)
-                    conn.commit()
-                    merged_count = len(set(group_merge_map.keys()))
-                    print(f"Run ID {run_id}: {merged_count} 個のグループを再接続（マージ）しました。")
-
+    # 5) タイヤ→車両 紐付け（ここで初めてタイヤに group_id を入れる）
+    with sqlite3.connect(MAIN_DB_PATH) as conn:
         df_vehicles = pd.read_sql_query(
             """
             SELECT auto_id, frame_num, x1, y1, x2, y2, group_id
             FROM Detection
-            WHERE run_id = ? AND group_id IS NOT NULL AND model_name != 'best'
+            WHERE run_id = ?
+              AND group_id IS NOT NULL
+              AND LOWER(model_name) != 'best'
             """,
             conn,
             params=(run_id,),
@@ -235,20 +181,21 @@ def assign_group_ids(run_id: int):
             """
             SELECT auto_id, frame_num, x1, y1, x2, y2
             FROM Detection
-            WHERE run_id = ? AND LOWER(model_name) = 'best'
+            WHERE run_id = ?
+              AND LOWER(model_name) = 'best'
             """,
             conn,
             params=(run_id,),
         )
 
-    if df_tires.empty:
+    if df_tires.empty or df_vehicles.empty:
         return time.time() - start_time
 
     vehicles_by_frame: Dict[int, List[dict]] = {
-        int(frame): group.to_dict('records') for frame, group in df_vehicles.groupby('frame_num')
+        int(frame): group.to_dict("records") for frame, group in df_vehicles.groupby("frame_num")
     }
     tires_by_frame: Dict[int, List[dict]] = {
-        int(frame): group.to_dict('records') for frame, group in df_tires.groupby('frame_num')
+        int(frame): group.to_dict("records") for frame, group in df_tires.groupby("frame_num")
     }
     frame_items: List[Tuple[int, List[dict]]] = list(tires_by_frame.items())
 
@@ -259,14 +206,11 @@ def assign_group_ids(run_id: int):
             return []
         updates: List[Tuple[int, int]] = []
         for tire in tires:
-            tire_center_x = (tire['x1'] + tire['x2']) / 2
-            tire_center_y = (tire['y1'] + tire['y2']) / 2
+            tx = (tire["x1"] + tire["x2"]) / 2
+            ty = (tire["y1"] + tire["y2"]) / 2
             for vehicle in vehicles_in_frame:
-                if (
-                    vehicle['x1'] <= tire_center_x <= vehicle['x2']
-                    and vehicle['y1'] <= tire_center_y <= vehicle['y2']
-                ):
-                    updates.append((vehicle['group_id'], tire['auto_id']))
+                if vehicle["x1"] <= tx <= vehicle["x2"] and vehicle["y1"] <= ty <= vehicle["y2"]:
+                    updates.append((int(vehicle["group_id"]), int(tire["auto_id"])))
                     break
         return updates
 
@@ -291,6 +235,7 @@ def assign_group_ids(run_id: int):
             updates = match_frame(item)
             if updates:
                 tire_updates.extend(updates)
+
     if tire_updates:
         with sqlite3.connect(MAIN_DB_PATH) as conn:
             c = conn.cursor()

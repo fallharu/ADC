@@ -1,0 +1,32 @@
+--- Overtake Flag Stats ---
+Total Detections: 2730044
+overtake = 1: 39
+overtake_by = 1: 0
+Any Overtake Flag: 39
+
+--- Sample Overtake Rows ---
+{'run_id': 20, 'frame_num': 532, 'track_id': 18, 'overtake': 1, 'overtake_by': 21}
+{'run_id': 100006, 'frame_num': 380, 'track_id': 150, 'overtake': 1, 'overtake_by': 35}
+{'run_id': 100008, 'frame_num': 888, 'track_id': 325, 'overtake': 1, 'overtake_by': 45}
+{'run_id': 100008, 'frame_num': 981, 'track_id': 325, 'overtake': 1, 'overtake_by': 50}
+{'run_id': 100008, 'frame_num': 1070, 'track_id': 387, 'overtake': 1, 'overtake_by': 69}
+{'run_id': 100008, 'frame_num': 1346, 'track_id': 426, 'overtake': 1, 'overtake_by': 88}
+{'run_id': 100009, 'frame_num': 678, 'track_id': 106, 'overtake': 1, 'overtake_by': 19}
+{'run_id': 100009, 'frame_num': 690, 'track_id': 106, 'overtake': 1, 'overtake_by': 19}
+{'run_id': 100009, 'frame_num': 864, 'track_id': 106, 'overtake': 1, 'overtake_by': 20}
+{'run_id': 100022, 'frame_num': 1419, 'track_id': 334, 'overtake': 1, 'overtake_by': 71}
+{'run_id': 100026, 'frame_num': 442, 'track_id': 32, 'overtake': 1, 'overtake_by': 9}
+{'run_id': 100026, 'frame_num': 447, 'track_id': 32, 'overtake': 1, 'overtake_by': 9}
+{'run_id': 100026, 'frame_num': 452, 'track_id': 32, 'overtake': 1, 'overtake_by': 9}
+{'run_id': 100027, 'frame_num': 388, 'track_id': 122, 'overtake': 1, 'overtake_by': 26}
+{'run_id': 100027, 'frame_num': 392, 'track_id': 122, 'overtake': 1, 'overtake_by': 26}
+{'run_id': 100027, 'frame_num': 398, 'track_id': 122, 'overtake': 1, 'overtake_by': 26}
+{'run_id': 100027, 'frame_num': 413, 'track_id': 122, 'overtake': 1, 'overtake_by': 26}
+{'run_id': 100032, 'frame_num': 1009, 'track_id': 148, 'overtake': 1, 'overtake_by': 26}
+{'run_id': 100033, 'frame_num': 968, 'track_id': 110, 'overtake': 1, 'overtake_by': 11}
+{'run_id': 100033, 'frame_num': 981, 'track_id': 110, 'overtake': 1, 'overtake_by': 11}
+
+--- Checking Consistency with OvertakeEvents ---
+Event: Run 1, Frame 47, Overtaker 7, Overtaken 6
+Matching Detection: {'run_id': 1, 'frame_num': 47, 'group_id': 7, 'overtake': 0, 'overtake_by': None}
+Matching Detection: {'run_id': 1, 'frame_num': 47, 'group_id': 6, 'overtake': 0, 'overtake_by': None}

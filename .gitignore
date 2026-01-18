@@ -17,6 +17,8 @@
 
 # Specific large files (>100MB)
 db.zip
+real_data_export_test.xlsx
+*.xlsx
 models/best.pt
 models/yolo*.pt
 

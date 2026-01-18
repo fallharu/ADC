@@ -7560,8 +7560,8 @@ def manual_overtake_scale_preview_image(run_id: int):
     return resp
 
 
-@main.route("/api/manual_overtake/<int:run_id>/metadata")
-def manual_overtake_metadata(run_id: int):
+# @main.route("/api/manual_overtake/<int:run_id>/metadata")
+def legacy_manual_overtake_metadata(run_id: int):
     upload_folder = current_app.config['UPLOAD_FOLDER']
     info = get_run_video_info(run_id, upload_folder)
     if not info:

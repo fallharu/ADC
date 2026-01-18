@@ -30,6 +30,13 @@
     border-color: #e9ecef;
   }
 
+  .manual-badge-new-auto {
+    background-color: #f8d7da;
+    color: #842029;
+    border-color: #f5c2c7;
+  }
+
+
   #manualRunSelect option.manual-run-option[data-status="annotated"],
   #manualViewRuns option.manual-run-option[data-status="annotated"] {
     background-color: #d1e7dd;
@@ -47,6 +54,14 @@
   #manualViewRuns option.manual-run-option[data-status="new"] {
     background-color: #f8f9fa;
   }
+
+  #manualRunSelect option.manual-run-option[data-status="new_auto"],
+  #manualViewRuns option.manual-run-option[data-status="new_auto"] {
+    background-color: #f8d7da;
+    color: #842029;
+    font-weight: 600;
+  }
+
 
   .manual-context-scroll {
     max-height: clamp(360px, 60vh, 580px);
@@ -111,8 +126,10 @@
     <div class="manual-run-legend d-flex align-items-center gap-2 mb-1 small">
       <span class="badge rounded-pill manual-badge-annotated">付与済み</span>
       <span class="badge rounded-pill manual-badge-visited">観覧済み</span>
+      <span class="badge rounded-pill manual-badge-new-auto">自動検知あり</span>
       <span class="badge rounded-pill manual-badge-new">未訪問</span>
     </div>
+
     <select id="manualRunSelect" name="run_id" class="form-select form-select-sm">
       <option value="" {% if not selected_run_id %}selected{% endif %}>Runを選択してください</option>
       {% for option in run_options %}
@@ -124,7 +141,10 @@
       {% set status_label = '手動追い越し付与済み' %}
       {% elif status == 'visited' %}
       {% set status_label = '観覧済み (付与なし)' %}
+      {% elif status == 'new_auto' %}
+      {% set status_label = '自動検知あり (未確認)' %}
       {% endif %}
+
       <option value="{{ rid }}" class="manual-run-option" data-status="{{ status }}" title="{{ status_label }}" {% if
         selected_run_id==rid %}selected{% endif %}>
         Run #{{ rid }}{% if option.filename or option['filename'] %} - {{ option.filename if option.filename is defined
@@ -169,6 +189,11 @@
         <span id="manualFrameCounter" class="badge text-bg-secondary">0 / 0</span>
       </div>
       <div class="card-body">
+        <!-- 自動追い越し情報表示エリア -->
+        <div id="manualAutoOvertakeInfo" class="alert alert-info small mb-2 d-none" role="alert">
+          <span id="manualAutoOvertakeLabel"></span>
+          <span id="manualAutoOvertakeFrames" class="ms-2"></span>
+        </div>
         <div class="position-relative border rounded bg-body-tertiary overflow-hidden" style="min-height: 380px;"
           id="manualFrameContainer">
           <div id="manualFrameLoader"
@@ -222,38 +247,118 @@
     </div>
   </div>
   <div class="col-12 col-lg-4">
+    <!-- Existing Events List Panel (Moved here) -->
+    <div class="card shadow-sm mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>イベントジャンプ</span>
+        <span class="badge bg-secondary">{{ existing_events|length if existing_events is defined else 0 }}</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="list-group list-group-flush small" style="max-height: 300px; overflow-y: auto;">
+          {% if existing_events %}
+          {% for event in existing_events %}
+          <div class="list-group-item list-group-item-action p-0 d-flex align-items-center">
+            <div class="flex-grow-1 p-2" onclick="jumpToFrame({{ event.frame }})" style="cursor: pointer;">
+              <div class="fw-bold">
+                {% if event.type == 'auto' %}
+                <span class="badge bg-info text-dark me-1">自動</span>
+                {% else %}
+                <span class="badge bg-success me-1">手動</span>
+                {% endif %}
+                Frame: {{ event.frame }}
+              </div>
+              <div class="small text-muted text-truncate" style="max-width: 250px;">{{ event.desc }}</div>
+            </div>
+            {% if event.type == 'manual' %}
+            <button type="button" class="btn btn-link text-danger p-2"
+              onclick="deleteManualEvent(event, {{ event.id }})" title="削除">
+              <i class="bi bi-trash"></i>
+            </button>
+            {% endif %}
+          </div>
+          {% endfor %}
+          {% else %}
+          <div class="p-3 text-center text-muted">イベントはありません</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
     <div class="card shadow-sm mb-3">
       <div class="card-header">フレーム内の検出</div>
       <div class="card-body">
         <p class="small text-muted mb-2">BBOXをクリックすると追い越し側→追い越され側の順に選択できます。</p>
+        <div id="manualDetectionLoader" class="d-flex align-items-center justify-content-center py-3 d-none">
+          <div class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></div>
+          <span class="small text-muted">検出データを取得中...</span>
+        </div>
         <div id="manualDetectionList" class="list-group list-group-flush small"></div>
         <div id="manualNoDetection" class="alert alert-info small mb-0 d-none">このフレームには検出がありません。</div>
       </div>
     </div>
-    <div class="card shadow-sm">
-      <div class="card-header">追い越しイベント登録</div>
-      <div class="card-body">
-        <p class="small text-muted">追い越し側と追い越され側を選択し、必要であればメモを記入して保存してください。</p>
-        <div class="mb-2">
-          <label for="manualNotes" class="form-label small">メモ (任意)</label>
-          <textarea id="manualNotes" class="form-control form-control-sm" rows="2" maxlength="500"
-            placeholder="例: 目視で追い越しを確認"></textarea>
-          <div class="form-text">最大500文字まで入力できます。</div>
-        </div>
-        <button type="button" class="btn btn-primary w-100 btn-sm" id="manualSaveButton" disabled>追い越しを保存</button>
-        <button type="button" class="btn btn-outline-primary w-100 btn-sm mt-2" id="manualScalePreviewButton"
-          disabled>View lane scale</button>
-        <div id="manualSaveMessage" class="alert alert-success small mt-3 d-none" role="alert"></div>
-        <div id="manualSaveNotice" class="alert alert-warning small mt-3 d-none" role="alert"></div>
-        <div id="manualSaveError" class="alert alert-danger small mt-3 d-none" role="alert"></div>
-        <div class="d-flex align-items-center gap-2 mt-3">
-          <span id="manualProcessingIndicator" class="manual-processing-indicator" data-state="idle"
-            aria-hidden="true"></span>
-          <span id="manualProcessingLabel" class="small text-muted" aria-live="polite">保存処理待機中</span>
-        </div>
+  </div>
+
+  <!-- Existing Events List Panel -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>イベントジャンプ</span>
+      <span class="badge bg-secondary">{{ existing_events|length if existing_events is defined else 0 }}</span>
+    </div>
+    <div class="card-body p-0">
+      <div class="list-group list-group-flush small" style="max-height: 300px; overflow-y: auto;">
+        {% if existing_events %}
+        {% for event in existing_events %}
+        <button type="button"
+          class="list-group-item list-group-item-action d-flex justify-content-between align-items-start"
+          onclick="jumpToFrame({{ event.frame }})">
+          <div class="ms-2 me-auto">
+            <div class="fw-bold">
+              {% if event.type == 'auto' %}
+              <span class="badge bg-info text-dark me-1">自動</span>
+              {% else %}
+              <span class="badge bg-success me-1">手動</span>
+              {% endif %}
+              Frame: {{ event.frame }}
+            </div>
+            {{ event.desc }}
+          </div>
+        </button>
+        {% endfor %}
+        {% else %}
+        <div class="p-3 text-center text-muted">イベントはありません</div>
+        {% endif %}
       </div>
     </div>
   </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header">追い越しイベント登録</div>
+    <div class="card-body">
+      <p class="small text-muted">追い越し側と追い越され側を選択し、必要であればメモを記入して保存してください。</p>
+      <div class="mb-2">
+        <label for="manualNotes" class="form-label small">メモ (任意)</label>
+        <textarea id="manualNotes" class="form-control form-control-sm" rows="2" maxlength="500"
+          placeholder="例: 目視で追い越しを確認"></textarea>
+        <div class="form-text">最大500文字まで入力できます。</div>
+      </div>
+      <div class="d-grid gap-2">
+        <button type="button" class="btn btn-primary btn-sm" id="manualSaveImmediateButton" disabled>保存して即時計算</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="manualSaveQueueButton" disabled>保存
+          (後処理キュー登録)</button>
+      </div>
+      <button type="button" class="btn btn-outline-primary w-100 btn-sm mt-2" id="manualScalePreviewButton"
+        disabled>View lane scale</button>
+      <div id="manualSaveMessage" class="alert alert-success small mt-3 d-none" role="alert"></div>
+      <div id="manualSaveNotice" class="alert alert-warning small mt-3 d-none" role="alert"></div>
+      <div id="manualSaveError" class="alert alert-danger small mt-3 d-none" role="alert"></div>
+      <div class="d-flex align-items-center gap-2 mt-3">
+        <span id="manualProcessingIndicator" class="manual-processing-indicator" data-state="idle"
+          aria-hidden="true"></span>
+        <span id="manualProcessingLabel" class="small text-muted" aria-live="polite">保存処理待機中</span>
+      </div>
+    </div>
+  </div>
+</div>
 </div>
 
 <div class="card shadow-sm mt-4">
@@ -748,6 +853,14 @@
 {{ super() }}
 {% if selected_run_id %}
 <script>
+  window.jumpToFrame = function (frame) {
+    const input = document.getElementById('manualFrameInput');
+    if (input) {
+      input.value = frame;
+      input.dispatchEvent(new Event('change'));
+    }
+  };
+
   (function () {
     const configEl = document.getElementById('manualOvertakeConfig');
     if (!configEl) {
@@ -773,9 +886,11 @@
     const loader = document.getElementById('manualFrameLoader');
     const playToggle = document.getElementById('manualPlayToggle');
     const detectionList = document.getElementById('manualDetectionList');
+    const detectionLoader = document.getElementById('manualDetectionLoader');
     const noDetectionAlert = document.getElementById('manualNoDetection');
     const selectionSummary = document.getElementById('manualSelectionSummary');
-    const saveButton = document.getElementById('manualSaveButton');
+    const saveImmediateButton = document.getElementById('manualSaveImmediateButton');
+    const saveQueueButton = document.getElementById('manualSaveQueueButton');
     const saveMessage = document.getElementById('manualSaveMessage');
     const saveNotice = document.getElementById('manualSaveNotice');
     const saveError = document.getElementById('manualSaveError');
@@ -838,6 +953,10 @@
     let firstDetectionFrame = null;
     let prefetchPollTimer = null;
     let firstBicycleFrame = null;
+    let autoOvertakeFrames = [];
+    const autoOvertakeInfo = document.getElementById('manualAutoOvertakeInfo');
+    const autoOvertakeLabel = document.getElementById('manualAutoOvertakeLabel');
+    const autoOvertakeFramesEl = document.getElementById('manualAutoOvertakeFrames');
     const EVENTS_FETCH_LIMIT = 500;
     let latestEvents = [];
     let eventsRefreshPromise = null;
@@ -1281,7 +1400,8 @@
 
     function updateSaveState() {
       const enabled = selectedOvertaker !== null && selectedOvertaken !== null;
-      saveButton.disabled = !enabled;
+      if (saveImmediateButton) saveImmediateButton.disabled = !enabled;
+      if (saveQueueButton) saveQueueButton.disabled = !enabled;
       if (scalePreviewButton) {
         scalePreviewButton.disabled = !(scalePreviewUrl && enabled);
       }
@@ -2076,6 +2196,50 @@
       }
     }
 
+    function updateAutoOvertakeInfo() {
+      if (!autoOvertakeInfo || !autoOvertakeLabel) {
+        return;
+      }
+      if (!autoOvertakeFrames || autoOvertakeFrames.length === 0) {
+        // 追い越し無し
+        autoOvertakeLabel.textContent = '自動追い越し: なし';
+        autoOvertakeLabel.className = 'text-muted';
+        if (autoOvertakeFramesEl) {
+          autoOvertakeFramesEl.textContent = '';
+        }
+        autoOvertakeInfo.classList.remove('d-none', 'alert-success');
+        autoOvertakeInfo.classList.add('alert-warning');
+      } else {
+        // 追い越し有り
+        autoOvertakeLabel.textContent = `自動追い越し: ${autoOvertakeFrames.length}件検出`;
+        autoOvertakeLabel.className = 'fw-bold text-success';
+        if (autoOvertakeFramesEl) {
+          const frameLinks = autoOvertakeFrames.slice(0, 10).map(frame => {
+            return `<a href="#" class="auto-overtake-frame-link" data-frame="${frame}">F${frame}</a>`;
+          });
+          const displayText = frameLinks.join(', ');
+          const suffix = autoOvertakeFrames.length > 10 ? ` ... 他${autoOvertakeFrames.length - 10}件` : '';
+          autoOvertakeFramesEl.innerHTML = `フレーム: ${displayText}${suffix}`;
+        }
+        autoOvertakeInfo.classList.remove('d-none', 'alert-warning');
+        autoOvertakeInfo.classList.add('alert-success');
+      }
+
+      // フレームリンクのクリックイベント
+      if (autoOvertakeFramesEl) {
+        autoOvertakeFramesEl.querySelectorAll('.auto-overtake-frame-link').forEach(link => {
+          link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const targetFrame = Number(link.dataset.frame);
+            if (Number.isFinite(targetFrame)) {
+              stopPlayback();
+              setFrame(targetFrame);
+            }
+          });
+        });
+      }
+    }
+
     function updateOrientationSummary(counts) {
       if (!orientationSummary) {
         return;
@@ -2864,20 +3028,30 @@
       if (!metadata || !frameImage || !overlayCanvas) {
         return;
       }
-      const width = frameImage.naturalWidth || frameImage.width;
-      const height = frameImage.naturalHeight || frameImage.height;
-      overlayCanvas.width = width;
-      overlayCanvas.height = height;
-      overlayCanvas.style.width = frameImage.clientWidth + 'px';
-      overlayCanvas.style.height = frameImage.clientHeight + 'px';
-      overlayCtx.clearRect(0, 0, width, height);
+      // 画像がまだ表示されていない場合は遅延して再試行
+      const imgWidth = frameImage.naturalWidth || frameImage.width;
+      const imgHeight = frameImage.naturalHeight || frameImage.height;
+      const clientWidth = frameImage.clientWidth;
+      const clientHeight = frameImage.clientHeight;
+
+      if (!imgWidth || !imgHeight || !clientWidth || !clientHeight) {
+        // 画像サイズが確定するまで遅延
+        requestAnimationFrame(() => drawDetections());
+        return;
+      }
+
+      overlayCanvas.width = imgWidth;
+      overlayCanvas.height = imgHeight;
+      overlayCanvas.style.width = clientWidth + 'px';
+      overlayCanvas.style.height = clientHeight + 'px';
+      overlayCtx.clearRect(0, 0, imgWidth, imgHeight);
 
       const metaWidthRaw = Number(metadata.width);
       const metaHeightRaw = Number(metadata.height);
-      const metaWidth = Number.isFinite(metaWidthRaw) && metaWidthRaw > 0 ? metaWidthRaw : width;
-      const metaHeight = Number.isFinite(metaHeightRaw) && metaHeightRaw > 0 ? metaHeightRaw : height;
-      const scaleX = width / metaWidth;
-      const scaleY = height / metaHeight;
+      const metaWidth = Number.isFinite(metaWidthRaw) && metaWidthRaw > 0 ? metaWidthRaw : imgWidth;
+      const metaHeight = Number.isFinite(metaHeightRaw) && metaHeightRaw > 0 ? metaHeightRaw : imgHeight;
+      const scaleX = imgWidth / metaWidth;
+      const scaleY = imgHeight / metaHeight;
 
       drawLaneLines(scaleX, scaleY);
 
@@ -3146,6 +3320,17 @@
       };
       img.src = url.toString() + '&ts=' + Date.now();
 
+      // 検出データ取得開始 - ローダー表示
+      if (detectionLoader) {
+        detectionLoader.classList.remove('d-none');
+      }
+      if (detectionList) {
+        detectionList.classList.add('d-none');
+      }
+      if (noDetectionAlert) {
+        noDetectionAlert.classList.add('d-none');
+      }
+
       fetch(`${detectionsUrl}?frame=${currentFrame}`)
         .then(resp => resp.ok ? resp.json() : Promise.reject(resp))
         .then(data => {
@@ -3161,7 +3346,15 @@
             }
             return det;
           });
+          // ローダー非表示
+          if (detectionLoader) {
+            detectionLoader.classList.add('d-none');
+          }
+          if (detectionList) {
+            detectionList.classList.remove('d-none');
+          }
           renderDetectionList();
+          drawDetections();
           updateSelectionPanel();
         })
         .catch(err => {
@@ -3170,6 +3363,13 @@
           }
           console.error('Failed to load detections', err);
           detections = [];
+          // ローダー非表示
+          if (detectionLoader) {
+            detectionLoader.classList.add('d-none');
+          }
+          if (detectionList) {
+            detectionList.classList.remove('d-none');
+          }
           renderDetectionList();
           updateSelectionPanel();
           showInlineFeedback('検出データを取得できませんでした。');
@@ -3438,7 +3638,23 @@
             firstBicycleFrame = null;
           }
           updateFirstBicycleButton();
-          currentFrame = 0;
+          // 自動追い越しフレームを処理
+          const rawAutoOvertakeFrames = data.auto_overtake_frames;
+          if (Array.isArray(rawAutoOvertakeFrames)) {
+            autoOvertakeFrames = rawAutoOvertakeFrames.filter(f => Number.isFinite(f)).map(f => Math.round(f));
+          } else {
+            autoOvertakeFrames = [];
+          }
+          updateAutoOvertakeInfo();
+
+          // Check for frame parameter in URL
+          const urlParams = new URLSearchParams(window.location.search);
+          const initFrameParam = parseInt(urlParams.get('frame'), 10);
+          if (!Number.isNaN(initFrameParam) && Number.isFinite(initFrameParam)) {
+            currentFrame = Math.max(0, Math.min(initFrameParam, data.frame_count - 1));
+          } else {
+            currentFrame = 0;
+          }
           frameInput.min = 0;
           frameInput.max = Math.max(data.frame_count - 1, 0);
           frameRange.min = 0;
@@ -3587,19 +3803,22 @@
       }
     });
 
-    saveButton.addEventListener('click', () => {
-      if (saveButton.disabled || selectedOvertaker === null || selectedOvertaken === null) {
+    const handleSave = (immediate) => {
+      if ((saveImmediateButton && saveImmediateButton.disabled) || selectedOvertaker === null || selectedOvertaken === null) {
         return;
       }
       clearMessages();
-      setProcessingIndicatorState('processing', 'データ処理中...');
+      const actionLabel = immediate ? '保存して即時計算中...' : '保存中...';
+      setProcessingIndicatorState('processing', actionLabel);
       const payload = {
         frame_num: currentFrame,
         overtaker_group_id: selectedOvertaker,
         overtaken_group_id: selectedOvertaken,
         notes: notesInput.value.trim(),
+        immediate: immediate, // Flag for backend
       };
-      saveButton.disabled = true;
+      if (saveImmediateButton) saveImmediateButton.disabled = true;
+      if (saveQueueButton) saveQueueButton.disabled = true;
       fetch(eventsUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3651,7 +3870,16 @@
               }
             });
           }
-          if (body.context_queued) {
+          if (body.context_executed) { // Result from immediate execution
+            const execMsg = typeof body.context_message === 'string' ? body.context_message : '後処理を実行しました。';
+            noticeMessages.push(execMsg);
+            if (body.context_success) {
+              // Success case
+            } else {
+              // Failure case in back-processing
+              noticeMessages.push('後処理でエラーまたは警告が発生しました。詳細はログを確認してください。');
+            }
+          } else if (body.context_queued) {
             const queueMessage = '追い越し側/追い越され側グループの全フレーム情報を後処理キューに登録しました。';
             if (!noticeMessages.some(msg => msg === queueMessage)) {
               noticeMessages.push(queueMessage);
@@ -3757,10 +3985,19 @@
           setProcessingIndicatorState('error', '保存処理に失敗しました');
         })
         .finally(() => {
-          saveButton.disabled = false;
+          if (saveImmediateButton) saveImmediateButton.disabled = false;
+          if (saveQueueButton) saveQueueButton.disabled = false;
+          // Re-evaluate state in case selection changed
+          updateSaveState();
         });
-    });
+    };
 
+    if (saveImmediateButton) {
+      saveImmediateButton.addEventListener('click', () => handleSave(true));
+    }
+    if (saveQueueButton) {
+      saveQueueButton.addEventListener('click', () => handleSave(false));
+    }
     if (scalePreviewButton) {
       scalePreviewButton.addEventListener('click', () => {
         if (scalePreviewButton.disabled || !scalePreviewUrl || selectedOvertaker === null || selectedOvertaken === null) {
@@ -3800,6 +4037,36 @@
 
     refreshEventsFromServer();
     fetchMetadata();
+
+    // Define delete function in global scope accessible from HTML
+    window.deleteManualEvent = function (e, eventId) {
+      if (e) e.stopPropagation(); // prevent jumping
+
+      if (!confirm("この追い越しイベントを削除してもよろしいですか？\n関連データも削除されます（自動バックアップはされません）。")) {
+        return;
+      }
+
+      const runId = manualRunId;
+      // Use relative path or construct full URL
+      fetch(`/api/manual_overtake/${runId}/events/${eventId}`, {
+        method: 'DELETE'
+      })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            // Remove element from DOM or reload
+            // For simplicity, reload to reflect backend state accurately
+            window.location.reload();
+          } else {
+            alert("削除に失敗しました: " + (data.error || "不明なエラー"));
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert("通信エラーが発生しました。");
+        });
+    };
+
   })();
 </script>
 {% endif %}

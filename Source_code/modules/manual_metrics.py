@@ -60,18 +60,31 @@ def _measurement_from_bbox(
     det: Mapping[str, object],
     left_line: Optional[Sequence[Sequence[object]]],
     right_line: Optional[Sequence[Sequence[object]]],
+    direction: str = 'unknown',
 ) -> tuple[Optional[float], Optional[float]]:
     y2 = _to_float(det.get("y2"))
     if y2 is None:
         return None, None
 
+    x1 = _to_float(det.get("x1"))
+    x2 = _to_float(det.get("x2"))
+    
+    # 強制選択ロジック
+    if direction == 'up_to_down':
+        # 右側 (x2) を優先
+        if x2 is not None:
+             return x2, y2
+    elif direction == 'down_to_up':
+        # 左側 (x1) を優先
+        if x1 is not None:
+             return x1, y2
+
     candidates: list[tuple[float, float, float]] = []
-    for key in ("x1", "x2"):
-        x_val = _to_float(det.get(key))
-        if x_val is None:
+    for val in (x1, x2):
+        if val is None:
             continue
-        distance = _distance_to_white_lines((x_val, y2), left_line, right_line)
-        candidates.append((distance, x_val, y2))
+        dist = _distance_to_white_lines((val, y2), left_line, right_line)
+        candidates.append((dist, val, y2))
 
     if candidates:
         best_distance, best_x, best_y = min(
@@ -85,36 +98,63 @@ def _measurement_from_bbox(
         if math.isfinite(best_distance):
             return best_x, best_y
 
-    return _to_float(det.get("x2")), y2
+    fallback_x = x2 if x2 is not None else x1
+    return fallback_x, y2
 
 
 def select_measure_point_from_candidates(
     candidates: Sequence[Mapping[str, object]],
     left_line: Optional[Sequence[Sequence[object]]],
     right_line: Optional[Sequence[Sequence[object]]],
+    direction: str = 'unknown',
 ) -> tuple[Optional[float], Optional[float]]:
-    """候補となる検出の中から白線に最も近い測定点を選択する。
-
-    グループ内に複数のタイヤ検出が存在する場合でも、白線との距離が
-    最も短い右下角を持つ候補を選択する。白線情報がない場合は
-    :func:`_measurement_from_bbox` のフォールバックに従う。
+    """候補となる検出の中から最適な測定点を選択する。
+    
+    directionにより優先順位が変わる:
+    - up_to_down (手前): 右側優先
+    - down_to_up (奥): 左側優先
+    - unknown: 白線距離優先
     """
 
     best_choice: Optional[tuple[tuple[float, float, float], float, float]] = None
+    
+    # 評価関数用の係数を設定
+    # rank_key形式: (primary_score, secondary_score, ...) 
+    # 小さいほど良い
+    
     for det in candidates:
         if not isinstance(det, Mapping):
             continue
 
-        measure_x, measure_y = _measurement_from_bbox(det, left_line, right_line)
+        measure_x, measure_y = _measurement_from_bbox(det, left_line, right_line, direction=direction)
         if None in (measure_x, measure_y):
             continue
 
         distance = _distance_to_white_lines((measure_x, measure_y), left_line, right_line)
-        rank = (
-            distance if math.isfinite(distance) else float("inf"),
-            -(measure_y if math.isfinite(measure_y) else float("-inf")),
-            -(measure_x if math.isfinite(measure_x) else float("-inf")),
-        )
+        norm_dist = distance if math.isfinite(distance) else float("inf")
+        
+        # ソートキー生成
+        if direction == 'up_to_down':
+            # 右側優先: Xが大きいほど良い -> primary_score = -X
+            # 白線距離は考慮しない（ユーザー要望: 右寄り固定）
+            # ただし、候補間でXを競わせる
+            rank = (
+                -(measure_x if math.isfinite(measure_x) else float("-inf")),
+                norm_dist
+            )
+        elif direction == 'down_to_up':
+             # 左側優先: Xが小さいほど良い -> primary_score = X
+             rank = (
+                 (measure_x if math.isfinite(measure_x) else float("inf")),
+                 norm_dist
+             )
+        else:
+            # 既存ロジック: 白線距離優先
+            rank = (
+                norm_dist,
+                -(measure_y if math.isfinite(measure_y) else float("-inf")), # 手前優先
+                -(measure_x if math.isfinite(measure_x) else float("-inf")), # 右優先
+            )
 
         if best_choice is None or rank < best_choice[0]:
             best_choice = (rank, measure_x, measure_y)
@@ -136,15 +176,20 @@ def select_bicycle_tire_measure_point(
     candidates: Sequence[Mapping[str, object]],
     left_line: Optional[Sequence[Sequence[object]]],
     right_line: Optional[Sequence[Sequence[object]]],
+    direction: str = 'unknown',
 ) -> tuple[Optional[float], Optional[float]]:
     """自転車BBOX内で最大のタイヤから測定点を決める。"""
+    
+    # Down->Up の場合は左寄り優先なので、共通ロジックに委譲
+    if direction == 'down_to_up':
+         return select_measure_point_from_candidates(candidates, left_line, right_line, direction=direction)
 
     bike_x1 = _to_float(bicycle_bbox.get("x1"))
     bike_y1 = _to_float(bicycle_bbox.get("y1"))
     bike_x2 = _to_float(bicycle_bbox.get("x2"))
     bike_y2 = _to_float(bicycle_bbox.get("y2"))
     if None in (bike_x1, bike_y1, bike_x2, bike_y2):
-        return select_measure_point_from_candidates(candidates, left_line, right_line)
+        return select_measure_point_from_candidates(candidates, left_line, right_line, direction=direction)
 
     bike_bbox = (bike_x1, bike_y1, bike_x2, bike_y2)
     best: Optional[tuple[tuple[float, float, float, float], float, float]] = None
@@ -168,6 +213,10 @@ def select_bicycle_tire_measure_point(
             continue
 
         corner_candidates = []
+        # 自転車の場合は、Up->Downでも白線に近い方を優先（ユーザー要望: 自転車は白線に近いほう）
+        # なので、direction 引数は _measurement_from_bbox に渡さず、デフォルト(unknown=白線優先)で評価する手もあるが、
+        # ここでは独自に評価している。
+        
         for corner_x in (x1, x2):
             distance = _distance_to_white_lines((corner_x, y2), left_line, right_line)
             corner_candidates.append((distance, corner_x, y2))
@@ -195,7 +244,7 @@ def select_bicycle_tire_measure_point(
             best = (rank, best_corner[1], best_corner[2])
 
     if best is None:
-        return select_measure_point_from_candidates(candidates, left_line, right_line)
+        return select_measure_point_from_candidates(candidates, left_line, right_line, direction=direction)
 
     return best[1], best[2]
 
