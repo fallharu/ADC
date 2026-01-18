@@ -15,6 +15,7 @@ from ..measure_points import (
 )
 from ..manual_metrics import lane_scale_at_point
 from ..calibration_loader import load_calibration_json
+from ..white_line import get_line_x_at_y
 
 
 LANE_WIDTH_METERS = 7.0
@@ -338,6 +339,17 @@ def assign_lane_distance(
     updates: list[tuple] = []
     measure_x_values = enriched["measure_x"].to_numpy(np.float64)
     measure_y_values = enriched["measure_y"].to_numpy(np.float64)
+    center_x_values = ((enriched["x1"] + enriched["x2"]) / 2).to_numpy(np.float64)
+    center_y_values = ((enriched["y1"] + enriched["y2"]) / 2).to_numpy(np.float64)
+    bbox_x2_values = enriched["x2"].to_numpy(np.float64)
+    bbox_y2_values = enriched["y2"].to_numpy(np.float64)
+    class_name_values = enriched.get("class_name", pd.Series([""] * len(enriched))).astype(str).str.lower()
+    direction_values = (
+        enriched.get("travel_direction", pd.Series([""] * len(enriched)))
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
     for idx, (
         left_px,
         left_m,
@@ -367,6 +379,8 @@ def assign_lane_distance(
     ):
         l_cross_m = None
         r_cross_m = None
+        center_status = None
+        white_status = None
         
         if flag == '-':
             # If outside, the smaller distance is the crossing amount
@@ -379,6 +393,16 @@ def assign_lane_distance(
                 l_cross_m = left_m
             elif np.isfinite(right_m):
                 r_cross_m = right_m
+
+        if direction_values.iloc[idx] == "B":
+            center_line_x = get_line_x_at_y(bbox_y2_values[idx], center_line) if center_line else None
+            if center_line_x is not None and np.isfinite(bbox_x2_values[idx]):
+                center_status = "中央線越え" if bbox_x2_values[idx] > center_line_x else "中央線内側"
+
+            if class_name_values.iloc[idx] == "bicycle":
+                left_line_x = get_line_x_at_y(center_y_values[idx], left_line) if left_line else None
+                if left_line_x is not None and np.isfinite(center_x_values[idx]):
+                    white_status = "白線内側" if center_x_values[idx] > left_line_x else "白線越え"
 
         updates.append(
             (
@@ -396,6 +420,8 @@ def assign_lane_distance(
                 flag if isinstance(flag, str) and flag in {"+", "-"} else None,
                 _normalize_distance(l_cross_m),
                 _normalize_distance(r_cross_m),
+                center_status,
+                white_status,
                 int(auto_id),
             )
         )
@@ -421,7 +447,9 @@ def assign_lane_distance(
                 line_distance_cm = ?,
                 lane_position_flag = ?,
                 l_line_cross_m = ?,
-                r_line_cross_m = ?
+                r_line_cross_m = ?,
+                center_line_overtake_status = ?,
+                white_line_overtake_status = ?
             WHERE auto_id = ?
             """,
             updates,

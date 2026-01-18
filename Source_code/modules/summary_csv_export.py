@@ -81,6 +81,12 @@ def generate_summary_csv(db_path: str = MAIN_DB_PATH) -> bytes:
         df['中央線越え(m)'] = pd.to_numeric(df['中央線越え(m)'], errors='coerce').round(2)
         df['白線越え(m)'] = pd.to_numeric(df['白線越え(m)'], errors='coerce').round(2)
 
+        def to_presence_flag(series: pd.Series) -> pd.Series:
+            return series.apply(lambda value: 'あり' if pd.notnull(value) and value > 0 else 'なし')
+
+        df['中央線追い越し'] = to_presence_flag(df['中央線越え(m)'])
+        df['外側線追い越し'] = to_presence_flag(df['白線越え(m)'])
+
         # Rename columns to Japanese
         column_map = {
             'run_id': 'Run ID',
@@ -95,7 +101,9 @@ def generate_summary_csv(db_path: str = MAIN_DB_PATH) -> bytes:
             'overtake': '追い越しフラグ',
             'line_distance': '白線距離(m)',
             '中央線越え(m)': '中央線越え(m)',
-            '白線越え(m)': '白線越え(m)'
+            '白線越え(m)': '白線越え(m)',
+            '中央線追い越し': '中央線追い越し',
+            '外側線追い越し': '外側線追い越し'
         }
         df = df.rename(columns=column_map)
         

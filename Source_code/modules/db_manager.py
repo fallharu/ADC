@@ -381,14 +381,24 @@ def init_db():
                 approach_distance_m REAL,
                 clearance_distance_m REAL,
                 travel_direction TEXT,
+                measure_x REAL,
+                measure_y REAL,
+                l_line_distance REAL,
                 l_line_distance_m REAL,
+                l_line_distance_cm REAL,
+                r_line_distance REAL,
                 r_line_distance_m REAL,
+                r_line_distance_cm REAL,
+                line_distance REAL,
                 line_distance_m REAL,
+                line_distance_cm REAL,
                 overtake INTEGER,
                 overtake_after INTEGER,
                 overtake_by TEXT,
                 l_line_cross_m REAL,
                 r_line_cross_m REAL,
+                center_line_overtake_status TEXT,
+                white_line_overtake_status TEXT,
                 FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
             )
         """)
@@ -680,8 +690,49 @@ def get_or_create_class_id(conn, class_name):
 
 def ensure_detection_distance_columns():
     """Ensure Detection table has distance related columns."""
-    # Placeholder for logic inferred from imports
-    pass
+    should_close = False
+    conn = None
+    try:
+        conn = sqlite3.connect(MAIN_DB_PATH)
+        should_close = True
+        c = conn.cursor()
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='Detection'")
+        if not c.fetchone():
+            return
+
+        c.execute("PRAGMA table_info(Detection)")
+        columns = [row[1] for row in c.fetchall()]
+
+        required = {
+            "measure_x": "REAL",
+            "measure_y": "REAL",
+            "l_line_distance": "REAL",
+            "l_line_distance_m": "REAL",
+            "l_line_distance_cm": "REAL",
+            "r_line_distance": "REAL",
+            "r_line_distance_m": "REAL",
+            "r_line_distance_cm": "REAL",
+            "line_distance": "REAL",
+            "line_distance_m": "REAL",
+            "line_distance_cm": "REAL",
+            "lane_position_flag": "TEXT",
+            "l_line_cross_m": "REAL",
+            "r_line_cross_m": "REAL",
+            "center_line_overtake_status": "TEXT",
+            "white_line_overtake_status": "TEXT",
+        }
+
+        for col, dtype in required.items():
+            if col not in columns:
+                print(f"Migrating Detection: Adding {col}")
+                c.execute(f"ALTER TABLE Detection ADD COLUMN {col} {dtype}")
+
+        conn.commit()
+    except Exception as e:
+        print(f"Error during Detection distance migration: {e}")
+    finally:
+        if should_close and conn:
+            conn.close()
 
 def ensure_processlog_columns():
     """Ensure ProcessLog table has necessary columns."""

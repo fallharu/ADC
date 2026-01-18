@@ -58,6 +58,8 @@ def generate_full_csv(db_path: str) -> bytes:
             "離隔距離(m)", "離隔距離(cm)", "離隔距離(px)",
             "追い越し側 中央線越え", "追い越し側 白線越え", 
             "追い越され側 中央線越え", "追い越され側 白線越え",
+            "追い越し側 中央線追い越し", "追い越し側 外側線追い越し",
+            "追い越され側 中央線追い越し", "追い越され側 外側線追い越し",
             "採取年度", "道種"
         ]
 
@@ -296,6 +298,14 @@ def generate_full_csv(db_path: str) -> bytes:
                         on_center_cross = l_c
                         on_white_cross = r_c
 
+                def to_presence_flag(value):
+                    if value is None:
+                        return "なし"
+                    try:
+                        return "あり" if float(value) > 0 else "なし"
+                    except (TypeError, ValueError):
+                        return "なし"
+
                 row.extend([
                     clearance_m,
                     clearance_cm,
@@ -304,6 +314,10 @@ def generate_full_csv(db_path: str) -> bytes:
                     ot_white_cross,
                     on_center_cross,
                     on_white_cross,
+                    to_presence_flag(ot_center_cross),
+                    to_presence_flag(ot_white_cross),
+                    to_presence_flag(on_center_cross),
+                    to_presence_flag(on_white_cross),
                     event['collection_year'],
                     event['road_type']
                 ])
