@@ -97,6 +97,10 @@
                         style="font-size: 0.65rem; display: none;">0</span>
                     <span class="badge data-status-badge" data-img="{{ img }}" title="データ状態"
                         style="font-size: 0.65rem; display: none;">?</span>
+                    <span class="badge line-status-badge" data-img="{{ img }}" data-line="center" title="中央線判定"
+                        style="font-size: 0.65rem; display: none;">中:-</span>
+                    <span class="badge line-status-badge" data-img="{{ img }}" data-line="white" title="白線判定"
+                        style="font-size: 0.65rem; display: none;">白:-</span>
                 </div>
                 <!-- 右上: RUN_ID -->
                 <div class="card-overlay-right" style="position: absolute; top: 4px; right: 4px; z-index: 10;">
@@ -233,6 +237,14 @@
                                                 <th>進行方向</th>
                                                 <td id="carDirection">-</td>
                                             </tr>
+                                            <tr>
+                                                <th>中央線判定</th>
+                                                <td id="carCenterLineStatus">-</td>
+                                            </tr>
+                                            <tr>
+                                                <th>白線判定</th>
+                                                <td id="carWhiteLineStatus">-</td>
+                                            </tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -263,6 +275,14 @@
                                             <tr>
                                                 <th>進行方向</th>
                                                 <td id="bikeDirection">-</td>
+                                            </tr>
+                                            <tr>
+                                                <th>中央線判定</th>
+                                                <td id="bikeCenterLineStatus">-</td>
+                                            </tr>
+                                            <tr>
+                                                <th>白線判定</th>
+                                                <td id="bikeWhiteLineStatus">-</td>
                                             </tr>
                                         </tbody>
                                     </table>
@@ -402,6 +422,29 @@
         }
     }
 
+    function updateLineStatusBadge(imgPath, lineType, status) {
+        const badge = document.querySelector(`.line-status-badge[data-img="${imgPath}"][data-line="${lineType}"]`);
+        if (!badge) {
+            return;
+        }
+        if (!status) {
+            badge.style.display = 'none';
+            return;
+        }
+        const isCross = status.includes('越え');
+        const lineLabel = lineType === 'center' ? '中' : '白';
+        const statusLabel = isCross ? '越' : '中';
+        badge.textContent = `${lineLabel}:${statusLabel}`;
+        badge.title = status;
+        badge.classList.remove('bg-danger', 'bg-info', 'text-dark');
+        if (isCross) {
+            badge.classList.add('bg-danger');
+        } else {
+            badge.classList.add('bg-info', 'text-dark');
+        }
+        badge.style.display = 'inline-block';
+    }
+
     // Enable tooltips
     document.addEventListener('DOMContentLoaded', () => {
         const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
@@ -488,6 +531,13 @@
                     }
                     statusBadge.style.display = 'inline-block';
                 }
+
+                const centerStatus = data.car_detection?.center_line_overtake_status ||
+                    data.bike_detection?.center_line_overtake_status;
+                const whiteStatus = data.bike_detection?.white_line_overtake_status ||
+                    data.car_detection?.white_line_overtake_status;
+                updateLineStatusBadge(imgPath, 'center', centerStatus);
+                updateLineStatusBadge(imgPath, 'white', whiteStatus);
             }
         } catch (err) {
             console.warn(`Failed to fetch metadata for ${imgPath}:`, err);
@@ -507,11 +557,14 @@
         const hasCarLineDistance = car.line_distance_m != null;
         const hasBikeSpeed = bike.speed_km_h != null;
         const hasCarSpeed = car.speed_km_h != null;
-        const hasBikeLaneFlag = bike.lane_position_flag != null && bike.lane_position_flag !== '';
-        const hasCarLaneFlag = car.lane_position_flag != null && car.lane_position_flag !== '';
+        const carDirection = car.travel_direction || '';
+        const bikeDirection = bike.travel_direction || '';
+        const hasCarCenterStatus = carDirection !== 'B' || (car.center_line_overtake_status != null && car.center_line_overtake_status !== '');
+        const hasBikeCenterStatus = bikeDirection !== 'B' || (bike.center_line_overtake_status != null && bike.center_line_overtake_status !== '');
+        const hasBikeWhiteStatus = bikeDirection !== 'B' || (bike.white_line_overtake_status != null && bike.white_line_overtake_status !== '');
 
         return hasClearance && hasBikeLineDistance && hasCarLineDistance &&
-            hasBikeSpeed && hasCarSpeed && hasBikeLaneFlag && hasCarLaneFlag;
+            hasBikeSpeed && hasCarSpeed && hasCarCenterStatus && hasBikeCenterStatus && hasBikeWhiteStatus;
     }
 
     // 追い越し写真詳細を表示
@@ -574,6 +627,8 @@
             document.getElementById('carClassName').textContent = car.class_name || '-';
             document.getElementById('carSpeed').textContent = car.speed_km_h != null ? `${car.speed_km_h.toFixed(1)} km/h` : '-';
             document.getElementById('carDirection').textContent = car.travel_direction || '-';
+            document.getElementById('carCenterLineStatus').textContent = car.center_line_overtake_status || '-';
+            document.getElementById('carWhiteLineStatus').textContent = car.white_line_overtake_status || '-';
 
             // 被追い越し車（自転車）
             document.getElementById('bikeGroupId').textContent = data.bike_group_id || '-';
@@ -581,6 +636,8 @@
             document.getElementById('bikeClassName').textContent = bike.class_name || '-';
             document.getElementById('bikeSpeed').textContent = bike.speed_km_h != null ? `${bike.speed_km_h.toFixed(1)} km/h` : '-';
             document.getElementById('bikeDirection').textContent = bike.travel_direction || '-';
+            document.getElementById('bikeCenterLineStatus').textContent = bike.center_line_overtake_status || '-';
+            document.getElementById('bikeWhiteLineStatus').textContent = bike.white_line_overtake_status || '-';
 
             // Store full data for copy function
             currentEventData = data;

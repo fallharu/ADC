@@ -1058,7 +1058,8 @@ def overtake_photo_detail():
                         d.auto_id, d.frame_num, d.group_id, 
                         cm.class_name, d.speed_km_h, d.confidence,
                         d.front_distance_m, d.clearance_distance_m,
-                        d.line_distance_m, d.travel_direction, d.lane_position_flag
+                        d.line_distance_m, d.travel_direction, d.lane_position_flag,
+                        d.center_line_overtake_status, d.white_line_overtake_status
                     FROM Detection d
                     LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
                     WHERE d.auto_id = ?
@@ -1075,7 +1076,8 @@ def overtake_photo_detail():
                         d.auto_id, d.frame_num, d.group_id,
                         cm.class_name, d.speed_km_h, d.confidence,
                         d.front_distance_m, d.clearance_distance_m,
-                        d.line_distance_m, d.travel_direction, d.lane_position_flag
+                        d.line_distance_m, d.travel_direction, d.lane_position_flag,
+                        d.center_line_overtake_status, d.white_line_overtake_status
                     FROM Detection d
                     LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
                     WHERE d.auto_id = ?
@@ -1136,6 +1138,7 @@ def overtake_photo_group_data():
                     d.line_distance_m, d.l_line_distance_m, d.r_line_distance_m,
                     d.travel_direction, d.acceleration_state, d.acceleration_m_s2,
                     d.x1, d.y1, d.x2, d.y2,
+                    d.center_line_overtake_status, d.white_line_overtake_status,
                     d.overtake, d.overtake_after
                 FROM Detection d
                 LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id

@@ -85,7 +85,7 @@ def generate_summary_csv(db_path: str = MAIN_DB_PATH) -> bytes:
             return series.apply(lambda value: 'あり' if pd.notnull(value) and value > 0 else 'なし')
 
         df['中央線追い越し'] = to_presence_flag(df['中央線越え(m)'])
-        df['外側線追い越し'] = to_presence_flag(df['白線越え(m)'])
+        df['白線追い越し'] = to_presence_flag(df['白線越え(m)'])
 
         # Rename columns to Japanese
         column_map = {
@@ -103,7 +103,7 @@ def generate_summary_csv(db_path: str = MAIN_DB_PATH) -> bytes:
             '中央線越え(m)': '中央線越え(m)',
             '白線越え(m)': '白線越え(m)',
             '中央線追い越し': '中央線追い越し',
-            '外側線追い越し': '外側線追い越し'
+            '白線追い越し': '白線追い越し'
         }
         df = df.rename(columns=column_map)
         
