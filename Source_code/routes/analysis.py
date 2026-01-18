@@ -1162,6 +1162,84 @@ def overtake_photo_group_data():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@main.route("/api/overtake_photo/delete", methods=["POST"])
+def overtake_photo_delete():
+    """追い越し写真と対応する追い越しイベントを削除するAPI"""
+    payload = request.get_json(silent=True) or {}
+    filename = payload.get("filename", "")
+
+    if not filename:
+        return jsonify({"ok": False, "error": "ファイル名が指定されていません"}), 400
+
+    pattern = r"overtake_(\d+)_car(\d+)_bike(\d+)_\d+\.png"
+    match = re.match(pattern, os.path.basename(filename))
+    if not match:
+        return jsonify({"ok": False, "error": "ファイル名の形式が不正です"}), 400
+
+    frame_num = int(match.group(1))
+    car_group_id = int(match.group(2))
+    bike_group_id = int(match.group(3))
+
+    deleted_event = False
+    deleted_file = False
+    event_run_id = None
+
+    try:
+        with sqlite3.connect(MAIN_DB_PATH) as conn:
+            configure_connection(conn, mode="read")
+            event_row = conn.execute(
+                """
+                SELECT event_id, run_id, overtaker_auto_id
+                FROM OvertakeEvents
+                WHERE event_frame_num = ?
+                  AND overtaker_group_id = ?
+                  AND overtaken_group_id = ?
+                """,
+                (frame_num, car_group_id, bike_group_id),
+            ).fetchone()
+
+            if event_row:
+                event_id, event_run_id, overtaker_auto_id = event_row
+                conn.execute("DELETE FROM OvertakeEvents WHERE event_id = ?", (event_id,))
+                if overtaker_auto_id:
+                    conn.execute(
+                        """
+                        UPDATE Detection
+                        SET overtake = 0,
+                            overtake_after = 0,
+                            overtake_by = NULL,
+                            overtake_by_second = NULL
+                        WHERE auto_id = ?
+                        """,
+                        (overtaker_auto_id,),
+                    )
+                conn.commit()
+                deleted_event = True
+    except Exception as e:
+        current_app.logger.exception("Overtake photo delete API failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    opt_root = os.getenv("Opt_files") or "output"
+    abs_opt = os.path.abspath(opt_root)
+    abs_path = os.path.abspath(os.path.join(abs_opt, filename))
+    if abs_path.startswith(abs_opt) and os.path.isfile(abs_path):
+        try:
+            os.remove(abs_path)
+            deleted_file = True
+        except Exception as e:
+            current_app.logger.exception("Failed to delete overtake snapshot file")
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify(
+        {
+            "ok": True,
+            "deleted_event": deleted_event,
+            "deleted_file": deleted_file,
+            "run_id": event_run_id,
+        }
+    )
+
+
 @main.route("/api/overtake_events/all_group_ids")
 def overtake_events_all_group_ids():
     """全追い越しイベントの車・自転車グループIDを一覧で取得するAPI"""

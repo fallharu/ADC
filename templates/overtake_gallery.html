@@ -293,6 +293,9 @@
                                 <button type="button" class="btn btn-success" id="btnCopyData">
                                     <i class="bi bi-clipboard me-1"></i>データをコピー (Excel形式)
                                 </button>
+                                <button type="button" class="btn btn-outline-danger ms-2" id="btnDeleteOvertake">
+                                    <i class="bi bi-trash me-1"></i>この追い越しを削除
+                                </button>
                                 <div id="copySuccess" class="text-success mt-2 d-none">
                                     <i class="bi bi-check-circle me-1"></i>コピーしました！
                                 </div>
@@ -477,6 +480,9 @@
 
         // コピーボタン
         document.getElementById('btnCopyData').addEventListener('click', copyOvertakeData);
+
+        // 削除ボタン
+        document.getElementById('btnDeleteOvertake').addEventListener('click', deleteOvertakeSnapshot);
     });
 
     // 全カードのバッジを初期化（コピー回数表示 + API呼び出しでRUN_ID・データ状態取得）
@@ -812,6 +818,55 @@
         }).catch(err => {
             alert('コピーに失敗しました: ' + err.message);
         });
+    }
+
+    // 追い越しイベント/写真を削除
+    async function deleteOvertakeSnapshot() {
+        if (!currentImgPath) {
+            alert('削除するデータがありません');
+            return;
+        }
+
+        if (!confirm('この追い越しイベントと写真を削除しますか？')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/overtake_photo/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: currentImgPath })
+            });
+            const data = await response.json();
+
+            if (!data.ok) {
+                alert('削除に失敗しました: ' + (data.error || '不明なエラー'));
+                return;
+            }
+
+            const card = document.querySelector(`.overtake-card[data-img-path="${currentImgPath}"]`);
+            if (card) {
+                const cardCol = card.closest('.col');
+                if (cardCol) {
+                    cardCol.remove();
+                } else {
+                    card.remove();
+                }
+            }
+
+            const modalEl = document.getElementById('overtakeDetailModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) {
+                modal.hide();
+            }
+
+            const detailMessage = data.deleted_event
+                ? '追い越しイベントと写真を削除しました。'
+                : '写真のみ削除しました（イベントが見つかりませんでした）。';
+            alert(detailMessage);
+        } catch (err) {
+            alert('通信エラー: ' + err.message);
+        }
     }
 
     // 全追い越しイベントのグループIDを一括出力
