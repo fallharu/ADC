@@ -46,6 +46,7 @@ def export_overtake_tracks():
                 SELECT 
                     e.overtake_event_id as event_id, 
                     e.run_id, 
+                    e.event_frame_num,
                     e.overtaker_group_id, 
                     e.overtaken_group_id,
                     p.output_folder,
@@ -99,11 +100,17 @@ def export_overtake_tracks():
                     line_dist_m = trk['line_distance_m'] 
                     
                     # Row Data
+                    offset_frame = None
+                    try:
+                        offset_frame = int(trk['frame_num']) - int(event['event_frame_num'])
+                    except (TypeError, ValueError):
+                        offset_frame = None
                     row = {
                         "イベントID": event['event_id'],
                         "Run": run_id,
                         "動画名": event['video_filename'],
                         "動画フレーム": trk['frame_num'],
+                        "オフセットフレーム": offset_frame,
                         "役割": role,
                         "Group ID": group_id,
                         "相手Group": partner_id,

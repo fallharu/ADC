@@ -151,6 +151,30 @@
       </button>
     </div>
   </div>
+
+  <div class="collapse mb-3" id="manualOvertakePostProcess">
+    <div class="card card-body bg-light">
+      <h6 class="card-title fw-bold">選択中Runの後処理画面を開く</h6>
+      <p class="small text-muted mb-2">
+        選択したRun IDの後処理画面（キャリブレーション・再計算・動画生成）を別タブで開きます。<br>
+        手動イベントの修正後に再計算が必要な場合はこちらから実行してください。
+      </p>
+      {% if selected_run_ids_set %}
+      <div class="d-flex flex-wrap gap-2">
+        {% for rid in selected_run_ids_set %}
+        <a href="{{ url_for('main.post_process', selected_run_id=rid) }}" class="btn btn-primary btn-sm"
+          target="_blank">
+          <i class="bi bi-box-arrow-up-right"></i> Run {{ rid }} の後処理へ
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="alert alert-warning py-1 mb-0 border-0">
+        <i class="bi bi-exclamation-triangle"></i> Runが選択されていません。上部のプルダウンからRunを選択してください。
+      </div>
+      {% endif %}
+    </div>
+  </div>
   <div class="d-flex flex-wrap gap-2 mb-3">
     <form method="post" action="{{ url_for('main.manual_overtake_reset') }}" class="d-inline">
       <input type="hidden" name="scope" value="all">
@@ -238,6 +262,43 @@
     </div>
   </div>
 
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold bg-warning bg-opacity-10">手動追い越し一括再計算</div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">登録済みのすべての手動追い越しイベントのメトリクス（離隔距離など）を現在のロジックで再計算します。</p>
+      <div class="d-flex align-items-center gap-3">
+        <button type="button" class="btn btn-warning btn-sm" id="manualRecalculateAllButton"
+          onclick="handleRecalculateAll()">
+          <i class="bi bi-arrow-repeat"></i> 手動追い越しすべて再実行 (更新)
+        </button>
+      </div>
+
+      <div id="recalculateStatsArea" class="mt-3 d-none">
+        <div class="alert alert-light border">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong><i class="bi bi-info-circle"></i> 結果ステータス:</strong>
+            <span id="recalcStatusText">待機中...</span>
+          </div>
+          <hr class="my-2">
+          <div class="row text-center">
+            <div class="col">
+              <div class="small text-muted">最大離隔</div>
+              <div class="fw-bold fs-5 text-dark" id="recalcMax">-</div>
+            </div>
+            <div class="col border-start border-end">
+              <div class="small text-muted">中央値</div>
+              <div class="fw-bold fs-5 text-primary" id="recalcMedian">-</div>
+            </div>
+            <div class="col">
+              <div class="small text-muted">最小離隔</div>
+              <div class="fw-bold fs-5 text-dark" id="recalcMin">-</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="card shadow-sm mt-4">
     <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
       <div>
@@ -271,6 +332,7 @@
             {% if selected_run_ids %}選択Runを再処理{% else %}Runを選択{% endif %}
           </button>
         </form>
+
       </div>
     </div>
     <div class="card-body">
@@ -2338,5 +2400,75 @@
       });
     }
   })();
+</script>
+
+<script>
+  console.log("Manual Recalculate Script Loaded");
+  async function handleRecalculateAll() {
+    console.log("handleRecalculateAll called");
+    if (!confirm('★全Run★の手動追い越しデータを再計算（距離・比率等）します。\n\n※この操作は、現在の計算ロジック（中心線基準）を全イベントに適用し直します。\n※イベント数によっては時間がかかります。\n\n実行してよろしいですか？')) {
+      return;
+    }
+
+    const btn = document.getElementById('manualRecalculateAllButton');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 再計算中...';
+
+    const statsArea = document.getElementById('recalculateStatsArea');
+    const statusText = document.getElementById('recalcStatusText');
+    const elMax = document.getElementById('recalcMax');
+    const elMedian = document.getElementById('recalcMedian');
+    const elMin = document.getElementById('recalcMin');
+
+    // Reset display
+    statsArea.classList.add('d-none');
+    statusText.textContent = '処理中...';
+    statusText.className = '';
+    elMax.textContent = '-';
+    elMedian.textContent = '-';
+    elMin.textContent = '-';
+
+    try {
+      const response = await fetch('/api/manual_overtake/recalculate_all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      statsArea.classList.remove('d-none');
+
+      if (result.success) {
+        statusText.textContent = `完了 (処理: ${result.processed}/${result.total})`;
+        statusText.className = 'text-success fw-bold';
+
+        if (result.stats) {
+          const fmt = (v) => v !== null ? v.toFixed(2) + 'm' : '-';
+          elMax.textContent = fmt(result.stats.max);
+          elMedian.textContent = fmt(result.stats.median);
+          elMin.textContent = fmt(result.stats.min);
+        }
+        alert("再計算が完了しました。カード内の結果を確認してください。");
+      } else {
+        statusText.textContent = `エラー: ${result.error}`;
+        statusText.className = 'text-danger fw-bold';
+        alert(`エラーが発生しました: ${result.error}`);
+      }
+    } catch (e) {
+      statsArea.classList.remove('d-none');
+      statusText.textContent = `通信エラー: ${e.message}`;
+      statusText.className = 'text-danger fw-bold';
+      alert(`通信エラー: ${e.message}`);
+      console.error(e);
+    } finally {
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+    }
+  }
 </script>
 {% endblock %}

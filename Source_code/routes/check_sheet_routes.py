@@ -626,7 +626,7 @@ def rerun_yolo_for_run():
                             
                         print(f"[Rerun Worker] Starting post-process for Run ID {video_result.run_id}...")
                         from Source_code.modules.inference import run_postprocess_pipeline_sync
-                        completed_steps, error_steps = run_postprocess_pipeline_sync(video_result.run_id)
+                        completed_steps, error_steps, _ = run_postprocess_pipeline_sync(video_result.run_id)
                         
                         if error_steps:
                             print(f"[Rerun Worker] Post-process finished with errors: {error_steps}")

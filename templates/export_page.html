@@ -68,11 +68,37 @@
                         </form>
                     </div>
 
-                    <!-- DB出力 (Full Data) -->
+                    <!-- DBそのまま出力 -->
+                    <div class="p-3 border rounded bg-light d-flex align-items-center justify-content-between mb-3">
+                        <div>
+                            <h5 class="mb-1">DBそのまま (CSV)</h5>
+                            <p class="mb-0 text-muted small">Detectionテーブル中心に行データをそのまま出力します。</p>
+                        </div>
+                        <a href="{{ url_for('main.export_all_detections', format='csv') }}" class="btn btn-dark">
+                            <i class="bi bi-file-earmark-text me-1"></i>CSVダウンロード
+                        </a>
+                    </div>
+
+                    <!-- 追い越しペアCSV -->
+                    <div class="p-3 border rounded bg-light d-flex align-items-center justify-content-between mb-3">
+                        <div>
+                            <h5 class="mb-1">追い越しペア (CSV)</h5>
+                            <p class="mb-0 text-muted small">追い越し/追い越されを1行にまとめたCSVを出力します。</p>
+                        </div>
+                        <form action="{{ url_for('main.export_overtake_pairs_csv') }}" method="POST">
+                            <input type="hidden" name="csrf_token"
+                                value="{{ csrf_token() if csrf_token is defined else '' }}">
+                            <button type="submit" class="btn btn-outline-primary">
+                                <i class="bi bi-arrow-left-right me-1"></i>ペアCSV
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- 追い越し詳細CSV -->
                     <div class="p-3 border rounded bg-light d-flex align-items-center justify-content-between">
                         <div>
-                            <h5 class="mb-1">DB出力 (CSV)</h5>
-                            <p class="mb-0 text-muted small">解析された全イベントデータを詳細なCSV形式で出力します。</p>
+                            <h5 class="mb-1">追い越し詳細 (CSV)</h5>
+                            <p class="mb-0 text-muted small">追い越しイベントの詳細時系列データをCSV形式で出力します。</p>
                         </div>
                         <form action="{{ url_for('main.export_full_data') }}" method="POST">
                             <input type="hidden" name="csrf_token"

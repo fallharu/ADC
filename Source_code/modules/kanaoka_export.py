@@ -208,8 +208,19 @@ def _generate_kanaoka_df(db_path: str) -> pd.DataFrame:
             
             fps = float(event['fps']) if event['fps'] else 30.0
             
-            ot_det = detections[detections['group_id'] == overtaker_gid].set_index('frame_num')
-            on_det = detections[detections['group_id'] == overtaken_gid].set_index('frame_num')
+            ot_det = detections[detections['group_id'] == overtaker_gid]
+            # Filter overtaker for cars (exclude ghosts)
+            ot_det = ot_det[ot_det['class_name'].astype(str).str.lower().isin(['car', 'bus', 'truck'])]
+            # Remove duplicates if any remain
+            ot_det = ot_det.drop_duplicates(subset=['frame_num'])
+            ot_det = ot_det.set_index('frame_num')
+            
+            on_det = detections[detections['group_id'] == overtaken_gid]
+            # Filter overtaken for bikes (exclude ghosts)
+            on_det = on_det[on_det['class_name'].astype(str).str.lower().isin(['bicycle', 'bike', 'cyclist'])]
+            # Remove duplicates if any remain
+            on_det = on_det.drop_duplicates(subset=['frame_num'])
+            on_det = on_det.set_index('frame_num')
             
             def calc_pixel_speed_series(df_grp):
                 if df_grp.empty: return pd.Series(dtype=float)
@@ -277,6 +288,17 @@ def _generate_kanaoka_df(db_path: str) -> pd.DataFrame:
                         # B: Left=Center, Right=White
                         center_cross_m = l_cross
                         white_cross_m = r_cross
+                    
+                    # Filtering based on class (User Request: White=Bike only, Center=Car only)
+                    class_name_lower = str(rec.get('class_name', '')).lower()
+                    is_bike = any(x in class_name_lower for x in ['bicycle', 'bike', 'cyclist'])
+                    
+                    if not is_bike:
+                        # Cars/Others: Suppress White Line Crossing
+                        white_cross_m = None
+                    else:
+                        # Bikes: Suppress Center Line Crossing
+                        center_cross_m = None
 
                     # For distances, we still have the existing columns in Det table
                     # but kanaoka_export calculates them or uses them.

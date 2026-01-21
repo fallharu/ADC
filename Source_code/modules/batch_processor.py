@@ -1,11 +1,93 @@
 
 import os
 import logging
+import sqlite3
+from collections import Counter
+from datetime import datetime
 from typing import Dict, Any, List
 
 # Configure logger suitable for multiprocessing
 # (Note: Standard logging setup might need adjustment for MP, but basic console output works)
 logger = logging.getLogger(__name__)
+
+def _postprocess_log_dir() -> str:
+    log_dir = os.path.abspath(os.path.join(os.getcwd(), "log"))
+    os.makedirs(log_dir, exist_ok=True)
+    return log_dir
+
+
+def _write_postprocess_log(run_id: int, lines: List[str]) -> None:
+    log_dir = _postprocess_log_dir()
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(log_dir, f"RAN_postprocess_run_{run_id}_{ts}.log")
+    header = [
+        "RAN Postprocess Log",
+        f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Run ID: {run_id}",
+        "-" * 60,
+    ]
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(header + lines))
+        f.write("\n")
+
+
+def _fetch_overtake_by_stats(run_id: int) -> Dict[str, int]:
+    from .db_manager import MAIN_DB_PATH, configure_connection
+
+    stats = {
+        "overtake_by_rows": 0,
+        "overtake_by_second_rows": 0,
+        "overtake_flag_rows": 0,
+        "overtake_event_rows": 0,
+    }
+    with sqlite3.connect(MAIN_DB_PATH) as conn:
+        configure_connection(conn, mode="read")
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM Detection
+            WHERE run_id = ?
+              AND overtake_by IS NOT NULL
+              AND TRIM(COALESCE(overtake_by, '')) != ''
+            """,
+            (run_id,),
+        )
+        stats["overtake_by_rows"] = cur.fetchone()[0]
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM Detection
+            WHERE run_id = ?
+              AND overtake_by_second IS NOT NULL
+              AND TRIM(COALESCE(overtake_by_second, '')) != ''
+            """,
+            (run_id,),
+        )
+        stats["overtake_by_second_rows"] = cur.fetchone()[0]
+        cur.execute(
+            "SELECT COUNT(*) FROM Detection WHERE run_id = ? AND overtake = 1",
+            (run_id,),
+        )
+        stats["overtake_flag_rows"] = cur.fetchone()[0]
+        cur.execute(
+            "SELECT COUNT(*) FROM OvertakeEvents WHERE run_id = ?",
+            (run_id,),
+        )
+        stats["overtake_event_rows"] = cur.fetchone()[0]
+    return stats
+
+
+def _fetch_output_folder(run_id: int) -> str:
+    from .db_manager import MAIN_DB_PATH, configure_connection
+
+    with sqlite3.connect(MAIN_DB_PATH) as conn:
+        configure_connection(conn, mode="read")
+        cur = conn.cursor()
+        cur.execute("SELECT output_folder FROM ProcessLog WHERE run_id = ?", (run_id,))
+        row = cur.fetchone()
+        return row[0] if row and row[0] else ""
+
 
 def process_single_batch(
     folder_alias: str, 
@@ -115,7 +197,7 @@ def process_single_batch(
                 })
 
             try:
-                completed_steps, step_errors = run_postprocess_pipeline_sync(run_id)
+                completed_steps, step_errors, skip_logs = run_postprocess_pipeline_sync(run_id)
                 if step_errors:
                     logger.error(f"Pipeline errors for run_id {run_id}: {step_errors}")
                 
@@ -137,6 +219,54 @@ def process_single_batch(
                 if ov_summary:
                     result["overtake_stats"]["total"] += ov_summary.get("total", 0)
                     result["overtake_stats"]["images"].extend(ov_summary.get("images", []))
+
+                try:
+                    log_lines = []
+                    if completed_steps:
+                        log_lines.append(f"処理ステップ: {' / '.join(completed_steps)}")
+                    if step_errors:
+                        log_lines.append(f"エラー: {'; '.join(step_errors)}")
+
+                    try:
+                        from .xy_section_speed import get_measurement_length_for_run
+                        section_len = get_measurement_length_for_run(run_id)
+                        if section_len is not None:
+                            log_lines.append(f"測定区間Y長さ(px): {section_len:.1f}")
+                    except Exception:
+                        pass
+
+                    stats = _fetch_overtake_by_stats(run_id)
+                    log_lines.append(
+                        "追い越しby行数: "
+                        f"{stats['overtake_by_rows']} "
+                        f"(overtake_by_second: {stats['overtake_by_second_rows']})"
+                    )
+                    log_lines.append(
+                        "追い越しフラグ: "
+                        f"overtake=1 {stats['overtake_flag_rows']}, "
+                        f"OvertakeEvents {stats['overtake_event_rows']}"
+                    )
+                    if stats["overtake_by_rows"] == 0:
+                        log_lines.append("警告: このRunのovertake_byが空です。")
+
+                    if skip_logs:
+                        reason_counts = Counter(
+                            item.get("reason", "Unknown") for item in skip_logs
+                        )
+                        log_lines.append("スキップ理由(上位5件):")
+                        for reason, count in reason_counts.most_common(5):
+                            log_lines.append(f"  - {reason}: {count}")
+                        output_folder = _fetch_output_folder(run_id)
+                        skip_path = os.path.join(
+                            output_folder or os.getcwd(), "overtake_skipped.csv"
+                        )
+                        log_lines.append(f"スキップログCSV: {skip_path}")
+
+                    _write_postprocess_log(run_id, log_lines)
+                except Exception as log_exc:
+                    logger.error(
+                        f"Failed to write postprocess log for run_id {run_id}: {log_exc}"
+                    )
 
             except Exception as e:
                  logger.error(f"Pipeline failed for run_id {run_id}: {e}")

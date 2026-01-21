@@ -1,6 +1,7 @@
 from flask import send_from_directory, request, flash, redirect, url_for, current_app
 import os
 from . import main
+from ..modules.db_manager import resolve_output_root
 
 CSV_COLUMN_GUIDE_PATH = os.path.join("docs", "csv_column_guide.csv") # Example path
 
@@ -19,9 +20,7 @@ def download_csv_column_guide():
 
 @main.route("/results/<path:filename>")
 def results_file_serve(filename):
-    directory = os.getenv("Opt_files", "output").strip('"')
-    if not os.path.isabs(directory):
-        directory = os.path.abspath(directory)
+    directory = resolve_output_root()
     return send_from_directory(directory, filename)
 
 

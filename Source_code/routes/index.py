@@ -359,6 +359,7 @@ def export_all_detections():
     
     try:
         conn = sqlite3.connect(dbm.MAIN_DB_PATH)
+        conn.text_factory = lambda b: b.decode("utf-8", "replace") if isinstance(b, (bytes, bytearray)) else b
         
         # Base Query
         if filter_type == 'bicycle_overtake_b':
@@ -409,43 +410,132 @@ def export_all_detections():
                     AND d2.group_id IS NOT NULL
             ) tgt ON d.run_id = tgt.run_id AND d.group_id = tgt.group_id
             """
+            order_cols = ["d.run_id", "d.frame_num"]
         else:
-            query = """
-            SELECT 
-                d.auto_id as detection_id,
-                d.run_id,
-                d.frame_num,
-                cm.class_name,
-                d.confidence,
-                d.speed_km_h,
-                d.line_distance_m,
-                d.ttc_s,
-                d.lane_position_flag,
-                d.travel_direction,
-                d.overtake,
-                d.overtake_by,
-                d.group_id,
-                d.approach_distance_m,
-                d.clearance_distance_m,
-                d.acceleration_m_s2,
-                v.filename as video_name,
-                v.collection_year,
-                v.road_type
+            cursor = conn.cursor()
+
+            def _columns(column_names, alias_prefix="", table_alias=""):
+                return [
+                    f"{table_alias}.{col} AS {alias_prefix}{col}" if alias_prefix or table_alias else col
+                    for col in column_names
+                ]
+
+            detection_cols = [row[1] for row in cursor.execute("PRAGMA table_info(Detection)")]
+            processlog_cols = [row[1] for row in cursor.execute("PRAGMA table_info(ProcessLog)")]
+            video_cols = [row[1] for row in cursor.execute("PRAGMA table_info(Video)")]
+
+            class_cols = [row[1] for row in cursor.execute("PRAGMA table_info(ClassMaster)")]
+            has_class_master = bool(class_cols)
+
+            select_cols = []
+            for col in detection_cols:
+                if col == "class_name":
+                    continue
+                select_cols.append(f"d.{col} AS {col}")
+                if col == "class_id":
+                    if "class_name" in detection_cols and has_class_master:
+                        select_cols.append("COALESCE(NULLIF(d.class_name, ''), cm.class_name) AS class_name")
+                    elif "class_name" in detection_cols:
+                        select_cols.append("d.class_name AS class_name")
+                    elif has_class_master:
+                        select_cols.append("cm.class_name AS class_name")
+
+            if "class_id" not in detection_cols:
+                if "class_name" in detection_cols:
+                    select_cols.append("d.class_name AS class_name")
+                elif has_class_master:
+                    select_cols.append("cm.class_name AS class_name")
+
+            select_cols.extend(_columns(processlog_cols, alias_prefix="p_", table_alias="p"))
+            select_cols.extend(_columns(video_cols, alias_prefix="v_", table_alias="v"))
+
+            query = f"""
+            SELECT
+                {", ".join(select_cols)}
             FROM Detection d
             JOIN ProcessLog p ON d.run_id = p.run_id
             JOIN Video v ON p.video_id = v.video_id
-            LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+            { "LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id" if has_class_master else "" }
             WHERE 1=1
             """
-        
+            order_cols = ["d.run_id", "d.frame_num"]
+            if "auto_id" in detection_cols:
+                order_cols.append("d.auto_id")
+      
         params = []
         if run_id:
             query += " AND d.run_id = ?"
             params.append(run_id)
             
-        query += " ORDER BY d.run_id, d.frame_num"
-        
+        query += f" ORDER BY {', '.join(order_cols)}"
+      
         df = pd.read_sql_query(query, conn, params=params)
+        if filter_type != 'bicycle_overtake_b':
+            expected_cols = []
+            for col in detection_cols:
+                if col == "class_name":
+                    continue
+                expected_cols.append(col)
+                if col == "class_id":
+                    if "class_name" in detection_cols or has_class_master:
+                        expected_cols.append("class_name")
+            if "class_id" not in detection_cols:
+                if "class_name" in detection_cols or has_class_master:
+                    expected_cols.append("class_name")
+
+            expected_cols.extend([f"p_{col}" for col in processlog_cols])
+            expected_cols.extend([f"v_{col}" for col in video_cols])
+
+            missing_cols = [col for col in expected_cols if col not in df.columns]
+            for col in missing_cols:
+                df[col] = None
+
+            extra_cols = [col for col in df.columns if col not in expected_cols]
+            if extra_cols:
+                df = df.drop(columns=extra_cols)
+
+            # Decode bytes BEFORE empty check to prevent UnicodeDecodeError
+            if not df.empty:
+                def _decode_bytes(value):
+                    if isinstance(value, memoryview):
+                        value = value.tobytes()
+                    if isinstance(value, (bytes, bytearray)):
+                        return value.decode("utf-8", "replace")
+                    return value
+
+                object_cols = df.select_dtypes(include=["object"]).columns
+                for col in object_cols:
+                    df[col] = df[col].map(_decode_bytes)
+
+            empty_cols = []
+            for col in df.columns:
+                series = df[col]
+                if series.dtype == object:
+                    non_null = series.dropna()
+                    if non_null.empty:
+                        empty_cols.append(col)
+                        continue
+                    if non_null.astype(str).str.strip().eq("").all():
+                        empty_cols.append(col)
+                        continue
+                else:
+                    if not series.notna().any():
+                        empty_cols.append(col)
+
+            if empty_cols:
+                df = df.drop(columns=empty_cols)
+
+            ordered_cols = [col for col in expected_cols if col in df.columns]
+            if ordered_cols:
+                df = df[ordered_cols]
+
+            if missing_cols:
+                current_app.logger.info("export_all_detections: added_missing_columns=%s", missing_cols)
+            if extra_cols:
+                current_app.logger.info("export_all_detections: dropped_extra_columns=%s", extra_cols)
+            if empty_cols:
+                current_app.logger.info("export_all_detections: dropped_empty_columns=%s", empty_cols)
+
         conn.close()
         
         # Prepare Output directory

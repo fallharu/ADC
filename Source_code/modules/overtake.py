@@ -84,6 +84,23 @@ def _safe_float(value) -> Optional[float]:
     return numeric
 
 
+_SKIP_REASON_JP = {
+    "Bike Detected": "自転車検出",
+    "Direction Mismatch or Invalid": "進行方向が不一致/無効",
+    "Never Adjacent": "並走フレームなし",
+    "No Behind State Detected": "後方状態なし",
+    "No Ahead State Detected": "前方状態なし",
+    "Order Invalid": "前後順序が不正",
+    "Crossing Gap Too Large": "交差ギャップが大きい",
+    "Ray-Cast: Dist Too Large": "レイキャスト: 距離が大きい",
+    "Unknown": "不明",
+}
+
+
+def _to_skip_reason_jp(reason: str) -> str:
+    return _SKIP_REASON_JP.get(reason, reason)
+
+
 # ローカルフォントパスの候補
 # プロジェクトルートからの相対パスを解決
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -444,7 +461,7 @@ def assign_overtake(run_id: int) -> int:
 
     if not car_aliases or not bicycle_aliases:
         print("[assign_overtake] 追い越し対象クラスが設定されていないためスキップします。")
-        return 0
+        return 0, []
 
     video_filename: Optional[str] = None
     source_path: Optional[str] = None
@@ -537,7 +554,7 @@ def assign_overtake(run_id: int) -> int:
 
     if df.empty or len(df['group_id'].unique()) < 2:
         print("追い越し相手判定スキップ: 比較対象の車両が2台未満です。")
-        return 0
+        return 0, []
         
     # Recalculate measure points using correct logic
     tyre_points = compute_front_right_tire_points(
@@ -571,7 +588,7 @@ def assign_overtake(run_id: int) -> int:
                 print(f"    - {row['class_name']} (ID {row['class_id']}): {row['count']}件")
         else:
             print("  (検出自体が0件です)")
-        return 0
+        return 0, []
     
     df_filtered['center_y'] = (df_filtered['y1'] + df_filtered['y2']) / 2
     df_filtered['center_x'] = (df_filtered['x1'] + df_filtered['x2']) / 2
@@ -604,15 +621,38 @@ def assign_overtake(run_id: int) -> int:
         .to_dict()
     )
 
-    bike_event_updates: List[Tuple[int, int, int]] = []
+    skip_logs = []
+    bike_groups = [
+        int(gid)
+        for gid, cls in group_class_map.items()
+        if cls in bicycle_aliases
+    ]
+    for bike_gid in bike_groups:
+        bike_rows = df[df["group_id"] == bike_gid]
+        if bike_rows.empty:
+            continue
+        frame_min = int(bike_rows["frame_num"].min())
+        frame_max = int(bike_rows["frame_num"].max())
+        direction = group_direction_map.get(bike_gid, "")
+        skip_logs.append({
+            "run_id": run_id,
+            "car_group": "",
+            "bike_group": bike_gid,
+            "reason": _to_skip_reason_jp("Bike Detected"),
+            "detail": f"フレーム:{frame_min}-{frame_max}, 方向:{direction or '-'}",
+        })
+
+    overtaker_event_updates: List[Tuple[int, int, int]] = []
+    overtaken_event_updates: List[Tuple[int, int, int]] = []
     bike_after_auto_ids: set[int] = set()
     events_for_overtake_table: list[tuple] = []
+    complex_events: list[dict] = [] # (event_tuple, stats_dict)
     overtake_offset_updates: dict[int, int] = {}
     max_frame_num = int(df['frame_num'].max())
     window_radius = 30
     snapshot_requests: List[dict] = []
     
-    skip_logs = []
+
 
     def _record_offset(auto_id: Optional[int], offset: int) -> None:
         if auto_id is None:
@@ -691,7 +731,8 @@ def assign_overtake(run_id: int) -> int:
             if not dir_a or not dir_b or dir_a != dir_b:
                 skip_logs.append({
                     "run_id": run_id, "car_group": car_group_id, "bike_group": bike_group_id,
-                    "reason": "Direction Mismatch or Invalid", "detail": f"Car:{dir_a}, Bike:{dir_b}"
+                    "reason": _to_skip_reason_jp("Direction Mismatch or Invalid"),
+                    "detail": f"車:{dir_a or '-'}, 自転車:{dir_b or '-'}"
                 })
                 continue
             
@@ -756,8 +797,8 @@ def assign_overtake(run_id: int) -> int:
             if not is_adjacent_frames.any():
                 skip_logs.append({
                     "run_id": run_id, "car_group": car_group_id, "bike_group": bike_group_id,
-                    "reason": "Never Adjacent", 
-                    "detail": f"Behind detected: {has_behind_state}"
+                    "reason": _to_skip_reason_jp("Never Adjacent"),
+                    "detail": f"後方状態検出: {'あり' if has_behind_state else 'なし'}"
                 })
                 continue
 
@@ -772,7 +813,8 @@ def assign_overtake(run_id: int) -> int:
             if not has_behind_state:
                 skip_logs.append({
                     "run_id": run_id, "car_group": car_group_id, "bike_group": bike_group_id,
-                    "reason": "No Behind State Detected", "detail": "Car never behind bike"
+                    "reason": _to_skip_reason_jp("No Behind State Detected"),
+                    "detail": "車が自転車の後方になったフレームがありません"
                 })
                 continue
                 
@@ -787,7 +829,8 @@ def assign_overtake(run_id: int) -> int:
             if len(frames_ahead) == 0:
                 skip_logs.append({
                     "run_id": run_id, "car_group": car_group_id, "bike_group": bike_group_id,
-                    "reason": "No Ahead State Detected", "detail": "Car never got ahead (Stayed behind?)"
+                    "reason": _to_skip_reason_jp("No Ahead State Detected"),
+                    "detail": "車が自転車の前方になったフレームがありません"
                 })
                 continue
                 
@@ -804,8 +847,8 @@ def assign_overtake(run_id: int) -> int:
             if candidates_behind.empty:
                 skip_logs.append({
                     "run_id": run_id, "car_group": car_group_id, "bike_group": bike_group_id,
-                    "reason": "Order Invalid", 
-                    "detail": f"Ahead at {first_ahead}, but no Behind state before it."
+                    "reason": _to_skip_reason_jp("Order Invalid"),
+                    "detail": f"前方フレーム {first_ahead} より前に後方状態がありません"
                 })
                 continue
 
@@ -829,8 +872,11 @@ def assign_overtake(run_id: int) -> int:
             if min_diff > CROSSING_THRESHOLD:
                 skip_logs.append({
                     "run_id": run_id, "car_group": car_group_id, "bike_group": bike_group_id,
-                    "reason": "Crossing Gap Too Large", 
-                    "detail": f"Best frame {event_frame} has diff {min_diff:.1f}px (Limit {CROSSING_THRESHOLD}px)"
+                    "reason": _to_skip_reason_jp("Crossing Gap Too Large"),
+                    "detail": (
+                        f"最適フレーム {event_frame} の差分 {min_diff:.1f}px "
+                        f"(上限 {CROSSING_THRESHOLD:.1f}px)"
+                    )
                 })
                 continue
             
@@ -909,8 +955,8 @@ def assign_overtake(run_id: int) -> int:
                             min_dist = lat_dist.loc[intersections].min()
                             skip_logs.append({
                                 "run_id": run_id, "car_group": car_group_id, "bike_group": bike_group_id,
-                                "reason": "Ray-Cast: Dist Too Large", 
-                                "detail": f"Min Dist {min_dist:.1f}px (Threshold 30px)"
+                                "reason": _to_skip_reason_jp("Ray-Cast: Dist Too Large"),
+                                "detail": f"最小距離 {min_dist:.1f}px (上限 30px)"
                             })
 
             if len(overtake_frames) == 0:
@@ -937,11 +983,18 @@ def assign_overtake(run_id: int) -> int:
                 # ユーザー要望: 追い越し判定は「車」に付与する (車が自転車を追い越した)
                 # ターゲット: Car (car_auto_id)
                 # Overtake By: Bike (bike_group_id)
-                bike_event_updates.append(
+                overtaker_event_updates.append(
                     (
-                        int(bike_group_id),  # overtake_by (Bike)
-                        int(car_group_id),   # overtake_by_second (Car)
-                        car_auto_id,         # WHERE auto_id = Car's auto_id
+                        int(car_group_id),
+                        int(bike_group_id),
+                        car_auto_id,
+                    )
+                )
+                overtaken_event_updates.append(
+                    (
+                        int(car_group_id),
+                        int(bike_group_id),
+                        bike_auto_id,
                     )
                 )
                 _record_offset(bike_auto_id, 0)
@@ -998,110 +1051,85 @@ def assign_overtake(run_id: int) -> int:
                         _safe_float(bike_row.get("l_line_cross_m")),
                         _safe_float(bike_row.get("r_line_cross_m")),
                     )
-                )
+                    )
 
-                def _resolve_measure(row: pd.Series) -> Tuple[Optional[float], Optional[float]]:
-                    def _extract(primary: str, fallback: str) -> Optional[float]:
-                        value = row.get(primary)
-                        if value is None or (isinstance(value, float) and pd.isna(value)):
-                            value = row.get(fallback)
-                        try:
-                            return float(value) if value is not None else None
-                        except (TypeError, ValueError):
-                            return None
+                # --- Statistics Calculation ---
+                # Determine "Crossing" duration and area
+                # Direction F: Right is Center. B: Left is Center.
+                target_cross_col = 'r_line_cross_m' if direction == 'F' else 'l_line_cross_m'
+                
+                # Filter frames where car is crossing
+                # Using 0.0 margin
+                crossing_df = car_traj[car_traj[target_cross_col] > 0]
+                
+                duration_s = 0.0
+                area_m2 = 0.0
+                is_out_of_bounds = 0
+                traj_image_path = None
+                
+                start_cross_frame = -1
+                end_cross_frame = -1
 
-                    return _extract("measure_x", "x2"), _extract("measure_y", "y2")
+                if not crossing_df.empty:
+                    start_cross_frame = crossing_df.index.min()
+                    end_cross_frame = crossing_df.index.max()
+                    
+                    frame_count = len(crossing_df)
+                    duration_s = frame_count / fps
+                    
+                    # Area: Sum (CrossDist * (Speed * TimePerFrame))
+                    # Speed is km/h -> m/s
+                    # TimePerFrame = 1/fps
+                    # DistDelta = (Speed / 3.6) * (1/fps)
+                    for _, c_row in crossing_df.iterrows():
+                        cross_m = c_row.get(target_cross_col, 0)
+                        speed_k = c_row.get('speed_km_h', 0) or 0
+                        if pd.isna(speed_k): speed_k = 0
+                        if speed_k < 0: speed_k = 0 # Avoid negative speed
+                        dist_delta = (speed_k / 3.6) * (1.0 / fps)
+                        if dist_delta < 0: dist_delta = 0 # Avoid negative area
+                        area_m2 += cross_m * dist_delta
+                        
+                    # Out of bounds check
+                    # If start_cross_frame is the FIRST frame of car_traj -> Started before tracking
+                    # If end_cross_frame is the LAST frame of car_traj -> Ended after tracking
+                    traj_start = car_traj.index.min()
+                    traj_end = car_traj.index.max()
+                    
+                    if start_cross_frame <= traj_start or end_cross_frame >= traj_end:
+                        is_out_of_bounds = 1
+                
+                # Generate Image
+                # Reuse video capture if possible, or Open new
+                # We need one frame (event_frame)
+                # Note: 'cap' is not open here! We are in a loop without cap. 
+                # assign_overtake opens cap locally for snapshots but that is later.
+                # We should open cap momentarily or defer image generation?
+                # Deferring is better. Store requests.
+                
+                stats_payload = {
+                    "duration_s": duration_s,
+                    "is_out_of_bounds": is_out_of_bounds,
+                    "area_m2": area_m2,
+                    # For image gen later
+                    "car_traj": car_traj,
+                    "bike_traj": bike_traj,
+                    "start_cross_frame": start_cross_frame,
+                    "end_cross_frame": end_cross_frame,
+                    "target_cross_col": target_cross_col,
+                    "car_gid": int(car_group_id),
+                    "bike_gid": int(bike_group_id),
+                    "event_frame": event_frame
+                }
 
-                car_measure = _resolve_measure(car_row)
-                bike_measure = _resolve_measure(bike_row)
-
-                snapshot_requests.append(
-                    {
-                        "frame": event_frame,
-                        "car_group": int(car_group_id),
-                        "bike_group": int(bike_group_id),
-                        "car_measure": car_measure,
-                        "bike_measure": bike_measure,
-                        "clearance_cm": approach_cm, # Output Approach as Clearance
-                        "clearance_m": approach_m,
-                        "clearance_px": approach_px,
-                        "approach_m": approach_m,
-                        "approach_px": approach_px,
-                        "l_line_distance": bike_row.get("l_line_distance"),
-                        "r_line_distance": bike_row.get("r_line_distance"),
-                        "line_distance": bike_row.get("line_distance"),
-                        "car_box": (
-                            float(car_row['x1']),
-                            float(car_row['y1']),
-                            float(car_row['x2']),
-                            float(car_row['y2']),
-                        ),
-                        "bike_box": (
-                            float(bike_row['x1']),
-                            float(bike_row['y1']),
-                            float(bike_row['x2']),
-                            float(bike_row['y2']),
-                        ),
-                    }
-                )
-
-    # スキップ理由の保存 (Debug Log)
-    if skip_logs:
-        skip_df = pd.DataFrame(skip_logs)
-        skip_filename = "overtake_skipped.csv"
-        # Output to output_folder if available, or current dir
-        save_dir = Path(output_folder) if output_folder else Path(".")
-        save_path = save_dir / skip_filename
-        try:
-            skip_df.to_csv(save_path, index=False, encoding='utf-8-sig')
-            print(f"[assign_overtake] スキップ理由ログを保存しました: {save_path}")
-        except Exception as e:
-            print(f"[assign_overtake] スキップログ保存失敗: {e}")
-
-    with sqlite3.connect(MAIN_DB_PATH) as conn:
-        c = conn.cursor()
-        if bike_event_updates:
-            c.executemany(
-                """
-                UPDATE Detection
-                SET overtake = 1,
-                    overtake_after = 0,
-                    overtake_by = ?,
-                    overtake_by_second = ?
-                WHERE auto_id = ?
-                """,
-                bike_event_updates,
-            )
-
-        if bike_after_auto_ids:
-            c.executemany(
-                "UPDATE Detection SET overtake_after = 1 WHERE auto_id = ?",
-                [(auto_id,) for auto_id in bike_after_auto_ids],
-            )
-
-        if overtake_offset_updates:
-            offset_payload = [
-                (int(offset), int(auto_id))
-                for auto_id, offset in overtake_offset_updates.items()
-            ]
-            c.executemany(
-                "UPDATE Detection SET overtake_window_offset = ? WHERE auto_id = ?",
-                offset_payload,
-            )
-
-        c.execute("DELETE FROM OvertakeEvents WHERE run_id = ?", (run_id,))
-        if events_for_overtake_table:
-            c.executemany(_OVERTAKE_EVENT_INSERT_SQL, events_for_overtake_table)
-
-        conn.commit()
-        print(
-            (
-                f"Run ID {run_id}: 自転車の追い越しフレーム{len(bike_event_updates)}件、"
-                f"追い越しイベント{len(events_for_overtake_table)}件を保存しました。"
+                complex_events.append({
+                    "tuple": events_for_overtake_table[-1],
+                    "stats": stats_payload
+                })
             )
         )
 
-    return _export_overtake_snapshots(
+    created_count = _export_overtake_snapshots(
         run_id,
         snapshot_requests,
         output_folder=output_folder,
@@ -1111,6 +1139,7 @@ def assign_overtake(run_id: int) -> int:
         calibration_profile=calibration_profile,
         calibration_data=calibration_data,
     )
+    return created_count, skip_logs
 
 
 def summarize_run_overtakes(run_id: int) -> dict:

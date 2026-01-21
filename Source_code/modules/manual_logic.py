@@ -140,6 +140,14 @@ MANUAL_OVERTAKE_CSV_FORMATS: dict[str, str] = {
     "clearance_distance_m": "{:.2f}",
     "clearance_distance_px": "{:.0f}",
     "clearance_distance_px_ratio": "{:.1f}",
+    "overtaker_white_line_distance_m": "{:.2f}",
+    "overtaker_white_line_cross_m": "{:.2f}",
+    "overtaker_center_line_distance_m": "{:.2f}",
+    "overtaker_center_line_cross_m": "{:.2f}",
+    "overtaken_white_line_distance_m": "{:.2f}",
+    "overtaken_white_line_cross_m": "{:.2f}",
+    "overtaken_center_line_distance_m": "{:.2f}",
+    "overtaken_center_line_cross_m": "{:.2f}",
 }
 
 MANUAL_OVERTAKE_EXPORT_COLUMNS = list(MANUAL_OVERTAKE_CSV_FORMATS.keys())
@@ -666,6 +674,45 @@ def _prepare_manual_events(events: Sequence[dict[str, Any]]) -> None:
         if not isinstance(event, dict):
             continue
         _apply_manual_distance_ratios(event)
+
+        # --- White/Center Line Logic (Latest Export Rule) ---
+        # Default Direction 'B' (Rear Camera): Left=Center, Right=White
+        # Map Overtaker
+        ot_l_dist = event.get("overtaker_left_line_distance_m")
+        ot_r_dist = event.get("overtaker_right_line_distance_m")
+        event["overtaker_center_line_distance_m"] = ot_l_dist
+        event["overtaker_center_line_cross_m"] = None # No explicit crossing data
+        event["overtaker_white_line_distance_m"] = ot_r_dist
+        event["overtaker_white_line_cross_m"] = None
+
+        # Map Overtaken
+        on_l_dist = event.get("overtaken_left_line_distance_m")
+        on_r_dist = event.get("overtaken_right_line_distance_m")
+        event["overtaken_center_line_distance_m"] = on_l_dist
+        event["overtaken_center_line_cross_m"] = None
+        event["overtaken_white_line_distance_m"] = on_r_dist
+        event["overtaken_white_line_cross_m"] = None
+        
+        # Class Suppression
+        # White=Bike only, Center=Car(non-Bike) only
+        
+        ot_cls = str(event.get("overtaker_class_name", "")).lower()
+        ot_is_bike = any(x in ot_cls for x in ["bicycle", "bike", "cyclist"])
+        if ot_is_bike:
+            event["overtaker_center_line_distance_m"] = None
+            event["overtaker_center_line_cross_m"] = None
+        else:
+            event["overtaker_white_line_distance_m"] = None
+            event["overtaker_white_line_cross_m"] = None
+            
+        on_cls = str(event.get("overtaken_class_name", "")).lower()
+        on_is_bike = any(x in on_cls for x in ["bicycle", "bike", "cyclist"])
+        if on_is_bike:
+            event["overtaken_center_line_distance_m"] = None
+            event["overtaken_center_line_cross_m"] = None
+        else:
+            event["overtaken_white_line_distance_m"] = None
+            event["overtaken_white_line_cross_m"] = None
         contexts = event.get("context_frames")
         if isinstance(contexts, list):
             for context in contexts:
@@ -882,6 +929,8 @@ def _compute_manual_overtake_event_data(
     compute_lane_metrics: bool = False,
     lane_width_m: Optional[float] = None,
     group_presence_context: bool = False,
+    overtaker_track_id: Optional[int] = None,
+    overtaken_track_id: Optional[int] = None,
 ) -> ManualOvertakeComputation:
     detection_frame_num = convert_video_frame_to_detection_frame(run_id, frame_num)
     if detection_frame_num is None:
@@ -899,6 +948,13 @@ def _compute_manual_overtake_event_data(
 
     overtaker_detection = fetch_detection_for_group(run_id, detection_frame_num, overtaker_group_id)
     overtaken_detection = fetch_detection_for_group(run_id, detection_frame_num, overtaken_group_id)
+
+    # Fallback to track_id if group_id not found
+    if overtaker_detection is None and overtaker_track_id is not None:
+        overtaker_detection = next((d for d in detections_frame if d.get('track_id') == overtaker_track_id), None)
+    
+    if overtaken_detection is None and overtaken_track_id is not None:
+        overtaken_detection = next((d for d in detections_frame if d.get('track_id') == overtaken_track_id), None)
 
     # Fallback search for nearby frames (±5)
     search_range = 5
@@ -1913,128 +1969,431 @@ def _compute_manual_overtake_event_data(
 
 
 def _process_manual_context_backlog(
-    batch_size: int = 10,
-    time_limit_s: float = 2.0,
-    run_ids: Optional[list[int]] = None,
-) -> tuple[int, list[str], int]:
-    """バックログにあるコンテキスト未生成の手動追い越しイベントを処理する。"""
+    run_ids: Optional[Sequence[int]] = None,
+    *,
+    limit: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    time_limit_s: Optional[float] = None,
+    group_presence_context: bool = False,
+) -> tuple[int, list[str], dict[int, int]]:
+    """Process manual context backlog queue."""
 
-    candidates = list_manual_context_backlog(limit=batch_size, run_ids=run_ids)
+    limit_value = limit
+    if limit_value is None and batch_size is not None:
+        limit_value = batch_size
 
-    if not candidates:
-        return 0, [], 0
-
+    backlog_entries = list_manual_context_backlog(run_ids, limit=limit_value)
     processed = 0
     notices: list[str] = []
-    start_time = time.time()
 
-    for row in candidates:
-        elapsed = time.time() - start_time
-        if elapsed > time_limit_s and processed > 0:
-            break
+    if not backlog_entries:
+        remaining = count_manual_context_backlog(run_ids)
+        return processed, notices, remaining
 
-        event_id = row["manual_event_id"]
-        run_id = row["run_id"]
-        frame_num = row["frame_num"]
-        overtaker_gid = row["overtaker_group_id"]
-        overtaken_gid = row["overtaken_group_id"]
-        raw_notes = row.get("notes")
+    app = current_app._get_current_object()
+    logger = app.logger
+
+    def _distance_in_meters(entry: Mapping[str, Any], prefix: str) -> Optional[float]:
+        meter_value = _float_or_none(entry.get(f"{prefix}_line_distance_m"))
+        if meter_value is not None:
+            return meter_value
+
+        cm_value = _float_or_none(entry.get(f"{prefix}_line_distance_cm"))
+        if cm_value is not None:
+            return cm_value / 100
+
+        px_value = _float_or_none(entry.get(f"{prefix}_line_distance_px"))
+        ratio_value = _float_or_none(entry.get("lane_width_cm_per_px"))
+        if px_value is not None and ratio_value is not None:
+            return (px_value * ratio_value) / 100
+        return None
+
+    def _clearance_in_meters(entry: Mapping[str, Any]) -> Optional[float]:
+        meter_value = _float_or_none(entry.get("clearance_distance_m"))
+        if meter_value is not None:
+            return meter_value
+
+        cm_value = _float_or_none(entry.get("clearance_distance_cm"))
+        if cm_value is not None:
+            return cm_value / 100
+
+        px_value = _float_or_none(entry.get("clearance_distance_px"))
+        ratio_value = _float_or_none(entry.get("lane_width_cm_per_px"))
+        if px_value is not None and ratio_value is not None:
+            return (px_value * ratio_value) / 100
+        return None
+
+    def _format_summary(label: str, values: Sequence[float]) -> Optional[str]:
+        if not values:
+            return None
+        median_val = statistics.median(values)
+        return (
+            f"{label} median {median_val:.2f} m / max {max(values):.2f} m / min {min(values):.2f} m"
+        )
+
+    def _build_distance_summary(frames: Sequence[Mapping[str, Any]]) -> Optional[str]:
+        if not frames:
+            return None
+        lane_values: list[float] = []
+        clearance_values: list[float] = []
+
+        for frame in frames:
+            lane_candidates = (
+                _distance_in_meters(frame, "overtaker"),
+                _distance_in_meters(frame, "overtaken"),
+            )
+            for candidate in lane_candidates:
+                if candidate is not None:
+                    lane_values.append(candidate)
+
+            clearance_val = _clearance_in_meters(frame)
+            if clearance_val is not None:
+                clearance_values.append(clearance_val)
+
+        lane_summary = _format_summary("Lane distance", lane_values)
+        clearance_summary = _format_summary("Clearance", clearance_values)
+
+        summary_parts = [part for part in (lane_summary, clearance_summary) if part]
+        if not summary_parts:
+            return None
+
+        return " / ".join(summary_parts)
+
+    def _entry_label(entry: Mapping[str, Any]) -> str:
+        manual_event_id = entry.get("manual_event_id")
+        return f"Event ID {manual_event_id}" if manual_event_id else "Event"
+
+    def _handle_entry(entry: Mapping[str, Any]) -> tuple[Mapping[str, Any], bool, list[str], Optional[str]]:
+        manual_event_id = entry.get("manual_event_id")
+        frame_num = entry.get("frame_num")
+        event_payload = entry.get("event_payload") or {}
+        context_frames = entry.get("context_frames") or []
+        label = _entry_label(entry)
+
+        run_value = entry.get("run_id")
+        try:
+            run_int = int(run_value)
+            frame_int = int(frame_num)
+        except (TypeError, ValueError):
+            run_int = None
+            frame_int = None
+
+        recompute_messages: list[str] = []
+        detection_frame_num: Optional[int] = None
 
         try:
-            computation = _compute_manual_overtake_event_data(
-                run_id,
-                frame_num,
-                overtaker_gid,
-                overtaken_gid,
-                notes=raw_notes,
-                compute_lane_metrics=True,
-                group_presence_context=True,
+            overtaker_int = int(event_payload.get("overtaker_group_id"))
+            overtaken_int = int(event_payload.get("overtaken_group_id"))
+        except (TypeError, ValueError):
+            overtaker_int = None
+            overtaken_int = None
+
+        if None in (run_int, frame_int, overtaker_int, overtaken_int):
+            notice = f"{label}: run/frame/group data missing; skipped."
+            return entry, False, [notice], notice
+
+        actions_taken, warnings, fatal = _prepare_manual_overtake_dependencies(run_int)
+        if actions_taken:
+            recompute_messages.append(
+                f"{label}: prerequisites recomputed ({', '.join(actions_taken)})"
             )
-        except Exception as exc:  # pragma: no cover - runtime safeguard
-            notices.append(f"Event {event_id}: 計算失敗 ({exc})")
-            # 失敗しても処理済みとしてマークしないと永遠にリトライしてしまう
-            # ここではマークしてしまう設計にするか、あるいはエラー回数を記録するか検討余地あり
-            # 現状は処理済み扱いにして次に進む
-            mark_manual_context_backlog_processed(event_id)
-            continue
+        recompute_messages.extend(warnings)
+        if fatal:
+            notice = f"{label}: required detections missing."
+            return entry, False, recompute_messages + [notice], notice
 
-        saved_ok, save_warns = _save_manual_overtake_context_frames(
-            event_id,
-            computation.context_frames,
-            computation.payload,
-            frame_num,
-        )
-        if save_warns:
-            notices.extend(save_warns)
+        try:
+            recomputation = _compute_manual_overtake_event_data(
+                run_int,
+                frame_int,
+                overtaker_int,
+                overtaken_int,
+                notes=event_payload.get("notes"),
+                context_window=0,
+                compute_lane_metrics=True,
+                lane_width_m=event_payload.get("lane_width_m"),
+                group_presence_context=group_presence_context,
+            )
+            detection_frame_num = recomputation.detection_frame_num
+        except ManualOvertakeComputationError as exc:
+            recompute_messages.append(
+                f"{label}: recompute failed ({exc})"
+            )
+            recomputation = None
+        except Exception as exc:  # pragma: no cover - safety net
+            logger.exception("Failed to recompute manual overtake frame")
+            recompute_messages.append(
+                f"{label}: recompute error ({exc})"
+            )
+            recomputation = None
 
-        # イベント本体のデータを更新 (距離などの再計算結果を反映)
-        if getattr(dbm, 'update_manual_overtake_event', None):
-            dbm.update_manual_overtake_event(event_id, computation.payload)
+        if recomputation:
+            if recomputation.context_frames:
+                context_frames = recomputation.context_frames
+            event_payload = recomputation.payload
+            if recomputation.notices:
+                recompute_messages.extend(
+                    notice for notice in recomputation.notices if notice
+                )
+
+        distance_summary = _build_distance_summary(context_frames)
+        if distance_summary:
+            recompute_messages.append(
+                f"{label}: {distance_summary} (frames {len(context_frames)})"
+            )
         else:
-            notices.append(f"Event {event_id}: update_manual_overtake_event not found")
+            recompute_messages.append(
+                f"{label}: missing run/group info for context recompute."
+            )
 
-        if saved_ok:
-            # 成功したらフラグを適用する (実装計画に基づく追加)
-            if apply_manual_overtake_flags:
+        if manual_event_id:
+            try:
+                update_manual_overtake_event(int(manual_event_id), event_payload)
+            except Exception as exc:  # pragma: no cover - safety net
+                recompute_messages.append(
+                    f"{label}: failed to update event ({exc})"
+                )
+        else:
+            notice = f"{label}: invalid manual_event_id; not saved."
+            return entry, False, recompute_messages + [notice], notice
+
+        try:
+            context_saved, context_notices = _save_manual_overtake_context_frames(
+                manual_event_id,
+                context_frames,
+                event_payload,
+                frame_num,
+                label=label,
+            )
+        except Exception as exc:  # pragma: no cover - safety net
+            logger.exception("Failed to process manual context backlog")
+            context_saved = False
+            context_notices = [f"{label}: context processing failed ({exc})"]
+
+        if manual_event_id is not None:
+            try:
+                record_manual_overtake_timeline_entry(
+                    run_int,
+                    frame_int,
+                    overtaker_int,
+                    overtaken_int,
+                    notes=event_payload.get("notes"),
+                    last_event_id=int(manual_event_id),
+                )
+            except Exception as exc:  # pragma: no cover - safety net
+                logger.exception("Failed to update manual timeline during context processing")
+                recompute_messages.append(
+                    f"{label}: timeline update failed ({exc})"
+                )
+
+        if detection_frame_num is not None:
+            try:
+                flags_applied = apply_manual_overtake_flags(
+                    run_int,
+                    detection_frame_num,
+                    overtaker_int,
+                    overtaken_int,
+                )
+                if not flags_applied:
+                    recompute_messages.append(
+                        f"{label}: unable to set manual overtake flags."
+                    )
+            except Exception as exc:  # pragma: no cover - safety net
+                logger.exception("Failed to update detection manual overtake flags during context processing")
+                recompute_messages.append(
+                    f"{label}: manual overtake flag update failed ({exc})"
+                )
+
+        if manual_event_id is not None:
+            try:
+                _backup_manual_overtake_timing(run_int, int(manual_event_id), event_payload)
+            except Exception as exc:  # pragma: no cover - safety net
+                logger.exception("Failed to back up manual overtake timing during context processing")
+                recompute_messages.append(
+                    f"{label}: CSV backup failed ({exc})"
+                )
+
+        try:
+            touch_manual_run_progress(run_int, annotation=True)
+        except Exception:  # pragma: no cover - logging only
+            logger.exception("Failed to update manual run annotation timestamp during context processing")
+
+        if recompute_messages:
+            context_notices = list(context_notices or []) + recompute_messages
+
+        error_message = None
+        if context_notices and not context_saved:
+            error_message = "\n".join(context_notices)
+
+        return entry, context_saved, list(context_notices or []), error_message
+
+    def _handle_failure(entry: Mapping[str, Any], exc: BaseException) -> tuple[Mapping[str, Any], bool, list[str], str]:
+        label = _entry_label(entry)
+        logger.exception("Failed to process manual context backlog")
+        message = f"{label}: context processing error ({exc})"
+        return entry, False, [message], message
+
+    def _resolve_worker_count(entry_count: int) -> int:
+        configured = app.config.get("MANUAL_CONTEXT_BACKLOG_WORKERS")
+        worker_limit: Optional[int] = None
+        if configured is not None:
+            try:
+                worker_limit = int(configured)
+            except (TypeError, ValueError):
+                worker_limit = None
+        if worker_limit is not None and worker_limit > 0:
+            return max(1, min(entry_count, worker_limit))
+        cpu_count = os.cpu_count() or 1
+        default_workers = min(4, max(1, cpu_count))
+        return max(1, min(entry_count, default_workers))
+
+    entry_results: list[tuple[Mapping[str, Any], bool, list[str], Optional[str]]] = []
+    entry_count = len(backlog_entries)
+    worker_count = _resolve_worker_count(entry_count)
+
+    if entry_count > 1 and worker_count > 1:
+        def _run_with_context(entry: Mapping[str, Any]) -> tuple[Mapping[str, Any], bool, list[str], Optional[str]]:
+            with app.app_context():
+                return _handle_entry(entry)
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            future_map = {executor.submit(_run_with_context, entry): entry for entry in backlog_entries}
+            for future in as_completed(future_map):
+                entry = future_map[future]
                 try:
-                    apply_manual_overtake_flags(run_id, frame_num, overtaker_gid, overtaken_gid)
-                except Exception as exc_flag:
-                    # フラグ付与に失敗してもイベント自体は保存されているのでWarningだけ残して進む
-                    notices.append(f"Event {event_id}: フラグ付与失敗 ({exc_flag})")
-            
-            mark_manual_context_backlog_processed(event_id)
+                    entry_results.append(future.result())
+                except Exception as exc:  # pragma: no cover - safety net
+                    entry_results.append(_handle_failure(entry, exc))
+    else:
+        for entry in backlog_entries:
+            entry_results.append(_handle_entry(entry))
 
+    for entry, context_saved, context_notices, error_message in entry_results:
+        if context_notices:
+            notices.extend(context_notices)
+        try:
+            backlog_table = entry.get("backlog_table") or entry.get("source_table")
+            mark_manual_context_backlog_processed(
+                entry.get("backlog_id"),
+                success=context_saved,
+                error_message=error_message,
+                backlog_table=backlog_table,
+            )
+        except Exception:  # pragma: no cover - logging only
+            logger.exception("Failed to update context backlog status")
+        if context_saved:
             processed += 1
 
-    remaining_dict = count_manual_context_backlog(run_ids=run_ids)
-    if isinstance(remaining_dict, dict):
-        remaining = sum(remaining_dict.values())
-    elif isinstance(remaining_dict, int):
-        remaining = remaining_dict
-    else:
-        remaining = 0
+    remaining = count_manual_context_backlog(run_ids)
     return processed, notices, remaining
 
 
+def _execute_manual_context_processing(
+    run_ids: Sequence[int],
+    *,
+    limit: Optional[int] = None,
+    ensure_missing: bool = True,
+) -> dict[str, Any]:
+    """Run manual context processing and return summary."""
 
-def _execute_manual_context_processing(app_context: Any) -> None:
-    """バックグラウンドでコンテキスト生成を実行し続けるワーカー。"""
+    normalized_runs = _normalize_run_ids(list(run_ids))
 
-    # Flaskコンテキスト内で実行する必要がある場合のために受け取る
-    # ただし db_manager が current_app を使わず直接DBパスを参照していれば不要かもしれない
-    # ここでは念のため app_context.push() する
-    app_context.push()
-
-    current_app.logger.info("Manual context processing worker started.")
-    
-    # 起動時に既存の未処理分をバックログに登録する (念のため)
-    # ただし重いので毎回やるべきかは要検討。ここではスキップし、必要ならAPIで呼ぶ。
-    # ensure_manual_context_backlog_for_runs() 
-
-    while True:
+    limit_value: Optional[int] = None
+    if limit is not None:
         try:
-            processed, notices, remaining = _process_manual_context_backlog(
-                batch_size=5,
-                time_limit_s=5.0,
+            candidate = int(limit)
+        except (TypeError, ValueError):
+            candidate = None
+        else:
+            if candidate > 0:
+                limit_value = candidate
+
+    result: dict[str, Any] = {
+        "run_ids": normalized_runs,
+        "batch_limit": limit_value,
+        "ensure_missing": bool(ensure_missing),
+        "enqueued": 0,
+        "enqueued_event_ids": [],
+        "ensure_error": None,
+        "pending_before": 0,
+        "processed": 0,
+        "remaining": {},
+        "remaining_total": 0,
+        "notices": [],
+        "warnings": [],
+    }
+
+    if not normalized_runs:
+        return result
+
+    logger = getattr(current_app, "logger", None)
+
+    if ensure_missing:
+        try:
+            enqueued, enqueued_ids = ensure_manual_context_backlog_for_runs(
+                normalized_runs, force_requeue=True
             )
-            if notices:
-                current_app.logger.warning(
-                    f"Manual context processing notices: {notices}"
-                )
-            
-            if processed > 0:
-                time.sleep(0.1)  # 連続処理時の負荷軽減
-            else:
-                time.sleep(2.0)  # 待機
-                
         except Exception as exc:  # pragma: no cover - runtime safeguard
-            current_app.logger.exception("Manual context processing worker error")
-            time.sleep(10.0)
+            if logger is not None:
+                logger.exception("Failed to enqueue manual context backlog before manual process")
+            result["ensure_error"] = str(exc)
+            enqueued = 0
+            enqueued_ids = []
+        result["enqueued"] = int(enqueued or 0)
+        normalized_enqueued: list[int] = []
+        for candidate in list(enqueued_ids or [])[:50]:
+            try:
+                normalized_enqueued.append(int(candidate))
+            except (TypeError, ValueError):
+                continue
+        result["enqueued_event_ids"] = normalized_enqueued
 
+    summary_before = count_manual_context_backlog(normalized_runs or None)
+    pending_before = sum(int(value or 0) for value in summary_before.values())
+    result["pending_before"] = pending_before
 
+    if pending_before > 0:
+        processed, notices, remaining = _process_manual_context_backlog(
+            normalized_runs,
+            limit=limit_value,
+            group_presence_context=True,
+        )
+        result["processed"] = int(processed or 0)
+        result["notices"] = [str(notice) for notice in (notices or []) if notice]
+        normalized_remaining: dict[int, int] = {}
+        for key, value in (remaining or {}).items():
+            try:
+                normalized_key = int(key)
+            except (TypeError, ValueError):
+                continue
+            try:
+                normalized_value = int(value or 0)
+            except (TypeError, ValueError):
+                normalized_value = 0
+            normalized_remaining[normalized_key] = normalized_value
+        result["remaining"] = normalized_remaining
+    else:
+        normalized_summary: dict[int, int] = {}
+        for key, value in (summary_before or {}).items():
+            try:
+                normalized_key = int(key)
+            except (TypeError, ValueError):
+                continue
+            try:
+                normalized_value = int(value or 0)
+            except (TypeError, ValueError):
+                normalized_value = 0
+            normalized_summary[normalized_key] = normalized_value
+        result["remaining"] = normalized_summary
 
+    result["remaining_total"] = sum(int(value or 0) for value in result["remaining"].values())
 
+    if result["ensure_error"]:
+        result["warnings"].append(
+            f"Manual context backlog check failed: {result['ensure_error']}"
+        )
 
+    return result
 def _collect_manual_scale_preview(
     run_id: int,
     frame_num: int,
@@ -2097,3 +2456,64 @@ def _apply_manual_distance_ratios(event: dict[str, Any]) -> None:
                 pass
         
         event[ratio_key] = ratio
+
+
+def recalculate_manual_events_batch(run_ids: Optional[List[int]] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+    """
+    ManualOvertakeEvents のメトリクス（距離・速度・比率など）を再計算して更新する。
+    """
+    # Use dbm as imported in top of file
+    events = dbm.list_manual_overtake_events(run_ids=run_ids, limit=limit)
+    processed_count = 0
+    errors = []
+    updated_ids = []
+    clearance_values = []
+    
+    for event in events:
+        try:
+            manual_event_id = event['manual_event_id']
+            overtaker_track = event.get('overtaker_track_id')
+            overtaken_track = event.get('overtaken_track_id')
+            
+            computation = _compute_manual_overtake_event_data(
+                event['run_id'],
+                event['frame_num'],
+                event['overtaker_group_id'],
+                event['overtaken_group_id'],
+                overtaker_track_id=overtaker_track,
+                overtaken_track_id=overtaken_track,
+                compute_lane_metrics=True,
+                group_presence_context=False
+            )
+            
+            payload = computation.payload
+            
+            if dbm.update_manual_overtake_event(manual_event_id, payload):
+                 updated_ids.append(manual_event_id)
+                 processed_count += 1
+                 val = payload.get('clearance_distance_m')
+                 if val is not None:
+                     clearance_values.append(float(val))
+            else:
+                 errors.append(f"Event {manual_event_id}: Update failed (DB specific)")
+                 
+        except Exception as e:
+            errors.append(f"Event {event.get('manual_event_id')}: {e}")
+            
+    stats = {}
+    if clearance_values:
+        stats['min'] = min(clearance_values)
+        stats['max'] = max(clearance_values)
+        stats['median'] = statistics.median(clearance_values)
+    else:
+        stats['min'] = None
+        stats['max'] = None
+        stats['median'] = None
+
+    return {
+        "processed": processed_count,
+        "total": len(events),
+        "errors": errors,
+        "updated_ids": updated_ids,
+        "stats": stats
+    }

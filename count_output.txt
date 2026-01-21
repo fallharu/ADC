@@ -1,6 +1,0 @@
-
-Tables: ['Video', 'sqlite_sequence', 'Class', 'ProcessLog', 'Detection', 'OvertakeEvents', 'ManualOvertakeEvents', 'ManualOvertakeContext', 'ManualRunProgress', 'ProximityData', 'ManualOvertakeTimeline', 'ManualOvertakeContextBacklog', 'LocationSetting', 'ClassMaster', 'TrafficCount']
-Detection Total: 2730044
-Detection with Clearance: 122
-OvertakeEvents Total: 40
-OvertakeEvents with Clearance: 34

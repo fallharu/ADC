@@ -6,9 +6,14 @@
 <h2>3. 後処理 & キャリブレーション</h2>
 <p>解析済みのRunに対して、キャリブレーションの作成・適用、および各種後処理を実行します。</p>
 
-<div id="postProcessProgressArea" class="card bg-light mb-4" style="display: none;">
+<div id="postProcessProgressArea" class="card bg-light mb-4">
   <div class="card-header d-flex justify-content-between align-items-center">
-    <span>後処理の進捗</span>
+    <div>
+      <span class="me-2">後処理の進捗</span>
+      <button type="button" class="btn btn-sm btn-outline-info py-0 px-2" onclick="openLogViewerModal()">
+        <i class="bi bi-file-text me-1"></i>ログ閲覧
+      </button>
+    </div>
     <span id="postProcessStatusBadge" class="badge bg-secondary">待機中</span>
   </div>
   <div class="card-body">
@@ -632,13 +637,19 @@
             </div>
             <div class="col-6">
               <button type="submit" name="action" value="all_save" class="btn btn-dark w-100 btn-post-process-action">
-                <i class="bi bi-filetype-csv me-1"></i> CSV出力
+                <i class="bi bi-filetype-csv me-1"></i> DBそのままCSV
               </button>
             </div>
             <div class="col-6">
               <button type="submit" name="action" value="export_excel"
                 class="btn btn-secondary w-100 btn-post-process-action">
-                <i class="bi bi-file-earmark-spreadsheet me-1"></i> Excel出力
+                <i class="bi bi-file-earmark-spreadsheet me-1"></i> DBそのままExcel
+              </button>
+            </div>
+            <div class="col-12">
+              <button type="submit" name="action" value="export_overtake_pairs_csv"
+                class="btn btn-outline-primary w-100 btn-post-process-action" title="追い越し/追い越されを1行にまとめたCSVを出力します">
+                <i class="bi bi-arrow-left-right me-1"></i> 追い越しペアCSV
               </button>
             </div>
             <!-- New Buttons for Bicycle/Overtaken Import -->
@@ -882,6 +893,195 @@
 <script id="initialProgressJSON"
   type="application/json">{{ progress|tojson|safe if progress is defined else '{}' }}</script>
 <script id="availableProfilesJSON" type="application/json">{{ available_profiles|tojson|safe }}</script>
+
+<!-- Log Viewer Modal -->
+<div class="modal fade" id="logViewerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content" style="height: 90vh;">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-file-text me-2"></i>実行ログ・レポート閲覧</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="d-flex h-100">
+          <div class="bg-light border-end" style="width: 300px; overflow-y: auto;">
+            <div class="p-2 border-bottom fw-bold text-muted small bg-white sticky-top">
+              <div class="d-flex align-items-center justify-content-between gap-2">
+                <span>ログ一覧</span>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Log filter">
+                  <button type="button" class="btn btn-outline-secondary active" data-log-filter="file">ファイルログ</button>
+                  <button type="button" class="btn btn-outline-secondary" data-log-filter="summary">全体ログ</button>
+                </div>
+                <button class="btn btn-sm btn-link py-0 text-decoration-none" onclick="fetchLogList()">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+              </div>
+            </div>
+            <div class="list-group list-group-flush small" id="logViewerList">
+              <div class="p-3 text-center text-muted">読み込み中...</div>
+            </div>
+          </div>
+          <div class="flex-fill d-flex flex-column h-100" style="overflow: hidden;">
+            <div class="p-2 border-bottom bg-white d-flex justify-content-between align-items-center">
+              <span class="fw-bold small" id="logViewerCurrentFile">-</span>
+              <span class="badge bg-secondary" id="logViewerCurrentSize">-</span>
+            </div>
+            <pre class="flex-fill p-3 m-0 bg-dark text-light small font-monospace" id="logViewerContent"
+              style="overflow: auto; white-space: pre-wrap; font-size: 0.85rem;">ファイルを選択してください</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let logModalInstance = null;
+  let logViewerFilter = 'file';
+  let logViewerLogs = [];
+  let logViewerFilterReady = false;
+
+  function openLogViewerModal() {
+    if (!logModalInstance) {
+      logModalInstance = new bootstrap.Modal(document.getElementById('logViewerModal'));
+    }
+    setupLogViewerFilters();
+    logModalInstance.show();
+    fetchLogList();
+  }
+
+  function setupLogViewerFilters() {
+    if (logViewerFilterReady) return;
+    const filterButtons = document.querySelectorAll('[data-log-filter]');
+    filterButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setLogViewerFilter(btn.dataset.logFilter);
+      });
+    });
+    logViewerFilterReady = true;
+  }
+
+  function setLogViewerFilter(filter) {
+    logViewerFilter = filter || 'file';
+    document.querySelectorAll('[data-log-filter]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.logFilter === logViewerFilter);
+    });
+    renderLogList(logViewerLogs);
+  }
+
+  async function fetchLogList() {
+    const listEl = document.getElementById('logViewerList');
+    listEl.innerHTML = '<div class="p-3 text-center text-muted"><div class="spinner-border spinner-border-sm" role="status"></div></div>';
+
+    try {
+      const resp = await fetch('/api/logs/list');
+      const data = await resp.json();
+
+      logViewerLogs = Array.isArray(data.logs) ? data.logs : [];
+      renderLogList(logViewerLogs);
+
+    } catch (e) {
+      console.error(e);
+      listEl.innerHTML = `<div class="p-3 text-center text-danger">エラー: ${e.message}</div>`;
+    }
+  }
+
+  function renderLogList(logs) {
+    const listEl = document.getElementById('logViewerList');
+    listEl.innerHTML = '';
+
+    if (!logs || logs.length === 0) {
+      listEl.innerHTML = '<div class="p-3 text-center text-muted">ログファイルが見つかりません</div>';
+      return;
+    }
+
+    const filtered = logs.filter((log) => {
+      const category = log.category || 'file';
+      if (logViewerFilter === 'summary') return category === 'summary';
+      return category !== 'summary';
+    });
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = '<div class="p-3 text-center text-muted">表示対象のログがありません</div>';
+      return;
+    }
+
+    filtered.forEach(log => {
+      const item = document.createElement('a');
+      item.href = '#';
+      item.className = 'list-group-item list-group-item-action py-2';
+
+      let icon = 'bi-file-text';
+      let colorClass = 'text-dark';
+      if (log.type === 'error') {
+        icon = 'bi-exclamation-triangle-fill';
+        colorClass = 'text-danger';
+      } else if (log.type === 'report') {
+        icon = 'bi-file-earmark-check';
+        colorClass = 'text-success';
+      } else if (log.type === 'summary') {
+        icon = 'bi-clipboard-data';
+        colorClass = 'text-primary';
+      } else if (log.type === 'run') {
+        icon = 'bi-file-text';
+        colorClass = 'text-dark';
+      } else {
+        icon = 'bi-file-text';
+        colorClass = 'text-secondary';
+      }
+
+      item.innerHTML = `
+        <div class="d-flex w-100 justify-content-between">
+          <span class="${colorClass} text-truncate fw-bold" title="${log.filename}">
+            <i class="bi ${icon} me-1"></i>${log.filename}
+          </span>
+        </div>
+        <small class="text-muted text-truncate d-block">${log.datetime} (${formatBytes(log.size)})</small>
+      `;
+
+      item.onclick = (e) => {
+        e.preventDefault();
+        listEl.querySelectorAll('.list-group-item').forEach(el => el.classList.remove('active'));
+        item.classList.add('active');
+        fetchLogContent(log.filename, log.size);
+      };
+
+      listEl.appendChild(item);
+    });
+  }
+
+  async function fetchLogContent(filename, size) {
+    const contentEl = document.getElementById('logViewerContent');
+    const titleEl = document.getElementById('logViewerCurrentFile');
+    const sizeEl = document.getElementById('logViewerCurrentSize');
+
+    titleEl.textContent = filename;
+    sizeEl.textContent = formatBytes(size);
+    contentEl.textContent = '読み込み中...';
+
+    try {
+      const resp = await fetch(`/api/logs/content?filename=${encodeURIComponent(filename)}`);
+      const data = await resp.json();
+
+      if (data.error) throw new Error(data.error);
+
+      contentEl.textContent = data.content;
+
+    } catch (e) {
+      contentEl.textContent = `読み込みエラー: ${e.message}`;
+    }
+  }
+
+  function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  }
+</script>
+
 {% endblock %}
 
 {% block scripts %}

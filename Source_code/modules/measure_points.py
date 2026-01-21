@@ -637,5 +637,17 @@ def attach_measure_points(
                 # Actually, our logic above sets it to center logic.
                 pass
 
-    return merged
+    if "class_name" in merged.columns:
+        bike_mask = (
+            merged["class_name"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(r"bicycle|bike|cyclist", regex=True)
+        )
+        if bike_mask.any():
+            center_x = (merged.loc[bike_mask, "x1"] + merged.loc[bike_mask, "x2"]) / 2.0
+            merged.loc[bike_mask, "measure_x"] = center_x
+            merged.loc[bike_mask, "measure_y"] = merged.loc[bike_mask, "y2"]
 
+    return merged

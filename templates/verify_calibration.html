@@ -115,6 +115,30 @@
                 </div>
             </div>
         </div>
+        <!-- Scale Graph (2-6/7) -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">1ｍスケール(192px) 2-6/7</h5>
+                </div>
+                <div class="card-body text-center">
+                    <img id="scaleGraph2456Image" src="" class="img-fluid border" alt="Scale Graph 2-6/7">
+                    <p class="mt-2 text-muted small" id="scaleGraph2456Path"></p>
+                </div>
+            </div>
+        </div>
+        <!-- Top/Bottom Scale Graph -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">上側/下側 ピクセル比較</h5>
+                </div>
+                <div class="card-body text-center">
+                    <img id="scaleGraphTopBottomImage" src="" class="img-fluid border" alt="Top Bottom Scale Graph">
+                    <p class="mt-2 text-muted small" id="scaleGraphTopBottomPath"></p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="alert alert-info">
@@ -167,13 +191,19 @@
                 document.getElementById('frameImage').src = data.frame_url;
                 document.getElementById('graphImage').src = data.graph_url;
                 document.getElementById('scaleGraphImage').src = data.scale_graph_url;
+                document.getElementById('scaleGraph2456Image').src = data.scale_graph_2456_url;
+                document.getElementById('scaleGraphTopBottomImage').src = data.scale_graph_top_bottom_url;
                 document.getElementById('frameImage').classList.remove('d-none');
                 document.getElementById('graphImage').classList.remove('d-none');
                 document.getElementById('scaleGraphImage').classList.remove('d-none');
+                document.getElementById('scaleGraph2456Image').classList.remove('d-none');
+                document.getElementById('scaleGraphTopBottomImage').classList.remove('d-none');
 
                 document.getElementById('framePath').textContent = data.frame_path;
                 document.getElementById('graphPath').textContent = data.graph_path;
                 document.getElementById('scaleGraphPath').textContent = data.scale_graph_path;
+                document.getElementById('scaleGraph2456Path').textContent = data.scale_graph_2456_path;
+                document.getElementById('scaleGraphTopBottomPath').textContent = data.scale_graph_top_bottom_path;
 
             } else {
                 alert('エラー: ' + data.error);

@@ -341,6 +341,7 @@ def assign_lane_distance(
     measure_y_values = enriched["measure_y"].to_numpy(np.float64)
     center_x_values = ((enriched["x1"] + enriched["x2"]) / 2).to_numpy(np.float64)
     center_y_values = ((enriched["y1"] + enriched["y2"]) / 2).to_numpy(np.float64)
+    bbox_x1_values = enriched["x1"].to_numpy(np.float64)
     bbox_x2_values = enriched["x2"].to_numpy(np.float64)
     bbox_y2_values = enriched["y2"].to_numpy(np.float64)
     class_name_values = enriched.get("class_name", pd.Series([""] * len(enriched))).astype(str).str.lower()
@@ -396,13 +397,34 @@ def assign_lane_distance(
 
         if direction_values.iloc[idx] == "B":
             center_line_x = get_line_x_at_y(bbox_y2_values[idx], center_line) if center_line else None
+            if center_line_x is not None and np.isfinite(bbox_x1_values[idx]):
+                # 左が越え、右が中
+                center_status = "中央線越え" if bbox_x1_values[idx] < center_line_x else "中央線内側"
+
+            class_name = class_name_values.iloc[idx]
+            if "bicycle" in class_name or "bike" in class_name or "cyclist" in class_name:
+                white_y = measure_y_values[idx] if np.isfinite(measure_y_values[idx]) else bbox_y2_values[idx]
+                white_x = measure_x_values[idx] if np.isfinite(measure_x_values[idx]) else center_x_values[idx]
+                right_line_x = get_line_x_at_y(white_y, right_line) if right_line else None
+                if right_line_x is not None and np.isfinite(white_x):
+                    # 右側が中、左側が越え
+                    white_status = "白線内側" if white_x > right_line_x else "白線越え"
+
+        elif direction_values.iloc[idx] == "F":
+            # For 'F': Left=White, Right=Center
+            center_line_x = get_line_x_at_y(bbox_y2_values[idx], right_line) if right_line else None
             if center_line_x is not None and np.isfinite(bbox_x2_values[idx]):
+                # 右側が越え (x > center_line_x)
                 center_status = "中央線越え" if bbox_x2_values[idx] > center_line_x else "中央線内側"
 
-            if class_name_values.iloc[idx] == "bicycle":
-                left_line_x = get_line_x_at_y(center_y_values[idx], left_line) if left_line else None
-                if left_line_x is not None and np.isfinite(center_x_values[idx]):
-                    white_status = "白線内側" if center_x_values[idx] > left_line_x else "白線越え"
+            class_name = class_name_values.iloc[idx]
+            if "bicycle" in class_name or "bike" in class_name or "cyclist" in class_name:
+                white_y = measure_y_values[idx] if np.isfinite(measure_y_values[idx]) else bbox_y2_values[idx]
+                white_x = measure_x_values[idx] if np.isfinite(measure_x_values[idx]) else center_x_values[idx]
+                left_line_x = get_line_x_at_y(white_y, left_line) if left_line else None
+                if left_line_x is not None and np.isfinite(white_x):
+                    # 左側が越え (x < left_line_x)
+                    white_status = "白線越え" if white_x < left_line_x else "白線内側"
 
         updates.append(
             (

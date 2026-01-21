@@ -1,4 +1,6 @@
 from typing import Any, Optional, Mapping, Sequence
+from collections import OrderedDict
+from collections import OrderedDict
 from flask import (
     render_template,
     request,
@@ -197,7 +199,7 @@ def manual_overtake_view():
         _prepare_manual_events(events)
     except Exception as exc:
         current_app.logger.exception("Failed to load manual overtake table view")
-        flash(f"手動追い越しイベントの取得に失敗しました: {exc}", "danger")
+        flash(f"Failed to load manual overtake events: {exc}", "danger")
         events = []
     else:
         if selected_run_ids:
@@ -209,8 +211,12 @@ def manual_overtake_view():
                         "Failed to update manual run review timestamp"
                     )
 
-    run_options = list_runs_for_manual_tool() if list_runs_for_manual_tool else []
-    
+    run_options = []
+    if list_runs_for_manual_tool:
+        run_options = list_runs_for_manual_tool()
+    elif list_detection_runs:
+        run_options = list_detection_runs()
+
     run_label_map: dict[int, str] = {}
     status_groups: dict[str, list[int]] = {
         "all": [],
@@ -228,53 +234,118 @@ def manual_overtake_view():
         normalized_status = (status or "new").lower()
         if normalized_status not in {"annotated", "visited", "new", "new_auto"}:
             normalized_status = "new"
+        if normalized_status == "new_auto":
+            normalized_status = "new"
 
         rid_int = int(rid)
         status_groups["all"].append(rid_int)
         status_groups.setdefault(normalized_status, []).append(rid_int)
 
-    timeline_entries = []
+    timeline_entries: list[dict[str, Any]] = []
+    timeline_grouped: "OrderedDict[int, list[dict[str, Any]]]" = OrderedDict()
+    timeline_summary: dict[int, dict[str, int]] = {}
+
     if selected_run_ids:
         try:
             timeline_entries = list_manual_overtake_timeline_entries(selected_run_ids)
         except Exception as exc:
-            current_app.logger.exception("Failed to load timeline entries")
+            current_app.logger.exception("Failed to load manual overtake timeline view")
+            flash(f"Failed to load manual timeline: {exc}", "danger")
             timeline_entries = []
-            
-    timeline_summary = {} 
-    # Use empty dict for per-run backlog summary if breakdown is not available
-    backlog_summary = {} 
-    
+        else:
+            for entry in timeline_entries:
+                run_value = entry.get("run_id")
+                try:
+                    run_key = int(run_value)
+                except (TypeError, ValueError):
+                    continue
+                if run_key not in timeline_grouped:
+                    timeline_grouped[run_key] = []
+                timeline_grouped[run_key].append(entry)
+
+            for run_key, items in timeline_grouped.items():
+                processed_count = sum(1 for item in items if item.get("last_processed_at"))
+                timeline_summary[run_key] = {
+                    "total": len(items),
+                    "processed": processed_count,
+                    "pending": len(items) - processed_count,
+                }
+
+    backlog_summary = {}
     backlog_total = 0
     try:
-         backlog_total = count_manual_context_backlog(selected_run_ids or None)
-    except:
-         current_app.logger.exception("Failed to count backlog")
-         
+        backlog_summary = count_manual_context_backlog(selected_run_ids or None)
+        if isinstance(backlog_summary, dict):
+            backlog_total = sum(backlog_summary.values())
+        else:
+            backlog_total = int(backlog_summary or 0)
+            backlog_summary = {}
+    except Exception:
+        current_app.logger.exception("Failed to count backlog")
+        backlog_summary = {}
+        backlog_total = 0
+
     backlog_status_summary = summarize_manual_context_backlog_by_status(
         selected_run_ids or None
     )
+    backlog_status_total = sum(int(value or 0) for value in (backlog_status_summary or {}).values())
+
+    try:
+        manual_event_total = count_manual_overtake_events()
+    except Exception as exc:
+        current_app.logger.exception("Failed to count manual overtake events")
+        manual_event_total = 0
+
+    if selected_run_ids:
+        try:
+            manual_event_total_selected = count_manual_overtake_events(selected_run_ids)
+        except Exception as exc:
+            current_app.logger.exception("Failed to count selected manual overtake events")
+            manual_event_total_selected = 0
+    else:
+        manual_event_total_selected = manual_event_total
 
     context_rows = _build_manual_context_rows(events)
     group_rows = _build_manual_group_rows(
         context_rows, include_left=True, include_flags=True
     )
 
+    snapshot_group_ids: set[int] = set()
+    for event in events:
+        for key in ("overtaker_group_id", "overtaken_group_id"):
+            value = event.get(key) if isinstance(event, dict) else None
+            try:
+                if value is not None:
+                    snapshot_group_ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+
     return render_template(
         "manual_overtake_view.html",
-        events=events,
-        group_rows=group_rows,
         run_options=run_options,
         selected_run_ids=selected_run_ids,
-        run_label_map=run_label_map,
-        status_groups=status_groups,
+        selected_run_ids_set=set(selected_run_ids),
+        events=events,
+        event_rows=events,
+        limit=limit_value,
+        context_rows=context_rows,
+        group_rows=group_rows,
         timeline_entries=timeline_entries,
+        timeline_grouped=timeline_grouped,
         timeline_summary=timeline_summary,
+        run_label_map=run_label_map,
+        timeline_total=len(timeline_entries),
+        status_groups=status_groups,
         context_backlog_summary=backlog_summary,
         context_backlog_total=backlog_total,
-        context_backlog_status_total=sum(backlog_status_summary.values()) if backlog_status_summary else 0,
         context_backlog_status=backlog_status_summary,
+        context_backlog_status_total=backlog_status_total,
+        manual_event_total=manual_event_total,
+        manual_event_total_selected=manual_event_total_selected,
+        lane_width_default=LANE_WIDTH_METERS,
+        snapshot_group_options=sorted(snapshot_group_ids),
     )
+
 
 @main.route("/manual_scale_preview_image")
 def manual_scale_preview_image():
@@ -465,29 +536,232 @@ def manual_overtake_reprocess():
 
     run_ids = list(dict.fromkeys(_normalize_run_ids(list(raw_ids))))
     if not run_ids:
-        flash("再処理対象のRunを選択してください。", "warning")
+        flash("??????Run??????????", "warning")
         return redirect(request.referrer or url_for("main.manual_overtake_view"))
 
     for run_id in run_ids:
-        # Full logic for reprocess is complex, involving calling logic.
-        # We will attempt to call the helper from routes.py if we extracted it,
-        # OR re-implement the loop here using imported functions.
-        # This function loops over timeframe entries and re-calculates/saves them.
-        
-        # Simplified for now due to length:
-        # Check dependencies
         actions_taken, dependency_warnings, fatal = _prepare_manual_overtake_dependencies(run_id)
+        for action in actions_taken:
+            current_app.logger.info(
+                "Manual reprocess prerequisites executed for run %s: %s",
+                run_id,
+                action,
+            )
+        for warning_msg in dependency_warnings:
+            flash(f"Run {run_id}: {warning_msg}", "warning")
         if fatal:
-            flash(f"Run {run_id}: 再処理に必要な検出が不足しています。", "danger")
+            flash(f"Run {run_id}: ??????????????????", "danger")
             continue
-            
-        # ... (rest of logic as seen in file view)
-        # Assuming the user accepts this partial logic is preserved or we replicate fully.
-        # I'll implement a concise version calling `_reprocess_manual_run` if I had it.
-        # Since I don't, I put a placeholder warning and loop logic.
-        flash(f"Run {run_id}: Full Reprocess logic refactoring pending.", "warning")
 
-    return redirect(request.referrer or url_for("main.manual_overtake_view", run_id=run_ids))
+        entries = list_manual_overtake_timeline_entries([run_id])
+        if not entries:
+            cores = list_manual_overtake_event_cores([run_id])
+            for core in cores:
+                frame_core = core.get("frame_num")
+                overtaker_core = core.get("overtaker_group_id")
+                overtaken_core = core.get("overtaken_group_id")
+                if frame_core is None or overtaker_core is None or overtaken_core is None:
+                    continue
+                try:
+                    frame_int = int(frame_core)
+                    overtaker_int = int(overtaker_core)
+                    overtaken_int = int(overtaken_core)
+                except (TypeError, ValueError):
+                    continue
+                manual_core_id = core.get("manual_event_id")
+                try:
+                    manual_core_id_int = (
+                        int(manual_core_id) if manual_core_id is not None else None
+                    )
+                except (TypeError, ValueError):
+                    manual_core_id_int = None
+                try:
+                    record_manual_overtake_timeline_entry(
+                        run_id,
+                        frame_int,
+                        overtaker_int,
+                        overtaken_int,
+                        notes=core.get("notes"),
+                        last_event_id=manual_core_id_int,
+                    )
+                except Exception:
+                    current_app.logger.exception(
+                        "Failed to backfill manual overtake timeline for run %s", run_id
+                    )
+            entries = list_manual_overtake_timeline_entries([run_id])
+
+        if not entries:
+            flash(f"Run {run_id}: ?????????????????????????", "info")
+            continue
+
+        run_errors: list[str] = []
+        run_warnings: list[str] = []
+        processed_count = 0
+
+        for entry in entries:
+            timeline_id_value = entry.get("timeline_id")
+            try:
+                timeline_id_int = int(timeline_id_value)
+            except (TypeError, ValueError):
+                timeline_id_int = None
+            timeline_label = timeline_id_value
+            if timeline_label is None or timeline_label == "":
+                timeline_label = "?"
+
+            frame_value = entry.get("frame_num")
+            overtaker_gid = entry.get("overtaker_group_id")
+            overtaken_gid = entry.get("overtaken_group_id")
+            base_notes = entry.get("notes")
+            manual_event_id = entry.get("last_event_id")
+
+            if frame_value is None or overtaker_gid is None or overtaken_gid is None:
+                run_errors.append(
+                    f"timeline #{timeline_label}: missing identifiers; skipped."
+                )
+                continue
+
+            try:
+                frame_int = int(frame_value)
+                overtaker_int = int(overtaker_gid)
+                overtaken_int = int(overtaken_gid)
+            except (TypeError, ValueError):
+                run_errors.append(
+                    f"timeline #{timeline_label} (Frame {frame_value}): invalid group/frame values."
+                )
+                continue
+
+            try:
+                computation = _compute_manual_overtake_event_data(
+                    run_id,
+                    frame_int,
+                    overtaker_int,
+                    overtaken_int,
+                    notes=base_notes,
+                    context_window=0,
+                    compute_lane_metrics=True,
+                )
+            except ManualOvertakeComputationError as exc:
+                run_errors.append(
+                    f"timeline #{timeline_label} (Frame {frame_value}): {exc}"
+                )
+                continue
+            except Exception as exc:
+                current_app.logger.exception(
+                    "Unexpected failure while computing manual overtake data for run %s", run_id
+                )
+                run_errors.append(
+                    f"timeline #{timeline_label} (Frame {frame_value}): compute failed ({exc})"
+                )
+                continue
+
+            payload = computation.payload
+            context_rows = computation.context_frames
+            detect_frame = computation.detection_frame_num
+            if computation.notices:
+                run_warnings.extend(computation.notices)
+
+            event_id: Optional[int] = None
+
+            if manual_event_id is not None:
+                try:
+                    manual_event_id_int = int(manual_event_id)
+                except (TypeError, ValueError):
+                    manual_event_id_int = None
+                if manual_event_id_int is not None:
+                    existing_core = fetch_manual_overtake_event_core(manual_event_id_int)
+                    if existing_core:
+                        updated = update_manual_overtake_event(manual_event_id_int, payload)
+                        if updated:
+                            event_id = manual_event_id_int
+
+            if event_id is None:
+                try:
+                    event_id = insert_manual_overtake_event(payload)
+                except Exception as exc:
+                    current_app.logger.exception("Failed to insert manual overtake event during reprocess")
+                    run_errors.append(
+                        f"timeline #{timeline_label} (Frame {frame_value}): failed to save event ({exc})"
+                    )
+                    continue
+
+            if event_id is not None:
+                backup_notice = _backup_manual_overtake_timing(run_id, event_id, payload)
+                if backup_notice:
+                    run_warnings.append(backup_notice)
+
+            context_saved, context_messages = _save_manual_overtake_context_frames(
+                event_id,
+                context_rows,
+                payload,
+                frame_int,
+                label=f"Event ID {event_id}",
+            )
+            run_warnings.extend(context_messages)
+
+            try:
+                flags_applied = apply_manual_overtake_flags(
+                    run_id,
+                    detect_frame,
+                    overtaker_int,
+                    overtaken_int,
+                )
+                if not flags_applied:
+                    run_warnings.append(
+                        f"Event ID {event_id}: failed to set manual flags."
+                    )
+            except Exception as exc:
+                current_app.logger.exception("Failed to update detection flags during manual reprocess")
+                run_warnings.append(
+                    f"Event ID {event_id}: flag update failed ({exc})"
+                )
+
+            if timeline_id_int is not None:
+                try:
+                    mark_manual_overtake_timeline_processed(timeline_id_int, event_id)
+                except Exception as exc:
+                    current_app.logger.exception("Failed to update manual timeline during reprocess")
+                    run_warnings.append(
+                        f"timeline #{timeline_label}: failed to update timeline ({exc})"
+                    )
+            try:
+                record_manual_overtake_timeline_entry(
+                    run_id,
+                    frame_int,
+                    overtaker_int,
+                    overtaken_int,
+                    notes=payload.get("notes"),
+                    last_event_id=event_id,
+                )
+            except Exception as exc:
+                current_app.logger.exception("Failed to refresh manual timeline entry during reprocess")
+                run_warnings.append(
+                    f"timeline #{timeline_label}: failed to refresh timeline ({exc})"
+                )
+
+            processed_count += 1
+
+        try:
+            touch_manual_run_progress(run_id, annotation=True)
+        except Exception:
+            current_app.logger.exception("Failed to update manual run annotation timestamp during reprocess")
+
+        if processed_count and not run_errors:
+            flash(f"Run {run_id}: ???????????{processed_count}?????????", "success")
+        elif processed_count:
+            flash(
+                f"Run {run_id}: {processed_count}??????????{len(run_errors)}???????????",
+                "warning",
+            )
+        else:
+            flash(f"Run {run_id}: ??????????????????", "warning")
+
+        for warning_msg in run_warnings:
+            flash(f"Run {run_id}: {warning_msg}", "warning")
+        for error_msg in run_errors:
+            flash(f"Run {run_id}: {error_msg}", "danger")
+
+    target_url = request.referrer or url_for("main.manual_overtake_view", run_id=run_ids)
+    return redirect(target_url)
 
 @main.route("/manual_overtake/context/process", methods=["POST"])
 def manual_overtake_context_process():
@@ -502,19 +776,56 @@ def manual_overtake_context_process():
 
     run_ids = _normalize_run_ids(list(raw_ids))
     if not run_ids:
-        flash("後処理対象のRunを選択してください。", "warning")
+        flash("Select run(s) to process.", "warning")
         return redirect(request.referrer or url_for("main.manual_overtake_view"))
 
     result = _execute_manual_context_processing(run_ids)
-    
-    # Flash messages logic...
-    processed = int(result.get("processed", 0))
+
+    if result.get("ensure_error"):
+        flash(
+            f"Failed to check backlog targets: {result['ensure_error']}",
+            "danger",
+        )
+    elif result.get("enqueued"):
+        flash(
+            f"Enqueued {result['enqueued']} manual context entries.",
+            "info",
+        )
+
+    processed = int(result.get("processed", 0) or 0)
+    remaining_total = int(result.get("remaining_total", 0) or 0)
+    pending_before = int(result.get("pending_before", 0) or 0)
+
     if processed:
-        flash(f"追い越しフレーム後処理を {processed} 件実行しました。", "success")
+        if remaining_total > 0:
+            flash(
+                f"Processed {processed} manual context entries (remaining {remaining_total}).",
+                "success",
+            )
+        else:
+            flash(f"Processed {processed} manual context entries.", "success")
+    elif pending_before == 0:
+        flash("No pending manual context entries found.", "info")
     else:
-        flash("処理対象なし", "info")
-        
-    return redirect(request.referrer or url_for("main.manual_overtake_view", run_id=run_ids))
+        flash("No manual context entries processed.", "info")
+
+    for warning in result.get("warnings", []):
+        if warning:
+            flash(warning, "warning")
+
+    for notice in result.get("notices", []):
+        if notice:
+            flash(notice, "warning")
+
+    if remaining_total > 0:
+        flash(
+            f"Pending manual context entries remain: {remaining_total}.",
+            "warning",
+        )
+
+    target_url = request.referrer or url_for("main.manual_overtake_view", run_id=run_ids)
+    return redirect(target_url)
+
 
 @main.route("/api/manual_overtake/context/process", methods=["POST"])
 def manual_overtake_context_process_api():
@@ -524,55 +835,85 @@ def manual_overtake_context_process_api():
 
     payload = request.get_json(silent=True) or {}
     raw_runs = payload.get("run_ids")
-    limit = payload.get("limit", 5)
-    ensure_missing = bool(payload.get("ensure_missing", True))
+    if raw_runs is None:
+        return jsonify({"error": "run_ids is required"}), 400
+
+    if isinstance(raw_runs, (str, int)):
+        run_values = [raw_runs]
+    elif isinstance(raw_runs, Sequence):
+        run_values = list(raw_runs)
+    else:
+        run_values = []
+
+    run_ids = _normalize_run_ids(run_values)
+    if not run_ids:
+        return jsonify({"error": "run_ids is required"}), 400
+
     lane_width_m_value = payload.get("lane_width_m")
-
-    run_ids = _normalize_run_ids([raw_runs] if isinstance(raw_runs, (str, int)) else raw_runs)
-
-    if lane_width_m_value is not None:
-        try:
-            lane_width_meters = float(lane_width_m_value)
-            if lane_width_meters > 0 and update_manual_lane_width and run_ids:
-                update_manual_lane_width(run_ids, lane_width_meters)
-        except (TypeError, ValueError):
-            pass
-
-    notices = []
-    enqueued = 0
-    ensure_error = None
-    
-    if ensure_missing and run_ids and ensure_manual_context_backlog_for_runs:
-        try:
-            enqueued, _ = ensure_manual_context_backlog_for_runs(run_ids)
-            if enqueued > 0:
-                notices.append(f"{enqueued}件をキューに追加しました。")
-        except Exception as e:
-            current_app.logger.exception("Failed to ensure backlog")
-            ensure_error = str(e)
-            notices.append(f"キュー確認失敗: {e}")
-
+    lane_width_meters: Optional[float]
     try:
-        # Use the logic function directly
-        processed, proc_notices, remaining = _process_manual_context_backlog(
-            batch_size=int(limit) if limit else 5,
-            run_ids=run_ids
-        )
-        if proc_notices:
-            notices.extend(proc_notices)
-    except Exception as exc:
-        current_app.logger.exception("Failed to process manual backlog")
-        return jsonify({"error": str(exc)}), 500
+        lane_width_meters = float(lane_width_m_value)
+    except (TypeError, ValueError):
+        lane_width_meters = None
+    lane_width_updated = 0
+    if lane_width_meters is not None and lane_width_meters > 0:
+        try:
+            lane_width_updated = update_manual_lane_width(run_ids, lane_width_meters)
+        except Exception:
+            current_app.logger.exception("Failed to update manual lane width before processing")
 
-    return jsonify({
+    limit_value = payload.get("limit")
+    try:
+        limit_candidate = int(limit_value) if limit_value is not None else None
+    except (TypeError, ValueError):
+        limit_candidate = None
+    else:
+        if limit_candidate is not None and limit_candidate <= 0:
+            limit_candidate = None
+
+    ensure_flag = payload.get("ensure_missing")
+    ensure_missing = True if ensure_flag is None else bool(ensure_flag)
+
+    result = _execute_manual_context_processing(
+        run_ids,
+        limit=limit_candidate,
+        ensure_missing=ensure_missing,
+    )
+
+    processed = int(result.get("processed", 0) or 0)
+    remaining_total = int(result.get("remaining_total", 0) or 0)
+    pending_before = int(result.get("pending_before", 0) or 0)
+
+    if processed and remaining_total:
+        default_message = f"Processed {processed} manual context entries (remaining {remaining_total})."
+    elif processed:
+        default_message = f"Processed {processed} manual context entries."
+    elif pending_before == 0:
+        default_message = "No pending manual context entries found."
+    else:
+        default_message = "No manual context entries processed."
+
+    response_payload = {
+        "run_ids": result.get("run_ids", run_ids),
+        "pending_before": pending_before,
         "processed": processed,
-        "remaining_total": remaining,
-        "enqueued": enqueued,
-        "notices": notices,
-        "ensure_error": ensure_error,
-        "lane_width_updated": len(run_ids) if lane_width_m_value else 0,
-        "lane_width_m": lane_width_m_value
-    })
+        "remaining": result.get("remaining", {}),
+        "remaining_total": remaining_total,
+        "notices": result.get("notices", []),
+        "warnings": result.get("warnings", []),
+        "enqueued": int(result.get("enqueued", 0) or 0),
+        "lane_width_updated": int(lane_width_updated or 0),
+        "enqueued_event_ids": result.get("enqueued_event_ids", []),
+        "ensure_error": result.get("ensure_error"),
+        "batch_limit": result.get("batch_limit"),
+        "ensure_missing": result.get("ensure_missing"),
+        "message": result.get("message", default_message),
+        "snapshot_taken_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if lane_width_meters is not None and lane_width_meters > 0:
+        response_payload["lane_width_m"] = lane_width_meters
+    return jsonify(response_payload)
+
 
 @main.route("/api/manual_overtake/context/backlog", methods=["GET"])
 def manual_overtake_context_backlog_status_api():
@@ -583,16 +924,56 @@ def manual_overtake_context_backlog_status_api():
     raw_runs = request.args.getlist("run_id")
     run_ids = _normalize_run_ids(list(raw_runs))
     summary = count_manual_context_backlog(run_ids or None)
-    status_totals = summarize_manual_context_backlog_by_status(run_ids or None)
-    
-    return jsonify({
-        "run_ids": run_ids,
-        "pending": summary,
-        "status_totals": status_totals,
-        "snapshot_taken_at": datetime.now(timezone.utc).isoformat(),
-    })
+    if isinstance(summary, dict):
+        total_pending = sum(int(value or 0) for value in summary.values())
+        pending_payload = {str(key): int(value or 0) for key, value in summary.items()}
+    else:
+        total_pending = int(summary or 0)
+        pending_payload = {}
 
-@main.route("/manual_overtake/export", methods=["GET"])
+    status_totals = summarize_manual_context_backlog_by_status(run_ids or None)
+    backlog_total = sum(int(value or 0) for value in (status_totals or {}).values())
+
+    payload = {
+        "run_ids": run_ids,
+        "pending": pending_payload,
+        "pending_total": int(total_pending),
+        "status_totals": {str(key): int(value or 0) for key, value in (status_totals or {}).items()},
+        "backlog_total": int(backlog_total),
+        "snapshot_taken_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return jsonify(payload)
+
+
+@main.route("/api/manual_overtake/recalculate_all", methods=["POST"])
+def manual_overtake_recalculate_all_api():
+    error_response = _ensure_database_ready()
+    if error_response is not None:
+        return error_response
+        
+    payload = request.get_json(silent=True) or {}
+    raw_runs = payload.get("run_ids")
+    run_ids = _normalize_run_ids(raw_runs) if raw_runs else None
+    
+    try:
+        from ..modules.manual_logic import recalculate_manual_events_batch
+        result = recalculate_manual_events_batch(run_ids=run_ids)
+        
+        return jsonify({
+            "success": True,
+            "processed": result["processed"],
+            "total": result["total"],
+            "errors": result["errors"],
+            "updated_ids": result["updated_ids"],
+            "stats": result.get("stats"),
+            "message": f"Updated {result['processed']} / {result['total']} events."
+        })
+    except Exception as e:
+        current_app.logger.exception("Manual recalculate all failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@main.route("/manual_overtake/export")
 def manual_overtake_export():
     """手動追い越しデータをCSV形式でエクスポートする。"""
     raw_ids = request.args.getlist("run_id")
@@ -2051,8 +2432,8 @@ def manual_overtake_events_api(run_id: int):
                 # Using _process_manual_context_backlog directly
                 processed_count, exec_notices, _ = _process_manual_context_backlog(
                     run_ids=[run_id],
-                    batch_size=5,  # Process a few items to clear backlog
-                    time_limit_s=10.0
+                    limit=5,
+                    group_presence_context=True,
                 )
                 
                 context_executed = True
@@ -2287,25 +2668,31 @@ def export_manual_overtakes():
 
 @main.route("/api/manual_overtake/process_backlog", methods=["POST"])
 def process_manual_backlog():
-    """手動追い越しの後処理バックログを処理"""
+    """Process manual context backlog via API."""
     raw_run_ids = request.json.get("run_ids") if request.is_json else None
     selected_run_ids = _normalize_run_ids(raw_run_ids) if raw_run_ids else None
-    
+
     limit = request.json.get("limit", 50) if request.is_json else 50
-    
+
     try:
-        processed_count, notices, remaining_count = _process_manual_context_backlog(
-            batch_size=limit,
+        processed_count, notices, remaining_summary = _process_manual_context_backlog(
             run_ids=selected_run_ids,
+            limit=limit,
+            group_presence_context=True,
         )
     except Exception as exc:
         current_app.logger.exception("Failed to process manual backlog via logic")
-        return jsonify({"error": f"バックログ処理中にエラーが発生しました: {exc}"}), 500
+        return jsonify({"error": f"Manual backlog processing failed: {exc}"}), 500
+
+    if isinstance(remaining_summary, dict):
+        remaining_total = sum(int(value or 0) for value in remaining_summary.values())
+    else:
+        remaining_total = int(remaining_summary or 0)
 
     return jsonify({
-        "message": f"{processed_count}件の処理が完了しました",
+        "message": f"Processed {processed_count} entries.",
         "processed": processed_count,
-        "remaining_total": remaining_count,
+        "remaining_total": remaining_total,
         "errors": len(notices) if notices else 0,
         "error_details": notices[:10] if notices else []
     })

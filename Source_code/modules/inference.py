@@ -44,6 +44,7 @@ from .kinematics_analyzer import assign_kinematics
 from .overtake import assign_overtake, summarize_run_overtakes, _export_overtake_snapshots
 from .approach_distance import assign_approach_and_clearance
 from .lane_distance import assign_lane_distance
+from .xy_section_speed import assign_xy_section_speed
 from .inter_vehicle_distance import analyze_proximity
 from .ttc_calculator import assign_ttc
 from .folder_config import load_folder_settings_with_flag
@@ -577,31 +578,63 @@ def get_video_properties(video_path: str):
     return duration, fps, frame_count
 
 
-def run_postprocess_pipeline_sync(run_id: int) -> tuple[List[str], List[str]]:
+def _log_ran_error(identifier: str, error_msg: str, detail: str = "") -> None:
+    """実行時エラーをログファイルに追記する。"""
+    try:
+        log_dir = os.path.abspath(os.path.join(os.getcwd(), "log"))
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "RAN_error.log")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] [ERROR] {identifier}\n")
+            f.write(f"Message: {error_msg}\n")
+            if detail:
+                f.write(f"Detail:\n{detail}\n")
+            f.write("-" * 40 + "\n")
+    except Exception as e:
+        print(f"[SYSTEM ERROR] Failed to write to RAN_error.log: {e}")
+
+def run_postprocess_pipeline_sync(run_id: int) -> tuple[List[str], List[str], List[dict]]:
     """後処理7ステップを順番に実行し、成功/失敗の結果を返す。"""
     steps: List[tuple[str, Callable[[int], None]]] = [
         ("グループID", assign_group_ids),
         ("運動学", assign_kinematics),
         ("白線距離", assign_lane_distance),
         ("追い越し", assign_overtake),
+        ("区間速度", assign_xy_section_speed),
         ("接近/離隔", assign_approach_and_clearance),
         ("車両間距離", analyze_proximity),
         ("TTC", assign_ttc),
     ]
     completed: List[str] = []
     errors: List[str] = []
+    skip_logs: List[dict] = []
     for label, handler in steps:
         try:
             result = handler(run_id)
-            if label == "追い越し" and isinstance(result, int):
+            if label == "追い越し" and isinstance(result, tuple):
+                # Unpack (count, skips)
+                count_val, skips = result
+                # Capture skips
+                if skips:
+                    skip_logs.extend(skips)
+                completed.append(f"{label}({count_val}枚)")
+            elif label == "追い越し" and isinstance(result, int):
+                 # Backward compatibility or fallback
                 completed.append(f"{label}({result}枚)")
             else:
                 completed.append(label)
         except Exception as exc:  # noqa: BLE001
             import traceback
+            tb = traceback.format_exc()
             traceback.print_exc()
-            errors.append(f"{label}: {exc}")
-    return completed, errors
+            error_msg = f"{label}: {exc}"
+            errors.append(error_msg)
+            # Log to RAN_error.log
+            _log_ran_error(f"Run ID: {run_id} | Step: {label}", str(exc), tb)
+
+    return completed, errors, skip_logs
 
 def regenerate_manual_snapshots(
     run_id: int, 
@@ -1212,8 +1245,10 @@ def process_video_folder(
                     result['error'] = f"{existing_error} / {message}" if existing_error else message
 
             postprocess_note: Optional[str] = None
+            skip_logs_list: List[dict] = []
             if resolved_settings.auto_csv:
-                completed_steps, step_errors = run_postprocess_pipeline_sync(run_id)
+                completed_steps, step_errors, step_skips = run_postprocess_pipeline_sync(run_id)
+                skip_logs_list.extend(step_skips)
                 if step_errors:
                     joined = " / ".join(step_errors)
                     print(f"[!] Run ID {run_id} の後処理でエラー: {joined}")
@@ -1255,12 +1290,31 @@ def process_video_folder(
                 except Exception as e:
                     print(f"[!] Run ID {run_id} の追い越し集計に失敗: {e}")
 
+
+
+
         except Exception as exc:
             import traceback
+            tb = traceback.format_exc()
             traceback.print_exc()
+            # Log to RAN_error.log
+            _log_ran_error(f"Video: {video_path}", str(exc), tb)
             message = f"{exc}"
             print(f"[!] {video_path} の処理でエラー: {message}")
             result['error'] = message
+
+        # RAN Report Generation (Execute regardless of success/failure if we have run_id)
+        # Note: run_id might be None if error occurred before run_id determination
+        if run_id:
+            try:
+                # If error, result['csv_path'] might be missing, which is fine
+                # Use local 'skip_logs_list' if available
+                local_skips = locals().get('skip_logs_list', [])
+                report_path = generate_ran_report(int(run_id), result.get('csv_path'), out_folder, local_skips)
+                if report_path:
+                    print(f"\n[RAN Report] レポートを生成しました: {report_path}")
+            except Exception as rep_err:
+                print(f"[RAN Report] レポート生成に失敗しました: {rep_err}")
 
         if folder_callback:
             folder_callback("video_done", index, total, display_name, result.copy())

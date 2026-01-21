@@ -640,8 +640,45 @@ def lane_scale_details_at_y(
             lane_width_m,
         )
 
-    pixels_per_meter = lane_width_px / lane_width_m if lane_width_m else None
-    meters_per_pixel = lane_width_m / lane_width_px if lane_width_px else None
+
+    half_width_m = lane_width_m / 2.0 if lane_width_m else None
+    
+    left_ppm_temp = None
+    right_ppm_temp = None
+    
+    # Calculate independent PPMs from Center if available
+    if center_x is not None and half_width_m:
+        if left_x is not None:
+            w_l = abs(center_x - left_x)
+            if w_l > 1:
+                left_ppm_temp = w_l / half_width_m
+        if right_x is not None:
+            w_r = abs(right_x - center_x)
+            if w_r > 1:
+                right_ppm_temp = w_r / half_width_m
+
+    # Fallback to Left-Right full width if PPMs not yet found but L/R exist
+    if left_ppm_temp is None and right_ppm_temp is None:
+        if left_x is not None and right_x is not None and lane_width_m and lane_width_px > 0:
+             global_ppm = lane_width_px / lane_width_m
+             left_ppm_temp = global_ppm
+             right_ppm_temp = global_ppm
+
+    # Mirroring logic (from verify_route.py)
+    if left_ppm_temp is not None and right_ppm_temp is None:
+        right_ppm_temp = left_ppm_temp
+    if right_ppm_temp is not None and left_ppm_temp is None:
+        left_ppm_temp = right_ppm_temp
+        
+    pixels_per_meter = None
+    if left_ppm_temp is not None and right_ppm_temp is not None:
+        pixels_per_meter = (left_ppm_temp + right_ppm_temp) / 2.0
+    elif left_ppm_temp is not None:
+        pixels_per_meter = left_ppm_temp
+    elif right_ppm_temp is not None:
+        pixels_per_meter = right_ppm_temp
+        
+    meters_per_pixel = 1.0 / pixels_per_meter if pixels_per_meter else None
     centimeters_per_pixel = (
         meters_per_pixel * 100.0 if meters_per_pixel is not None else None
     )
@@ -676,10 +713,9 @@ def lane_scale_details_at_y(
     anchor_points.append((float(right_x), lane_width_m))
 
     if half_width_m and half_width_m > 0:
-        if left_segment_px is not None and left_segment_px > 0:
-            left_pixels_per_meter = left_segment_px / half_width_m
-        if right_segment_px is not None and right_segment_px > 0:
-            right_pixels_per_meter = right_segment_px / half_width_m
+        # Use calculated/mirrored PPMs
+        left_pixels_per_meter = left_ppm_temp
+        right_pixels_per_meter = right_ppm_temp
     if quarter_width_m and quarter_width_m > 0:
         if left_mid_segment_px is not None and left_mid_segment_px > 0:
             left_mid_pixels_per_meter = left_mid_segment_px / quarter_width_m

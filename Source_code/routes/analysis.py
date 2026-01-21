@@ -5,13 +5,18 @@ import sqlite3
 import glob
 import os
 import re
+import statistics
 from . import main
 from ..modules import db_manager as dbm
 from ..modules.comparative_analysis import load_overtake_data, compute_statistics, run_tests, generate_plots
+from ..modules.calibration_loader import load_calibration_json
+from ..modules.manual_metrics import load_white_lines
+from ..modules.white_line import get_line_x_at_y
 from ..modules.db_manager import (
     MAIN_DB_PATH,
     configure_connection,
     list_detection_runs,
+    resolve_output_root,
 )
 from ..modules.statistics_exporter import (
     generate_statistics_preview,
@@ -365,7 +370,7 @@ def global_stats_api():
                 stats["outer_ratio"] = round((outer_count / total_classified) * 100, 1)
 
             # 7. Collect all overtake snapshots
-            opt_root = os.getenv("Opt_files") or "output"
+            opt_root = resolve_output_root(conn)
             # Support both .jpg and .png (recursive search)
             snapshots_jpg = glob.glob(os.path.join(opt_root, "**", "overtake_snapshots", "*.jpg"), recursive=True)
             snapshots_png = glob.glob(os.path.join(opt_root, "**", "overtake_snapshots", "*.png"), recursive=True)
@@ -393,7 +398,7 @@ def global_stats_api():
 @main.route("/overtake_gallery")
 def overtake_gallery():
     """追い越し写真ギャラリーページを表示する。"""
-    opt_root = os.getenv("Opt_files") or "output"
+    opt_root = resolve_output_root()
     
     # ソートパラメータ取得
     sort_by = request.args.get("sort", "name")  # name, time
@@ -423,6 +428,22 @@ def overtake_gallery():
     # Get overtake event count from database
     overtake_event_count = 0
     manual_event_count = 0
+    overtake_stats = {
+        "widened": {
+            "count": 0,
+            "center_ratio": None,
+            "white_ratio": None,
+            "clearance": {"min": None, "median": None, "max": None},
+            "line": {"min": None, "median": None, "max": None},
+        },
+        "unwidened": {
+            "count": 0,
+            "center_ratio": None,
+            "white_ratio": None,
+            "clearance": {"min": None, "median": None, "max": None},
+            "line": {"min": None, "median": None, "max": None},
+        },
+    }
     try:
         with sqlite3.connect(MAIN_DB_PATH) as conn:
             configure_connection(conn, mode="read")
@@ -439,6 +460,151 @@ def overtake_gallery():
                     manual_event_count = row[0]
             except sqlite3.OperationalError:
                 pass  # Table may not exist
+
+            conn.row_factory = sqlite3.Row
+            stats_query = """
+                SELECT
+                    v.road_type,
+                    o.clearance_distance_m AS event_clearance_m,
+                    o.line_distance_m AS event_line_m,
+                    car.clearance_distance_m AS car_clearance_m,
+                    bike.clearance_distance_m AS bike_clearance_m,
+                    car.line_distance_m AS car_line_m,
+                    bike.line_distance_m AS bike_line_m,
+                    car.center_line_overtake_status AS car_center_status,
+                    bike.white_line_overtake_status AS bike_white_status,
+                    COALESCE(car.travel_direction, bike.travel_direction) AS travel_direction,
+                    car.l_line_cross_m AS car_l_cross_m,
+                    car.r_line_cross_m AS car_r_cross_m,
+                    bike.l_line_cross_m AS bike_l_cross_m,
+                    bike.r_line_cross_m AS bike_r_cross_m
+                FROM OvertakeEvents o
+                JOIN ProcessLog p ON o.run_id = p.run_id
+                JOIN Video v ON p.video_id = v.video_id
+                LEFT JOIN Detection car ON o.overtaker_auto_id = car.auto_id
+                LEFT JOIN Detection bike ON o.overtaken_auto_id = bike.auto_id
+            """
+            rows = conn.execute(stats_query).fetchall()
+
+            widened_center = 0
+            widened_white = 0
+            unwidened_center = 0
+            unwidened_white = 0
+            widened_clearance = []
+            widened_line = []
+            unwidened_clearance = []
+            unwidened_line = []
+
+            for row in rows:
+                road_type = (row["road_type"] or "").strip()
+                if road_type not in ("拡幅", "未拡幅"):
+                    continue
+
+                bucket = "widened" if road_type == "拡幅" else "unwidened"
+                overtake_stats[bucket]["count"] += 1
+
+                direction = str(row["travel_direction"] or "").strip().upper()
+                if direction == "F":
+                    center_cross = row["car_r_cross_m"]
+                    white_cross = row["bike_l_cross_m"]
+                else:
+                    center_cross = row["car_l_cross_m"]
+                    white_cross = row["bike_r_cross_m"]
+
+                center_status = (row["car_center_status"] or "").strip()
+                white_status = (row["bike_white_status"] or "").strip()
+
+                center_hit = False
+                white_hit = False
+                if center_status:
+                    center_hit = center_status == "中央線越え"
+                elif center_cross is not None and center_cross > 0:
+                    center_hit = True
+
+                if white_status:
+                    white_hit = white_status == "白線越え"
+                elif white_cross is not None and white_cross > 0:
+                    white_hit = True
+
+                if center_hit:
+                    if bucket == "widened":
+                        widened_center += 1
+                    else:
+                        unwidened_center += 1
+                if white_hit:
+                    if bucket == "widened":
+                        widened_white += 1
+                    else:
+                        unwidened_white += 1
+
+                clearance_val = row["event_clearance_m"]
+                if clearance_val is None:
+                    clearance_val = row["car_clearance_m"]
+                if clearance_val is None:
+                    clearance_val = row["bike_clearance_m"]
+
+                line_val = row["event_line_m"]
+                if line_val is None:
+                    line_val = row["bike_line_m"]
+                if line_val is None:
+                    line_val = row["car_line_m"]
+
+                if bucket == "widened":
+                    if clearance_val is not None:
+                        widened_clearance.append(clearance_val)
+                    if line_val is not None:
+                        widened_line.append(line_val)
+                else:
+                    if clearance_val is not None:
+                        unwidened_clearance.append(clearance_val)
+                    if line_val is not None:
+                        unwidened_line.append(line_val)
+
+            def _ratio(count: int, total: int):
+                if total <= 0:
+                    return None
+                return round((count / total) * 100, 1)
+
+            overtake_stats["widened"]["center_ratio"] = _ratio(
+                widened_center, overtake_stats["widened"]["count"]
+            )
+            overtake_stats["widened"]["white_ratio"] = _ratio(
+                widened_white, overtake_stats["widened"]["count"]
+            )
+            overtake_stats["unwidened"]["center_ratio"] = _ratio(
+                unwidened_center, overtake_stats["unwidened"]["count"]
+            )
+            overtake_stats["unwidened"]["white_ratio"] = _ratio(
+                unwidened_white, overtake_stats["unwidened"]["count"]
+            )
+
+            if widened_clearance:
+                overtake_stats["widened"]["clearance"] = {
+                    "min": min(widened_clearance),
+                    "median": statistics.median(widened_clearance),
+                    "max": max(widened_clearance),
+                }
+
+            if widened_line:
+                overtake_stats["widened"]["line"] = {
+                    "min": min(widened_line),
+                    "median": statistics.median(widened_line),
+                    "max": max(widened_line),
+                }
+
+            if unwidened_clearance:
+                overtake_stats["unwidened"]["clearance"] = {
+                    "min": min(unwidened_clearance),
+                    "median": statistics.median(unwidened_clearance),
+                    "max": max(unwidened_clearance),
+                }
+
+            if unwidened_line:
+                overtake_stats["unwidened"]["line"] = {
+                    "min": min(unwidened_line),
+                    "median": statistics.median(unwidened_line),
+                    "max": max(unwidened_line),
+                }
     except Exception as e:
         current_app.logger.exception("Failed to fetch overtake event counts")
     
@@ -448,6 +614,7 @@ def overtake_gallery():
         total_count=len(image_list),
         overtake_event_count=overtake_event_count,
         manual_event_count=manual_event_count,
+        overtake_stats=overtake_stats,
         output_root=opt_root,
         current_sort=sort_by,
         current_order=sort_order,
@@ -459,7 +626,7 @@ def reset_overtake_photos():
     """追い越し写真を全て削除する。"""
     import shutil
     
-    opt_root = os.getenv("Opt_files") or "output"
+    opt_root = resolve_output_root()
     deleted_count = 0
     
     # Find all overtake_snapshots directories recursively
@@ -858,6 +1025,26 @@ def export_overtake_summary_csv():
         current_app.logger.error(f"Overtake Summary CSV Export failed: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
+@main.route("/export_overtake_pairs_csv", methods=["POST"])
+def export_overtake_pairs_csv():
+    """追い越し/追い越されペアの1行CSV"""
+    try:
+        from ..modules.overtake_pair_export import generate_overtake_pair_csv
+        from datetime import datetime
+
+        csv_bytes = generate_overtake_pair_csv(MAIN_DB_PATH)
+        filename = f"overtake_pairs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        return send_file(
+            io.BytesIO(csv_bytes),
+            as_attachment=True,
+            download_name=filename,
+            mimetype="text/csv"
+        )
+    except Exception as e:
+        current_app.logger.error(f"Overtake Pair CSV Export failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @main.route("/export_full_data", methods=["POST"])
 def export_full_data():
     """全データ出力 (Full Data CSV Export)"""
@@ -1016,25 +1203,40 @@ def overtake_photo_detail():
             has_center_status = "center_line_overtake_status" in detection_columns
             has_white_status = "white_line_overtake_status" in detection_columns
             
-            # ファイルパスからrun_idを特定するため、output_folderを推測
-            # ファイルパスの親フォルダからrun_idを探す
-            path_parts = filename.replace("\\", "/").split("/")
-            
-            # overtake_snapshotsの親ディレクトリを取得
             run_id = None
-            if "overtake_snapshots" in path_parts:
-                idx = path_parts.index("overtake_snapshots")
-                if idx > 0:
-                    parent_folder = "/".join(path_parts[:idx])
-                    # ProcessLogからoutput_folderを検索
-                    find_run_sql = """
-                        SELECT run_id FROM ProcessLog 
-                        WHERE output_folder LIKE ? 
-                        ORDER BY run_id DESC LIMIT 1
-                    """
-                    run_row = conn.execute(find_run_sql, (f"%{path_parts[idx-1]}%",)).fetchone()
-                    if run_row:
-                        run_id = run_row["run_id"]
+            abs_file = filename
+            opt_root = resolve_output_root(conn)
+            if not os.path.isabs(abs_file):
+                abs_file = os.path.abspath(os.path.join(opt_root, filename))
+            else:
+                abs_file = os.path.abspath(abs_file)
+
+            output_rows = conn.execute(
+                "SELECT run_id, output_folder FROM ProcessLog "
+                "WHERE output_folder IS NOT NULL AND output_folder != ''"
+            ).fetchall()
+            best_match = None
+            for row in output_rows:
+                output_folder = os.path.abspath(row["output_folder"])
+                if abs_file.startswith(output_folder):
+                    if best_match is None or len(output_folder) > best_match[0]:
+                        best_match = (len(output_folder), row["run_id"])
+            if best_match:
+                run_id = best_match[1]
+
+            if run_id is None:
+                path_parts = filename.replace("\\", "/").split("/")
+                if "overtake_snapshots" in path_parts:
+                    idx = path_parts.index("overtake_snapshots")
+                    if idx > 0:
+                        find_run_sql = """
+                            SELECT run_id FROM ProcessLog
+                            WHERE output_folder LIKE ?
+                            ORDER BY run_id DESC LIMIT 1
+                        """
+                        run_row = conn.execute(find_run_sql, (f"%{path_parts[idx-1]}%",)).fetchone()
+                        if run_row:
+                            run_id = run_row["run_id"]
             
             # OvertakeEventsからイベントデータを取得
             event_data = None
@@ -1055,7 +1257,60 @@ def overtake_photo_detail():
             if event_row:
                 event_data = dict(event_row)
                 run_id = event_row["run_id"]
-            
+            else:
+                event_data = {
+                    "run_id": run_id,
+                    "event_frame_num": frame_num,
+                    "overtaker_group_id": car_group_id,
+                    "overtaken_group_id": bike_group_id,
+                    "overtaker_auto_id": None,
+                    "overtaken_auto_id": None,
+                    "approach_distance_m": None,
+                    "clearance_distance_m": None,
+                    "clearance_distance_cm": None,
+                    "line_distance_m": None,
+                }
+
+            check_sheet_event = None
+            manual_event = None
+            if run_id is not None:
+                manual_sql = """
+                    SELECT
+                        manual_event_id,
+                        notes,
+                        clearance_distance_m,
+                        clearance_distance_cm,
+                        approach_distance_m,
+                        overtaker_line_distance_m,
+                        overtaken_line_distance_m
+                    FROM ManualOvertakeEvents
+                    WHERE run_id = ?
+                      AND frame_num = ?
+                      AND overtaker_group_id = ?
+                      AND overtaken_group_id = ?
+                    ORDER BY manual_event_id DESC
+                """
+                for row in conn.execute(
+                    manual_sql, (run_id, frame_num, car_group_id, bike_group_id)
+                ).fetchall():
+                    payload = dict(row)
+                    notes = (payload.get("notes") or "").strip()
+                    if notes == "check_sheet_import":
+                        if check_sheet_event is None:
+                            check_sheet_event = payload
+                    else:
+                        if manual_event is None:
+                            manual_event = payload
+
+            class_name_map = {
+                0: "person",
+                1: "bicycle",
+                2: "car",
+                3: "motorcycle",
+                5: "bus",
+                7: "truck",
+            }
+
             # 追い越し車（車）のDetectionデータを取得
             car_detection = None
             if event_row and event_row["overtaker_auto_id"]:
@@ -1071,10 +1326,13 @@ def overtake_photo_detail():
                 )
                 car_sql = """
                     SELECT 
-                        d.auto_id, d.frame_num, d.group_id, 
+                        d.auto_id, d.frame_num, d.group_id, d.class_id,
+                        d.x1, d.y1, d.x2, d.y2, d.measure_x, d.measure_y,
                         cm.class_name, d.speed_km_h, d.confidence,
-                        d.front_distance_m, d.clearance_distance_m,
+                        d.front_distance_m, d.approach_distance_m,
+                        d.clearance_distance_m, d.clearance_distance_cm,
                         d.line_distance_m, d.travel_direction, d.lane_position_flag,
+                        d.l_line_cross_m, d.r_line_cross_m,
                         {center_col}, {white_col}
                     FROM Detection d
                     LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
@@ -1086,7 +1344,48 @@ def overtake_photo_detail():
                 ).fetchone()
                 if car_row:
                     car_detection = dict(car_row)
-            
+                    if not car_detection.get("class_name"):
+                        cid = car_detection.get("class_id")
+                        car_detection["class_name"] = class_name_map.get(cid)
+            elif run_id is not None:
+                car_center_col = (
+                    "d.center_line_overtake_status"
+                    if has_center_status
+                    else "NULL AS center_line_overtake_status"
+                )
+                car_white_col = (
+                    "d.white_line_overtake_status"
+                    if has_white_status
+                    else "NULL AS white_line_overtake_status"
+                )
+                car_sql = """
+                    SELECT 
+                        d.auto_id, d.frame_num, d.group_id, d.class_id,
+                        d.x1, d.y1, d.x2, d.y2, d.measure_x, d.measure_y,
+                        cm.class_name, d.speed_km_h, d.confidence,
+                        d.front_distance_m, d.approach_distance_m,
+                        d.clearance_distance_m, d.clearance_distance_cm,
+                        d.line_distance_m, d.travel_direction, d.lane_position_flag,
+                        d.l_line_cross_m, d.r_line_cross_m,
+                        {center_col}, {white_col}
+                    FROM Detection d
+                    LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+                    WHERE d.run_id = ?
+                      AND d.frame_num = ?
+                      AND d.group_id = ?
+                    ORDER BY d.auto_id DESC
+                    LIMIT 1
+                """
+                car_row = conn.execute(
+                    car_sql.format(center_col=car_center_col, white_col=car_white_col),
+                    (run_id, frame_num, car_group_id),
+                ).fetchone()
+                if car_row:
+                    car_detection = dict(car_row)
+                    if not car_detection.get("class_name"):
+                        cid = car_detection.get("class_id")
+                        car_detection["class_name"] = class_name_map.get(cid)
+
             # 被追い越し車（自転車）のDetectionデータを取得
             bike_detection = None
             if event_row and event_row["overtaken_auto_id"]:
@@ -1102,10 +1401,13 @@ def overtake_photo_detail():
                 )
                 bike_sql = """
                     SELECT 
-                        d.auto_id, d.frame_num, d.group_id,
+                        d.auto_id, d.frame_num, d.group_id, d.class_id,
+                        d.x1, d.y1, d.x2, d.y2, d.measure_x, d.measure_y,
                         cm.class_name, d.speed_km_h, d.confidence,
-                        d.front_distance_m, d.clearance_distance_m,
+                        d.front_distance_m, d.approach_distance_m,
+                        d.clearance_distance_m, d.clearance_distance_cm,
                         d.line_distance_m, d.travel_direction, d.lane_position_flag,
+                        d.l_line_cross_m, d.r_line_cross_m,
                         {center_col}, {white_col}
                     FROM Detection d
                     LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
@@ -1117,6 +1419,144 @@ def overtake_photo_detail():
                 ).fetchone()
                 if bike_row:
                     bike_detection = dict(bike_row)
+                    if not bike_detection.get("class_name"):
+                        cid = bike_detection.get("class_id")
+                        bike_detection["class_name"] = class_name_map.get(cid)
+            elif run_id is not None:
+                bike_center_col = (
+                    "d.center_line_overtake_status"
+                    if has_center_status
+                    else "NULL AS center_line_overtake_status"
+                )
+                bike_white_col = (
+                    "d.white_line_overtake_status"
+                    if has_white_status
+                    else "NULL AS white_line_overtake_status"
+                )
+                bike_sql = """
+                    SELECT 
+                        d.auto_id, d.frame_num, d.group_id, d.class_id,
+                        d.x1, d.y1, d.x2, d.y2, d.measure_x, d.measure_y,
+                        cm.class_name, d.speed_km_h, d.confidence,
+                        d.front_distance_m, d.approach_distance_m,
+                        d.clearance_distance_m, d.clearance_distance_cm,
+                        d.line_distance_m, d.travel_direction, d.lane_position_flag,
+                        d.l_line_cross_m, d.r_line_cross_m,
+                        {center_col}, {white_col}
+                    FROM Detection d
+                    LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+                    WHERE d.run_id = ?
+                      AND d.frame_num = ?
+                      AND d.group_id = ?
+                    ORDER BY d.auto_id DESC
+                    LIMIT 1
+                """
+                bike_row = conn.execute(
+                    bike_sql.format(center_col=bike_center_col, white_col=bike_white_col),
+                    (run_id, frame_num, bike_group_id),
+                ).fetchone()
+                if bike_row:
+                    bike_detection = dict(bike_row)
+                    if not bike_detection.get("class_name"):
+                        cid = bike_detection.get("class_id")
+                        bike_detection["class_name"] = class_name_map.get(cid)
+
+            calibration_data = None
+            overlay_data = None
+            if run_id:
+                calib_row = conn.execute(
+                    "SELECT calibration_profile FROM ProcessLog WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                profile_name = calib_row[0] if calib_row else None
+                try:
+                    calib_payload, _ = load_calibration_json(run_id, profile_name)
+                    lines = load_white_lines(calib_payload)
+                    calibration_data = {
+                        "left_line": lines.left,
+                        "right_line": lines.right,
+                        "center_line": lines.center,
+                    }
+                except Exception:
+                    calibration_data = None
+
+            if calibration_data:
+                center_line = calibration_data.get("center_line")
+                left_line = calibration_data.get("left_line")
+                car_point = None
+                bike_point = None
+                car_measure_point = None
+                bike_measure_point = None
+                car_line_point = None
+                bike_line_point = None
+
+                if car_detection and car_detection.get("x1") is not None and car_detection.get("y2") is not None:
+                    car_measure_point = {
+                        "x": car_detection.get("x1"),
+                        "y": car_detection.get("y2"),
+                    }
+
+                if car_detection and car_detection.get("x1") is not None and car_detection.get("y2") is not None:
+                    car_point = {"x": car_detection.get("x1"), "y": car_detection.get("y2")}
+                    if center_line:
+                        cx = get_line_x_at_y(car_detection.get("y2"), center_line)
+                        if cx is not None:
+                            car_line_point = {"x": cx, "y": car_detection.get("y2")}
+
+                if bike_detection and bike_detection.get("measure_x") is not None and bike_detection.get("measure_y") is not None:
+                    bike_measure_point = {
+                        "x": bike_detection.get("measure_x"),
+                        "y": bike_detection.get("measure_y"),
+                    }
+
+                if bike_detection and bike_detection.get("measure_x") is not None and bike_detection.get("measure_y") is not None:
+                    bike_point = {"x": bike_detection.get("measure_x"), "y": bike_detection.get("measure_y")}
+                    if calibration_data.get("right_line"):
+                        bx = get_line_x_at_y(bike_detection.get("measure_y"), calibration_data.get("right_line"))
+                        if bx is not None:
+                            bike_line_point = {"x": bx, "y": bike_detection.get("measure_y")}
+
+                overlay_data = {
+                    "car_point": car_point,
+                    "bike_point": bike_point,
+                    "car_measure_point": car_measure_point,
+                    "bike_measure_point": bike_measure_point,
+                    "car_center_line_point": car_line_point,
+                    "bike_white_line_point": bike_line_point,
+                }
+
+            if event_data:
+                def _first_value(*values):
+                    for value in values:
+                        if value is not None:
+                            return value
+                    return None
+
+                if event_data.get("clearance_distance_m") is None:
+                    event_data["clearance_distance_m"] = _first_value(
+                        (car_detection or {}).get("clearance_distance_m"),
+                        (bike_detection or {}).get("clearance_distance_m"),
+                    )
+                if event_data.get("clearance_distance_cm") is None:
+                    event_data["clearance_distance_cm"] = _first_value(
+                        (car_detection or {}).get("clearance_distance_cm"),
+                        (bike_detection or {}).get("clearance_distance_cm"),
+                    )
+                    if (
+                        event_data.get("clearance_distance_cm") is None
+                        and event_data.get("clearance_distance_m") is not None
+                    ):
+                        event_data["clearance_distance_cm"] = event_data["clearance_distance_m"] * 100.0
+                if event_data.get("approach_distance_m") is None:
+                    event_data["approach_distance_m"] = _first_value(
+                        (car_detection or {}).get("approach_distance_m"),
+                        (bike_detection or {}).get("approach_distance_m"),
+                    )
+                if event_data.get("line_distance_m") is None:
+                    event_data["line_distance_m"] = _first_value(
+                        (bike_detection or {}).get("line_distance_m"),
+                        (car_detection or {}).get("line_distance_m"),
+                    )
             
             # run_idから動画ファイル名も取得
             video_filename = None
@@ -1141,6 +1581,15 @@ def overtake_photo_detail():
                 "event": event_data,
                 "car_detection": car_detection,
                 "bike_detection": bike_detection,
+                "outputs": {
+                    "auto": bool(event_row),
+                    "rerun": check_sheet_event is not None,
+                    "manual": manual_event is not None,
+                },
+                "check_sheet_event": check_sheet_event,
+                "manual_event": manual_event,
+                "calibration": calibration_data,
+                "overlay": overlay_data,
             })
     
     except Exception as e:
@@ -1238,7 +1687,7 @@ def overtake_photo_delete():
             configure_connection(conn, mode="read")
             event_row = conn.execute(
                 """
-                SELECT event_id, run_id, overtaker_auto_id
+                SELECT overtake_event_id, run_id, overtaker_auto_id
                 FROM OvertakeEvents
                 WHERE event_frame_num = ?
                   AND overtaker_group_id = ?
@@ -1248,8 +1697,8 @@ def overtake_photo_delete():
             ).fetchone()
 
             if event_row:
-                event_id, event_run_id, overtaker_auto_id = event_row
-                conn.execute("DELETE FROM OvertakeEvents WHERE event_id = ?", (event_id,))
+                overtake_event_id, event_run_id, overtaker_auto_id = event_row
+                conn.execute("DELETE FROM OvertakeEvents WHERE overtake_event_id = ?", (overtake_event_id,))
                 if overtaker_auto_id:
                     conn.execute(
                         """
@@ -1268,7 +1717,7 @@ def overtake_photo_delete():
         current_app.logger.exception("Overtake photo delete API failed")
         return jsonify({"ok": False, "error": str(e)}), 500
 
-    opt_root = os.getenv("Opt_files") or "output"
+    opt_root = resolve_output_root()
     abs_opt = os.path.abspath(opt_root)
     abs_path = os.path.abspath(os.path.join(abs_opt, filename))
     if abs_path.startswith(abs_opt) and os.path.isfile(abs_path):
@@ -1287,6 +1736,47 @@ def overtake_photo_delete():
             "run_id": event_run_id,
         }
     )
+
+
+@main.route("/api/overtake_photo/update_line_status", methods=["POST"])
+def overtake_photo_update_line_status():
+    """追い越し詳細画面から中央線/白線判定を更新するAPI"""
+    payload = request.get_json(silent=True) or {}
+    car_auto_id = payload.get("car_auto_id")
+    bike_auto_id = payload.get("bike_auto_id")
+    car_center_status = (payload.get("car_center_status") or "").strip()
+    bike_white_status = (payload.get("bike_white_status") or "").strip()
+
+    if not car_auto_id and not bike_auto_id:
+        return jsonify({"ok": False, "error": "auto_idが指定されていません"}), 400
+
+    valid_center = {"中央線越え", "中央線内側"}
+    valid_white = {"白線越え", "白線内側"}
+
+    if car_center_status and car_center_status not in valid_center:
+        return jsonify({"ok": False, "error": "中央線判定が不正です"}), 400
+    if bike_white_status and bike_white_status not in valid_white:
+        return jsonify({"ok": False, "error": "白線判定が不正です"}), 400
+
+    try:
+        with sqlite3.connect(MAIN_DB_PATH) as conn:
+            configure_connection(conn, mode="write")
+            if car_auto_id:
+                conn.execute(
+                    "UPDATE Detection SET center_line_overtake_status = ? WHERE auto_id = ?",
+                    (car_center_status or None, car_auto_id),
+                )
+            if bike_auto_id:
+                conn.execute(
+                    "UPDATE Detection SET white_line_overtake_status = ? WHERE auto_id = ?",
+                    (bike_white_status or None, bike_auto_id),
+                )
+            conn.commit()
+    except Exception as e:
+        current_app.logger.exception("Failed to update line status")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True})
 
 
 @main.route("/api/overtake_events/all_group_ids")

@@ -1,11 +1,12 @@
 
-import json
 import sqlite3
 import logging
+from collections import Counter
 from datetime import datetime
 from typing import List, Dict, Tuple, Any
 
 from .db_manager import MAIN_DB_PATH, configure_connection
+from .calibration_loader import load_calibration_json
 
 logger = logging.getLogger(__name__)
 
@@ -33,36 +34,99 @@ class TrafficCounter:
                 
                 count_lines = []
                 use_fallback = False
-                
+
                 if row and row[0]:
                     try:
-                        profile = json.loads(row[0])
-                        count_lines = profile.get("count_lines", [])
-                    except json.JSONDecodeError:
-                        logger.error(f"Invalid JSON in calibration profile for run_id {run_id}.")
-                
-                # フォールバック: カウント線がない場合は Y=700 と Y=100 を使用
+                        profile_name = row[0]
+                        profile, _ = load_calibration_json(run_id, profile_name)
+                        count_lines = profile.get("count_lines", []) if isinstance(profile, dict) else []
+                    except FileNotFoundError:
+                        logger.error(f"Calibration file not found for run_id {run_id}: {row[0]}")
+                    except Exception as e:
+                        logger.error(f"Failed to load calibration profile for run_id {run_id}: {e}")
+
+                # ???????: ??????????????????Y???
                 if not count_lines:
-                    logger.info(f"No count lines for run_id {run_id}. Using fallback lines (Y=700, Y=100).")
-                    use_fallback = True
-                    default_width = 1920
-                    count_lines = [
-                        [[0, 700], [default_width, 700]],  # Line A (Y=700)
-                        [[0, 100], [default_width, 100]],  # Line B (Y=100)
-                    ]
+                    try:
+                        c.execute(
+                            """
+                            SELECT d.y1, d.y2, c.class_name
+                            FROM Detection d
+                            JOIN Class c ON d.class_id = c.class_id
+                            WHERE d.run_id = ? AND d.model_name != 'best'
+                            """,
+                            (run_id,),
+                        )
+                        bike_ys = []
+                        for y1, y2, class_name in c.fetchall():
+                            name = str(class_name or "").lower()
+                            if "bicycle" in name or "bike" in name:
+                                bike_ys.append(int(round((y1 + y2) / 2.0)))
+
+                        if bike_ys:
+                            y_mode = Counter(bike_ys).most_common(1)[0][0]
+                            c.execute("SELECT MAX(x2) FROM Detection WHERE run_id = ?", (run_id,))
+                            width_row = c.fetchone()
+                            default_width = int(width_row[0]) if width_row and width_row[0] else 1920
+                            count_lines = [
+                                [[0, y_mode], [default_width, y_mode]],
+                            ]
+                            use_fallback = True
+                            logger.info(
+                                f"No count lines for run_id {run_id}. Using bicycle Y mode line (Y={y_mode})."
+                            )
+                        else:
+                            raise ValueError("No bicycle detections")
+                    except Exception:
+                        logger.info(f"No count lines for run_id {run_id}. Using fallback lines (Y=700, Y=100).")
+                        use_fallback = True
+                        default_width = 1920
+                        count_lines = [
+                            [[0, 700], [default_width, 700]],  # Line A (Y=700)
+                            [[0, 100], [default_width, 100]],  # Line B (Y=100)
+                        ]
 
                 # 2. Clear existing counts
                 self._clear_counts(c, run_id)
 
-                # Fetch Class Map
-                c.execute("SELECT class_id, class_name FROM ClassMaster")
-                class_map = {row[0]: row[1] for row in c.fetchall()}
+                # Fetch Class Map (ClassMaster + Class)
+                class_map = {}
+                try:
+                    c.execute("SELECT class_id, class_name FROM ClassMaster")
+                    class_map.update({row[0]: row[1] for row in c.fetchall()})
+                except sqlite3.Error:
+                    pass
+                try:
+                    c.execute("SELECT class_id, class_name FROM Class")
+                    for class_id, class_name in c.fetchall():
+                        if class_id not in class_map:
+                            class_map[class_id] = class_name
+                except sqlite3.Error:
+                    pass
+
+                bicycle_ids = {
+                    class_id
+                    for class_id, class_name in class_map.items()
+                    if 'bicycle' in str(class_name or '').lower()
+                    or 'bike' in str(class_name or '').lower()
+                }
+                car_ids = {
+                    class_id
+                    for class_id, class_name in class_map.items()
+                    if 'car' in str(class_name or '').lower()
+                    or 'truck' in str(class_name or '').lower()
+                    or 'bus' in str(class_name or '').lower()
+                    or 'vehicle' in str(class_name or '').lower()
+                }
+                self._bicycle_ids = bicycle_ids
+                self._car_ids = car_ids
 
                 # 3. Fetch detections
                 c.execute("""
-                    SELECT obj_id, frame_num, x1, y1, x2, y2, class_id 
-                    FROM Detection 
-                    WHERE run_id = ? 
+                    SELECT obj_id, frame_num, x1, y1, x2, y2, class_id, model_name
+                    FROM Detection
+                    WHERE run_id = ?
+                      AND (model_name IS NULL OR LOWER(model_name) != 'best')
                     ORDER BY obj_id, frame_num
                 """, (run_id,))
                 
@@ -76,19 +140,17 @@ class TrafficCounter:
                 trajectory = []
                 counts = {}  # Key: (line_index, object_type, direction), Value: count
                 
-                def get_vehicle_type(class_name):
-                    """クラス名を車または自転車に分類"""
-                    class_lower = class_name.lower()
-                    if 'bicycle' in class_lower or 'bike' in class_lower:
-                        return '自転車'
-                    elif 'car' in class_lower or 'truck' in class_lower or 'bus' in class_lower or 'vehicle' in class_lower:
-                        return '車'
-                    else:
-                        return '車'
+                def get_vehicle_type(class_id):
+                    """Count using class_id only (YOLO results)."""
+                    if class_id in bicycle_ids:
+                        return '???'
+                    if class_id in car_ids:
+                        return '?'
+                    return '?'
 
                 for row in rows:
                     obj_id, frame_num, x1, y1, x2, y2, class_id = row
-                    class_name = class_map.get(class_id, f"Unknown({class_id})")
+                    
                     cx = (x1 + x2) / 2
                     cy = (y1 + y2) / 2
                     
@@ -101,7 +163,7 @@ class TrafficCounter:
                     trajectory.append({
                         "frame": frame_num,
                         "pt": (cx, cy),
-                        "class": class_name 
+                        "class_id": class_id 
                     })
                 
                 # Process last trajectory
@@ -157,19 +219,18 @@ class TrafficCounter:
         if len(trajectory) < 2:
             return
 
-        class_name = trajectory[0]["class"]
+        class_id = trajectory[0]["class_id"]
         
         # クラス名を車両タイプに変換
-        def get_vehicle_type(class_name):
-            class_lower = class_name.lower()
-            if 'bicycle' in class_lower or 'bike' in class_lower:
-                return '自転車'
-            elif 'car' in class_lower or 'truck' in class_lower or 'bus' in class_lower or 'vehicle' in class_lower:
-                return '車'
-            else:
-                return '車'
+        def get_vehicle_type(class_id):
+            """Count using class_id only (YOLO results)."""
+            if class_id in bicycle_ids:
+                return '???'
+            if class_id in car_ids:
+                return '?'
+            return '?'
         
-        object_type = get_vehicle_type(class_name)
+        object_type = get_vehicle_type(class_id)
         
         # Check intersections for each line
         for line_idx, line_def in enumerate(count_lines):
@@ -211,4 +272,3 @@ class TrafficCounter:
         # p1, p2 is segment 1
         # p3, p4 is segment 2
         return (ccw(p1, p3, p4) != ccw(p2, p3, p4)) and (ccw(p1, p2, p3) != ccw(p1, p2, p4))
-

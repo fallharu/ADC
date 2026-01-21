@@ -3,12 +3,46 @@ import os
 import contextlib
 from typing import Optional, Any, List, Dict, Union
 from datetime import datetime
+from pathlib import Path
 
 # --- Constants ---
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+def resolve_project_path(path_value: str) -> str:
+    path = Path(os.path.expanduser(str(path_value)).strip('"'))
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+    return str(path)
+
 # Determine DB path relative to project root or use env var
-# layout: Source_code/modules/db_manager.py -> values relative to CWD (usually project root)
-# CWD is usually .../ADC_08
-MAIN_DB_PATH = os.getenv("MAIN_DB_PATH", os.path.join("db", "my_app_data.db"))
+MAIN_DB_PATH = resolve_project_path(os.getenv("MAIN_DB_PATH", os.path.join("db", "my_app_data.db")))
+
+def resolve_output_root(conn: Optional[sqlite3.Connection] = None) -> str:
+    opt_root = resolve_project_path(os.getenv("Opt_files") or "output")
+    try:
+        if conn is None:
+            with sqlite3.connect(MAIN_DB_PATH) as tmp_conn:
+                tmp_conn.row_factory = sqlite3.Row
+                rows = tmp_conn.execute(
+                    "SELECT DISTINCT output_folder FROM ProcessLog "
+                    "WHERE output_folder IS NOT NULL AND output_folder != ''"
+                ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT DISTINCT output_folder FROM ProcessLog "
+                "WHERE output_folder IS NOT NULL AND output_folder != ''"
+            ).fetchall()
+
+        paths = []
+        for row in rows:
+            value = row["output_folder"] if isinstance(row, sqlite3.Row) else row[0]
+            if value:
+                paths.append(os.path.abspath(value))
+        if paths:
+            return os.path.commonpath(paths)
+    except Exception:
+        pass
+    return opt_root
 
 SQLITE_CACHE_MB = -2000 # Default to ~2GB (negative value in kb) or use positive for pages
 # Using standard default if not sure, but let's try to be smart
@@ -27,6 +61,29 @@ DETECTION_COLUMN_ORDER = [
     "lane_position_flag",
     "distance_m",
     "ttc_s"
+]
+
+MANUAL_OVERTAKE_CONTEXT_WINDOW = 150
+
+MANUAL_OVERTAKE_CONTEXT_COLUMNS = [
+    "run_id", "frame_num", "video_time_s", "offset_frames",
+    "overtaker_group_id", "overtaker_track_id", "overtaker_class_name",
+    "overtaker_speed_km_h", "overtaker_pixel_speed", "overtaker_pixel_speed_frame",
+    "overtaker_x1", "overtaker_y1", "overtaker_x2", "overtaker_y2",
+    "overtaker_measure_x", "overtaker_measure_y",
+    "overtaken_group_id", "overtaken_track_id", "overtaken_class_name",
+    "overtaken_speed_km_h", "overtaken_pixel_speed", "overtaken_pixel_speed_frame",
+    "overtaken_x1", "overtaken_y1", "overtaken_x2", "overtaken_y2",
+    "overtaken_measure_x", "overtaken_measure_y",
+    "approach_distance_m", "approach_distance_px",
+    "clearance_distance_m", "clearance_distance_cm", "clearance_distance_px", "clearance_distance_px_ratio",
+    "overtaker_line_distance_m", "overtaker_line_distance_cm", "overtaker_line_distance_px", "overtaker_line_distance_px_ratio",
+    "overtaken_line_distance_m", "overtaken_line_distance_cm", "overtaken_line_distance_px", "overtaken_line_distance_px_ratio",
+    "overtaker_left_line_distance_m", "overtaker_left_line_distance_cm", "overtaker_left_line_distance_px",
+    "overtaker_right_line_distance_m", "overtaker_right_line_distance_cm", "overtaker_right_line_distance_px",
+    "overtaken_left_line_distance_m", "overtaken_left_line_distance_cm", "overtaken_left_line_distance_px",
+    "overtaken_right_line_distance_m", "overtaken_right_line_distance_cm", "overtaken_right_line_distance_px",
+    "lane_width_m"
 ]
 
 # --- Exceptions ---
@@ -152,6 +209,26 @@ def get_db_connection():
         yield conn
     finally:
         conn.close()
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    if not _table_exists(conn, table_name):
+        return set()
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1] for row in rows}
+
+def _get_table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    if not _table_exists(conn, table_name):
+        return []
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    return [row[1] for row in cursor.fetchall()]
 
 # --- Schema / Initialization ---
 
@@ -311,6 +388,163 @@ def ensure_detection_columns(conn=None):
         if should_close:
             conn.close()
 
+def ensure_manual_annotation_schema(conn=None):
+    """Ensure manual annotation tables and columns exist."""
+    should_close = False
+    if conn is None:
+        conn = sqlite3.connect(MAIN_DB_PATH)
+        should_close = True
+
+    try:
+        c = conn.cursor()
+
+        # ManualOvertakeEvents columns
+        ensure_manual_overtake_event_columns(conn)
+
+        # ManualRunProgress table
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ManualRunProgress (
+                run_id INTEGER PRIMARY KEY,
+                last_visit_at TEXT,
+                last_review_at TEXT,
+                last_annotation_at TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                manual_status TEXT,
+                FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+            )
+            """
+        )
+
+        # ManualOvertakeTimeline table
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ManualOvertakeTimeline (
+                timeline_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                frame_num INTEGER NOT NULL,
+                overtaker_group_id INTEGER NOT NULL,
+                overtaken_group_id INTEGER NOT NULL,
+                notes TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                last_event_id INTEGER,
+                last_processed_at TEXT,
+                manual_event_id INTEGER,
+                is_deleted INTEGER DEFAULT 0,
+                FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+            )
+            """
+        )
+
+        # ManualOvertakeContextBacklog table
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ManualOvertakeContextBacklog (
+                backlog_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                manual_event_id INTEGER NOT NULL,
+                run_id INTEGER NOT NULL,
+                frame_num INTEGER NOT NULL,
+                event_payload_json TEXT NOT NULL,
+                context_frames_json TEXT,
+                created_at TEXT NOT NULL,
+                processed_at TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                error_message TEXT,
+                FOREIGN KEY(manual_event_id) REFERENCES ManualOvertakeEvents(manual_event_id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.commit()
+
+        # ManualRunProgress columns
+        progress_cols = _get_table_columns(conn, "ManualRunProgress")
+        progress_required = {
+            "last_visit_at": "TEXT",
+            "last_review_at": "TEXT",
+            "last_annotation_at": "TEXT",
+            "created_at": "TEXT",
+            "updated_at": "TEXT",
+            "manual_status": "TEXT",
+        }
+        for col, dtype in progress_required.items():
+            if col not in progress_cols:
+                c.execute(f"ALTER TABLE ManualRunProgress ADD COLUMN {col} {dtype}")
+
+        # ManualOvertakeTimeline columns
+        timeline_cols = _get_table_columns(conn, "ManualOvertakeTimeline")
+        timeline_required = {
+            "created_at": "TEXT",
+            "updated_at": "TEXT",
+            "last_event_id": "INTEGER",
+            "last_processed_at": "TEXT",
+            "manual_event_id": "INTEGER",
+            "is_deleted": "INTEGER DEFAULT 0",
+        }
+        for col, dtype in timeline_required.items():
+            if col not in timeline_cols:
+                c.execute(f"ALTER TABLE ManualOvertakeTimeline ADD COLUMN {col} {dtype}")
+
+        # ManualOvertakeContextBacklog columns
+        backlog_cols = _get_table_columns(conn, "ManualOvertakeContextBacklog")
+        backlog_required = {
+            "event_payload_json": "TEXT",
+            "context_frames_json": "TEXT",
+            "created_at": "TEXT",
+            "processed_at": "TEXT",
+            "status": "TEXT DEFAULT 'pending'",
+            "error_message": "TEXT",
+        }
+        for col, dtype in backlog_required.items():
+            if col not in backlog_cols:
+                c.execute(
+                    f"ALTER TABLE ManualOvertakeContextBacklog ADD COLUMN {col} {dtype}"
+                )
+
+        conn.commit()
+    finally:
+        if should_close:
+            conn.close()
+
+
+def ensure_overtake_stats_table(conn=None):
+    """Ensure OvertakeStats table exists. (Statistics Feature)"""
+    should_close = False
+    if conn is None:
+        conn = sqlite3.connect(MAIN_DB_PATH)
+        should_close = True
+        
+    try:
+        c = conn.cursor()
+        
+        # Check if table exists
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='OvertakeStats'")
+        if not c.fetchone():
+            print("Creating OvertakeStats table...")
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS OvertakeStats (
+                    stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id INTEGER UNIQUE,
+                    run_id INTEGER,
+                    duration_s REAL,
+                    is_out_of_bounds INTEGER,
+                    area_m2 REAL,
+                    trajectory_image_path TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(event_id) REFERENCES OvertakeEvents(event_id) ON DELETE CASCADE,
+                    FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+                )
+            """)
+        
+        conn.commit()
+    except Exception as e:
+        print(f"Error during OvertakeStats creation: {e}")
+    finally:
+        if should_close:
+            conn.close()
+
 
 def init_db():
     """Initialize database tables."""
@@ -320,6 +554,7 @@ def init_db():
     ensure_processlog_columns()
     ensure_manual_overtake_event_columns()
     ensure_detection_columns()
+    ensure_overtake_stats_table()
     
     with get_db_connection() as conn:
         # Video table
@@ -370,6 +605,10 @@ def init_db():
                 track_id INTEGER,
                 x1 REAL, y1 REAL, x2 REAL, y2 REAL,
                 speed_km_h REAL,
+                xy_px_speedpx REAL,
+                xy_px_karikm REAL,
+                xy_px_changeable REAL,
+                xy_px_changeable_name TEXT,
                 lane_position_flag TEXT,
                 distance_m REAL,
                 group_id INTEGER,
@@ -438,6 +677,21 @@ def init_db():
                 overtaker_r_line_cross_m REAL,
                 overtaken_l_line_cross_m REAL,
                 overtaken_r_line_cross_m REAL,
+                FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+            )
+        """)
+        # OvertakeStats - 追い越し統計情報
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS OvertakeStats (
+                stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER UNIQUE,
+                run_id INTEGER,
+                duration_s REAL,
+                is_out_of_bounds INTEGER,
+                area_m2 REAL,
+                trajectory_image_path TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(event_id) REFERENCES OvertakeEvents(event_id) ON DELETE CASCADE,
                 FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
             )
         """)
@@ -536,9 +790,12 @@ def init_db():
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ManualRunProgress (
                 run_id INTEGER PRIMARY KEY,
-                manual_status TEXT DEFAULT 'new', -- new, visited, annotated
-                last_visited_at TEXT,
-                last_annotated_at TEXT,
+                last_visit_at TEXT,
+                last_review_at TEXT,
+                last_annotation_at TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                manual_status TEXT,
                 FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
             )
         """)
@@ -547,19 +804,40 @@ def init_db():
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ManualOvertakeTimeline (
                 timeline_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id INTEGER,
-                frame_num INTEGER,
-                overtaker_group_id INTEGER,
-                overtaken_group_id INTEGER,
-                manual_event_id INTEGER,
+                run_id INTEGER NOT NULL,
+                frame_num INTEGER NOT NULL,
+                overtaker_group_id INTEGER NOT NULL,
+                overtaken_group_id INTEGER NOT NULL,
                 notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_event_id INTEGER,
+                last_processed_at TEXT,
+                manual_event_id INTEGER,
                 is_deleted INTEGER DEFAULT 0,
-                created_at TEXT,
-                FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+                FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id),
+                FOREIGN KEY(last_event_id) REFERENCES ManualOvertakeEvents(manual_event_id) ON DELETE SET NULL,
+                UNIQUE(run_id, frame_num, overtaker_group_id, overtaken_group_id)
             )
         """)
 
         # ManualContextBacklog - コンテキスト処理待ち行列
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ManualOvertakeContextBacklog (
+                backlog_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                manual_event_id INTEGER NOT NULL,
+                run_id INTEGER NOT NULL,
+                frame_num INTEGER NOT NULL,
+                event_payload_json TEXT NOT NULL,
+                context_frames_json TEXT,
+                created_at TEXT NOT NULL,
+                processed_at TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                error_message TEXT,
+                FOREIGN KEY(manual_event_id) REFERENCES ManualOvertakeEvents(manual_event_id) ON DELETE CASCADE
+            )
+        """)
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ManualContextBacklog (
                 backlog_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -730,6 +1008,41 @@ def ensure_detection_distance_columns():
         conn.commit()
     except Exception as e:
         print(f"Error during Detection distance migration: {e}")
+    finally:
+        if should_close and conn:
+            conn.close()
+
+
+def ensure_detection_xy_speed_columns():
+    """Ensure Detection table has xy speed related columns."""
+    should_close = False
+    conn = None
+    try:
+        conn = sqlite3.connect(MAIN_DB_PATH)
+        should_close = True
+        c = conn.cursor()
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='Detection'")
+        if not c.fetchone():
+            return
+
+        c.execute("PRAGMA table_info(Detection)")
+        columns = [row[1] for row in c.fetchall()]
+
+        required = {
+            "xy_px_speedpx": "REAL",
+            "xy_px_karikm": "REAL",
+            "xy_px_changeable": "REAL",
+            "xy_px_changeable_name": "TEXT",
+        }
+
+        for col, dtype in required.items():
+            if col not in columns:
+                print(f"Migrating Detection: Adding {col}")
+                c.execute(f"ALTER TABLE Detection ADD COLUMN {col} {dtype}")
+
+        conn.commit()
+    except Exception as e:
+        print(f"Error during Detection xy speed migration: {e}")
     finally:
         if should_close and conn:
             conn.close()
@@ -1401,23 +1714,190 @@ def touch_manual_run_progress(run_id, annotation=False, visit=False, review=Fals
             c.execute("UPDATE ManualRunProgress SET manual_status = CASE WHEN manual_status = 'annotated' THEN 'annotated' ELSE 'visited' END, last_visit_at = ? WHERE run_id = ?", (now, run_id))
         conn.commit()
 
-def record_manual_overtake_timeline_entry(run_id, frame_num, overtaker_gid, overtaken_gid, notes=None, last_event_id=None):
-    import datetime
+def record_manual_overtake_timeline_entry(
+    run_id,
+    frame_num,
+    overtaker_gid,
+    overtaken_gid,
+    notes=None,
+    last_event_id=None,
+):
+    now = datetime.now().isoformat()
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("""
-            INSERT INTO ManualOvertakeTimeline 
-            (run_id, frame_num, overtaker_group_id, overtaken_group_id, manual_event_id, notes, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (run_id, frame_num, overtaker_gid, overtaken_gid, last_event_id, notes, datetime.datetime.now().isoformat(), datetime.datetime.now().isoformat()))
+        try:
+            ensure_manual_annotation_schema(conn)
+        except Exception:
+            pass
+        columns = _table_columns(conn, "ManualOvertakeTimeline")
+        match_sql = (
+            "SELECT timeline_id FROM ManualOvertakeTimeline "
+            "WHERE run_id = ? AND frame_num = ? AND overtaker_group_id = ? AND overtaken_group_id = ?"
+        )
+        row = c.execute(
+            match_sql,
+            (run_id, frame_num, overtaker_gid, overtaken_gid),
+        ).fetchone()
+        if row:
+            updates = ["notes = ?"]
+            params = [notes]
+            if "updated_at" in columns:
+                updates.append("updated_at = ?")
+                params.append(now)
+            if last_event_id is not None:
+                if "last_event_id" in columns:
+                    updates.append("last_event_id = ?")
+                    params.append(last_event_id)
+                if "manual_event_id" in columns:
+                    updates.append("manual_event_id = COALESCE(manual_event_id, ?)")
+                    params.append(last_event_id)
+                if "last_processed_at" in columns:
+                    updates.append("last_processed_at = ?")
+                    params.append(now)
+            timeline_id = row[0] if not isinstance(row, sqlite3.Row) else row["timeline_id"]
+            sql = f"UPDATE ManualOvertakeTimeline SET {', '.join(updates)} WHERE timeline_id = ?"
+            params.append(timeline_id)
+            c.execute(sql, params)
+        else:
+            insert_cols = [
+                "run_id",
+                "frame_num",
+                "overtaker_group_id",
+                "overtaken_group_id",
+                "notes",
+            ]
+            insert_vals = [
+                run_id,
+                frame_num,
+                overtaker_gid,
+                overtaken_gid,
+                notes,
+            ]
+            if "created_at" in columns:
+                insert_cols.append("created_at")
+                insert_vals.append(now)
+            if "updated_at" in columns:
+                insert_cols.append("updated_at")
+                insert_vals.append(now)
+            if "last_event_id" in columns:
+                insert_cols.append("last_event_id")
+                insert_vals.append(last_event_id)
+            if "manual_event_id" in columns:
+                insert_cols.append("manual_event_id")
+                insert_vals.append(last_event_id)
+            if "last_processed_at" in columns and last_event_id is not None:
+                insert_cols.append("last_processed_at")
+                insert_vals.append(now)
+            placeholders = ", ".join(["?"] * len(insert_cols))
+            c.execute(
+                f"INSERT INTO ManualOvertakeTimeline ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                insert_vals,
+            )
         conn.commit()
 
-def list_manual_overtake_timeline_entries(run_id):
+def list_manual_overtake_timeline_entries(run_ids=None):
     with get_db_connection() as conn:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        rows = c.execute("SELECT * FROM ManualOvertakeTimeline WHERE run_id = ? ORDER BY created_at DESC", (run_id,)).fetchall()
+        if run_ids is None:
+            rows = c.execute(
+                "SELECT * FROM ManualOvertakeTimeline ORDER BY created_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+        if not isinstance(run_ids, (list, tuple, set)):
+            run_ids = [run_ids]
+        normalized = []
+        for value in run_ids:
+            try:
+                normalized.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if not normalized:
+            return []
+        placeholders = ",".join(["?"] * len(normalized))
+        rows = c.execute(
+            f"SELECT * FROM ManualOvertakeTimeline WHERE run_id IN ({placeholders}) ORDER BY created_at DESC",
+            normalized,
+        ).fetchall()
         return [dict(r) for r in rows]
+
+def mark_manual_overtake_timeline_processed(timeline_id, last_event_id=None):
+    if timeline_id is None:
+        return 0
+    now = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        columns = _table_columns(conn, "ManualOvertakeTimeline")
+        updates = []
+        params = []
+        if "updated_at" in columns:
+            updates.append("updated_at = ?")
+            params.append(now)
+        if "last_processed_at" in columns:
+            updates.append("last_processed_at = ?")
+            params.append(now)
+        if last_event_id is not None:
+            if "last_event_id" in columns:
+                updates.append("last_event_id = ?")
+                params.append(last_event_id)
+            if "manual_event_id" in columns:
+                updates.append("manual_event_id = COALESCE(manual_event_id, ?)")
+                params.append(last_event_id)
+        if not updates:
+            return 0
+        params.append(timeline_id)
+        c.execute(
+            f"UPDATE ManualOvertakeTimeline SET {', '.join(updates)} WHERE timeline_id = ?",
+            params,
+        )
+        conn.commit()
+        return c.rowcount
+
+def mark_manual_overtake_timeline_event_deleted(manual_event_id):
+    if manual_event_id is None:
+        return 0
+    now = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        columns = _table_columns(conn, "ManualOvertakeTimeline")
+        updates = []
+        params = []
+        if "updated_at" in columns:
+            updates.append("updated_at = ?")
+            params.append(now)
+        if "last_processed_at" in columns:
+            updates.append("last_processed_at = NULL")
+        if "last_event_id" in columns:
+            updates.append("last_event_id = NULL")
+        if "manual_event_id" in columns:
+            updates.append("manual_event_id = NULL")
+        if "is_deleted" in columns:
+            updates.append("is_deleted = 1")
+        if not updates:
+            return 0
+        where_clauses = []
+        if "last_event_id" in columns:
+            where_clauses.append("last_event_id = ?")
+            params.append(manual_event_id)
+        if "manual_event_id" in columns:
+            where_clauses.append("manual_event_id = ?")
+            params.append(manual_event_id)
+        if not where_clauses:
+            return 0
+        sql = f"UPDATE ManualOvertakeTimeline SET {', '.join(updates)} WHERE {' OR '.join(where_clauses)}"
+        c.execute(sql, params)
+        conn.commit()
+        return c.rowcount
+
+
+def _model_filter_attempts() -> list[str]:
+    """
+    (Internal) Returns a list of SQL WHERE clauses to try for filtering detections.
+    Used by manual_logic to heuristically find valid detection counts.
+    """
+    # Currently just return empty string to select all (or assume single model per run)
+    return [""]
 
 def list_manual_overtake_events(run_id=None, run_ids=None, limit=500):
     """Manual overtake events retrieval with optional filtering."""
@@ -1438,34 +1918,65 @@ def list_manual_overtake_events(run_id=None, run_ids=None, limit=500):
         
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         
+        limit_clause = ""
+        if limit is not None:
+            try:
+                limit_value = int(limit)
+            except (TypeError, ValueError):
+                limit_value = None
+            else:
+                if limit_value <= 0:
+                    limit_value = None
+            if limit_value is not None:
+                limit_clause = "LIMIT ?"
+                params.append(limit_value)
+
         sql = f"""
         SELECT *
         FROM ManualOvertakeEvents
         {where_sql}
         ORDER BY manual_event_id DESC
-        LIMIT ?
+        {limit_clause}
         """
-        
-        params.append(limit)
         
         try:
             rows = c.execute(sql, params).fetchall()
             events = [dict(row) for row in rows]
+
+            # Deserialize context_frames
+            import json
+            for event in events:
+                if event.get('context_frames'):
+                    try:
+                        event['context_frames'] = json.loads(event['context_frames'])
+                    except:
+                        event['context_frames'] = []
+                else:
+                    event['context_frames'] = []
             
-            # Helper to get filenames efficiently? 
+            # Helper to get filenames and metadata efficiently? 
             # Doing it per-row is slow but matches previous implementation
             for event in events:
                 if event.get('run_id'):
                     video_query = """
-                    SELECT v.filename
+                    SELECT v.filename, v.road_type, v.collection_year
                     FROM ProcessLog p
                     JOIN Video v ON p.video_id = v.video_id
                     WHERE p.run_id = ?
                     """
                     video_row = c.execute(video_query, (event['run_id'],)).fetchone()
-                    event['video_filename'] = video_row[0] if video_row else None
+                    if video_row:
+                        event['video_filename'] = video_row[0]
+                        event['road_type'] = video_row[1]
+                        event['collection_year'] = video_row[2]
+                    else:
+                        event['video_filename'] = None
+                        event['road_type'] = None
+                        event['collection_year'] = None
                 else:
                     event['video_filename'] = None
+                    event['road_type'] = None
+                    event['collection_year'] = None
             
             return events
         except sqlite3.Error as e:
@@ -1495,38 +2006,83 @@ fetch_manual_overtake_event_core = fetch_manual_overtake_event
 
 # --- Manual Overtake Helpers ---
 
-def count_manual_overtake_events(run_id=None):
+def count_manual_overtake_events(run_id=None, run_ids=None):
+    if run_ids is None and isinstance(run_id, (list, tuple, set)):
+        run_ids = list(run_id)
+        run_id = None
     with get_db_connection() as conn:
         c = conn.cursor()
-        if run_id:
-            c.execute("SELECT COUNT(*) FROM ManualOvertakeEvents WHERE run_id = ?", (run_id,))
+        if run_ids:
+            placeholders = ",".join(["?"] * len(run_ids))
+            row = c.execute(
+                f"SELECT COUNT(*) FROM ManualOvertakeEvents WHERE run_id IN ({placeholders})",
+                list(run_ids),
+            ).fetchone()
+        elif run_id is not None:
+            row = c.execute(
+                "SELECT COUNT(*) FROM ManualOvertakeEvents WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
         else:
-            c.execute("SELECT COUNT(*) FROM ManualOvertakeEvents")
-        row = c.fetchone()
+            row = c.execute("SELECT COUNT(*) FROM ManualOvertakeEvents").fetchone()
         return row[0] if row else 0
 
-def update_manual_lane_width(manual_event_id, lane_width_m, lane_width_px_reference=None, lane_width_cm_per_px=None):
+def update_manual_lane_width(
+    target_ids,
+    lane_width_m,
+    lane_width_px_reference=None,
+    lane_width_cm_per_px=None,
+):
+    if target_ids is None:
+        return 0
+
+    updates = ["lane_width_m = ?"]
+    params = [lane_width_m]
+    if lane_width_px_reference is not None:
+        updates.append("lane_width_px_reference = ?")
+        params.append(lane_width_px_reference)
+    if lane_width_cm_per_px is not None:
+        updates.append("lane_width_cm_per_px = ?")
+        params.append(lane_width_cm_per_px)
+    updates.append("updated_at = ?")
+    params.append(datetime.now().isoformat())
+
     with get_db_connection() as conn:
         c = conn.cursor()
-        updates = ["lane_width_m = ?"]
-        params = [lane_width_m]
-        
-        if lane_width_px_reference is not None:
-            updates.append("lane_width_px_reference = ?")
-            params.append(lane_width_px_reference)
-        
-        if lane_width_cm_per_px is not None:
-             updates.append("lane_width_cm_per_px = ?")
-             params.append(lane_width_cm_per_px)
-             
-        updates.append("updated_at = ?")
-        params.append(datetime.now().isoformat())
-        params.append(manual_event_id)
-        
-        sql = f"UPDATE ManualOvertakeEvents SET {', '.join(updates)} WHERE manual_event_id = ?"
-        c.execute(sql, params)
+        if isinstance(target_ids, (list, tuple, set)):
+            run_ids = []
+            for value in target_ids:
+                try:
+                    run_ids.append(int(value))
+                except (TypeError, ValueError):
+                    continue
+            if not run_ids:
+                return 0
+            placeholders = ",".join(["?"] * len(run_ids))
+            sql = f"UPDATE ManualOvertakeEvents SET {', '.join(updates)} WHERE run_id IN ({placeholders})"
+            c.execute(sql, params + run_ids)
+            conn.commit()
+            return c.rowcount
+
+        try:
+            target_int = int(target_ids)
+        except (TypeError, ValueError):
+            return 0
+
+        row = c.execute(
+            "SELECT 1 FROM ManualOvertakeEvents WHERE manual_event_id = ? LIMIT 1",
+            (target_int,),
+        ).fetchone()
+        if row:
+            sql = f"UPDATE ManualOvertakeEvents SET {', '.join(updates)} WHERE manual_event_id = ?"
+            c.execute(sql, params + [target_int])
+            conn.commit()
+            return c.rowcount
+
+        sql = f"UPDATE ManualOvertakeEvents SET {', '.join(updates)} WHERE run_id = ?"
+        c.execute(sql, params + [target_int])
         conn.commit()
-        return True
+        return c.rowcount
 
 def update_manual_overtake_event(manual_event_id, data):
     """手動追い越しイベントデータを更新する。"""
@@ -1596,60 +2152,373 @@ def reset_manual_overtake_for_runs(run_ids):
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
+            if _table_exists(conn, "ManualOvertakeContext"):
+                c.execute(
+                    f"DELETE FROM ManualOvertakeContext WHERE manual_event_id IN (SELECT manual_event_id FROM ManualOvertakeEvents WHERE run_id IN ({placeholders}))",
+                    run_ids,
+                )
             c.execute(f"DELETE FROM ManualOvertakeEvents WHERE run_id IN ({placeholders})", run_ids)
             c.execute(f"DELETE FROM ManualOvertakeTimeline WHERE run_id IN ({placeholders})", run_ids)
-            c.execute(f"DELETE FROM ManualContextBacklog WHERE run_id IN ({placeholders})", run_ids)
+            if _table_exists(conn, "ManualOvertakeContextBacklog"):
+                c.execute(
+                    f"DELETE FROM ManualOvertakeContextBacklog WHERE run_id IN ({placeholders})",
+                    run_ids,
+                )
+            if _table_exists(conn, "ManualContextBacklog"):
+                c.execute(
+                    f"DELETE FROM ManualContextBacklog WHERE run_id IN ({placeholders})",
+                    run_ids,
+                )
             c.execute(f"DELETE FROM ManualRunProgress WHERE run_id IN ({placeholders})", run_ids)
             conn.commit()
     except Exception as e:
         print(f"Error resetting manual overtake: {e}")
 
 def list_manual_context_backlog(run_ids=None, limit=10):
+    def _normalize_runs(values):
+        if values is None:
+            return []
+        if not isinstance(values, (list, tuple, set)):
+            values = [values]
+        normalized = []
+        for value in values:
+            try:
+                normalized.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        return normalized
+
+    def _load_json(raw_value):
+        if not raw_value:
+            return None
+        try:
+            import json
+            return json.loads(raw_value)
+        except Exception:
+            return None
+
+    run_ids_norm = _normalize_runs(run_ids)
+    entries = []
+
     with get_db_connection() as conn:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        sql = "SELECT * FROM ManualContextBacklog WHERE status = 'pending'"
-        params = []
-        if run_ids:
-             placeholders = ','.join(['?'] * len(run_ids))
-             sql += f" AND run_id IN ({placeholders})"
-             params.extend(run_ids)
-        sql += " ORDER BY created_at ASC LIMIT ?"
-        params.append(limit)
-        return [dict(r) for r in c.execute(sql, params).fetchall()]
 
-def mark_manual_context_backlog_processed(backlog_id, status='completed', error_message=None):
+        def _fetch_event_core(event_id):
+            if event_id is None:
+                return None
+            row = c.execute(
+                "SELECT manual_event_id, run_id, frame_num, overtaker_group_id, overtaken_group_id, notes "
+                "FROM ManualOvertakeEvents WHERE manual_event_id = ?",
+                (event_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+        def _merge_payload(entry, payload):
+            if not payload:
+                return
+            for key in ("overtaker_group_id", "overtaken_group_id", "notes"):
+                if entry.get(key) in (None, "") and payload.get(key) is not None:
+                    entry[key] = payload.get(key)
+
+        def _merge_core(entry, core):
+            if not core:
+                return
+            for key in ("run_id", "frame_num", "overtaker_group_id", "overtaken_group_id", "notes"):
+                if entry.get(key) in (None, "") and core.get(key) is not None:
+                    entry[key] = core.get(key)
+
+        if _table_exists(conn, "ManualOvertakeContextBacklog"):
+            sql = (
+                "SELECT backlog_id, manual_event_id, run_id, frame_num, "
+                "event_payload_json, context_frames_json, created_at, processed_at, status, error_message "
+                "FROM ManualOvertakeContextBacklog WHERE status = 'pending'"
+            )
+            params = []
+            if run_ids_norm:
+                placeholders = ",".join(["?"] * len(run_ids_norm))
+                sql += f" AND run_id IN ({placeholders})"
+                params.extend(run_ids_norm)
+            sql += " ORDER BY created_at ASC"
+            rows = c.execute(sql, params).fetchall()
+            for row in rows:
+                entry = dict(row)
+                event_payload = _load_json(entry.get("event_payload_json")) or {}
+                context_frames = _load_json(entry.get("context_frames_json")) or []
+                entry["event_payload"] = event_payload
+                entry["context_frames"] = context_frames
+                entry["backlog_table"] = "ManualOvertakeContextBacklog"
+                entry["source_table"] = entry["backlog_table"]
+                _merge_payload(entry, event_payload)
+                _merge_core(entry, _fetch_event_core(entry.get("manual_event_id")))
+                entries.append(entry)
+
+        if _table_exists(conn, "ManualContextBacklog"):
+            sql = (
+                "SELECT backlog_id, manual_event_id, run_id, frame_num, payload_json, "
+                "created_at, updated_at, status, error_message "
+                "FROM ManualContextBacklog WHERE status = 'pending'"
+            )
+            params = []
+            if run_ids_norm:
+                placeholders = ",".join(["?"] * len(run_ids_norm))
+                sql += f" AND run_id IN ({placeholders})"
+                params.extend(run_ids_norm)
+            sql += " ORDER BY created_at ASC"
+            rows = c.execute(sql, params).fetchall()
+            for row in rows:
+                entry = dict(row)
+                event_payload = _load_json(entry.get("payload_json")) or {}
+                entry["event_payload"] = event_payload
+                entry["context_frames"] = []
+                entry["backlog_table"] = "ManualContextBacklog"
+                entry["source_table"] = entry["backlog_table"]
+                _merge_payload(entry, event_payload)
+
+                manual_event_id = entry.get("manual_event_id")
+                core = _fetch_event_core(manual_event_id)
+                if core is None:
+                    alt_id = entry.get("run_id")
+                    core = _fetch_event_core(alt_id)
+                    if core is not None:
+                        entry["manual_event_id"] = alt_id
+                _merge_core(entry, core)
+                entries.append(entry)
+
+    entries.sort(key=lambda item: item.get("created_at") or "")
+    if limit is not None:
+        try:
+            limit_value = int(limit)
+        except (TypeError, ValueError):
+            limit_value = None
+        if limit_value and limit_value > 0:
+            entries = entries[:limit_value]
+    return entries
+
+def mark_manual_context_backlog_processed(
+    backlog_id,
+    success=None,
+    status=None,
+    error_message=None,
+    backlog_table=None,
+):
+    if backlog_id is None:
+        return 0
+    if status is None:
+        if success is True:
+            status = "completed"
+        elif success is False:
+            status = "error"
+        else:
+            status = "completed"
+    now = datetime.now().isoformat()
+    rows_updated = 0
     with get_db_connection() as conn:
         c = conn.cursor()
-        now = datetime.now().isoformat()
-        sql = "UPDATE ManualContextBacklog SET status = ?, updated_at = ?"
-        params = [status, now]
-        if error_message:
-            sql += ", error_message = ?"
-            params.append(error_message)
-        sql += " WHERE backlog_id = ?"
-        params.append(backlog_id)
-        c.execute(sql, params)
+        target_tables = []
+        if backlog_table in ("ManualOvertakeContextBacklog", "ManualContextBacklog"):
+            target_tables.append(backlog_table)
+        else:
+            if _table_exists(conn, "ManualOvertakeContextBacklog"):
+                target_tables.append("ManualOvertakeContextBacklog")
+            if _table_exists(conn, "ManualContextBacklog"):
+                target_tables.append("ManualContextBacklog")
+
+        for table_name in target_tables:
+            if table_name == "ManualOvertakeContextBacklog":
+                c.execute(
+                    """
+                    UPDATE ManualOvertakeContextBacklog
+                    SET status = ?, processed_at = ?, error_message = ?
+                    WHERE backlog_id = ?
+                    """,
+                    (status, now, error_message, backlog_id),
+                )
+                rows_updated += c.rowcount
+            elif table_name == "ManualContextBacklog":
+                c.execute(
+                    """
+                    UPDATE ManualContextBacklog
+                    SET status = ?, updated_at = ?, error_message = ?
+                    WHERE backlog_id = ?
+                    """,
+                    (status, now, error_message, backlog_id),
+                )
+                rows_updated += c.rowcount
         conn.commit()
+    return rows_updated
 
 def count_manual_context_backlog(run_ids=None):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        sql = "SELECT COUNT(*) FROM ManualContextBacklog WHERE status = 'pending'"
-        params = []
-        if run_ids:
-             placeholders = ','.join(['?'] * len(run_ids))
-             sql += f" AND run_id IN ({placeholders})"
-             params.extend(run_ids)
-        row = c.execute(sql, params).fetchone()
-        return row[0] if row else 0
+    run_ids_norm = []
+    if run_ids:
+        if not isinstance(run_ids, (list, tuple, set)):
+            run_ids = [run_ids]
+        for value in run_ids:
+            try:
+                run_ids_norm.append(int(value))
+            except (TypeError, ValueError):
+                continue
 
-def ensure_manual_context_backlog_for_runs(run_ids):
+    summary = {}
     with get_db_connection() as conn:
         c = conn.cursor()
-        for rid in run_ids:
-             c.execute("INSERT OR IGNORE INTO ManualRunProgress (run_id) VALUES (?)", (rid,))
+        if _table_exists(conn, "ManualOvertakeContextBacklog"):
+            sql = "SELECT run_id, COUNT(*) FROM ManualOvertakeContextBacklog WHERE status = 'pending'"
+            params = []
+            if run_ids_norm:
+                placeholders = ",".join(["?"] * len(run_ids_norm))
+                sql += f" AND run_id IN ({placeholders})"
+                params.extend(run_ids_norm)
+            sql += " GROUP BY run_id"
+            for run_id, count in c.execute(sql, params).fetchall():
+                summary[int(run_id)] = summary.get(int(run_id), 0) + int(count or 0)
+
+        if _table_exists(conn, "ManualContextBacklog"):
+            sql = (
+                "SELECT e.run_id, COUNT(*) "
+                "FROM ManualContextBacklog b "
+                "JOIN ManualOvertakeEvents e ON e.manual_event_id = b.manual_event_id "
+                "WHERE b.status = 'pending'"
+            )
+            params = []
+            if run_ids_norm:
+                placeholders = ",".join(["?"] * len(run_ids_norm))
+                sql += f" AND e.run_id IN ({placeholders})"
+                params.extend(run_ids_norm)
+            sql += " GROUP BY e.run_id"
+            for run_id, count in c.execute(sql, params).fetchall():
+                summary[int(run_id)] = summary.get(int(run_id), 0) + int(count or 0)
+
+    return summary
+
+def ensure_manual_context_backlog_for_runs(run_ids, force_requeue=False):
+    if not run_ids:
+        return 0, []
+
+    normalized = []
+    for value in run_ids:
+        try:
+            normalized.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if not normalized:
+        return 0, []
+
+    enqueued = 0
+    enqueued_ids = []
+    now = datetime.now().isoformat()
+
+    with get_db_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        try:
+            ensure_manual_annotation_schema(conn)
+        except Exception:
+            pass
+
+        has_new = _table_exists(conn, "ManualOvertakeContextBacklog")
+        has_old = _table_exists(conn, "ManualContextBacklog")
+        if not has_new and not has_old:
+            return 0, []
+
+        existing = set()
+        placeholders = ",".join(["?"] * len(normalized))
+
+        if has_new:
+            rows = c.execute(
+                f"SELECT manual_event_id FROM ManualOvertakeContextBacklog WHERE run_id IN ({placeholders})",
+                normalized,
+            ).fetchall()
+            for row in rows:
+                existing.add(row[0] if not isinstance(row, sqlite3.Row) else row["manual_event_id"])
+            if force_requeue and rows:
+                c.execute(
+                    f"UPDATE ManualOvertakeContextBacklog SET status = 'pending', processed_at = NULL, error_message = NULL WHERE run_id IN ({placeholders})",
+                    normalized,
+                )
+                enqueued += c.rowcount
+
+        if has_old:
+            rows = c.execute(
+                f"SELECT manual_event_id FROM ManualContextBacklog WHERE run_id IN ({placeholders})",
+                normalized,
+            ).fetchall()
+            for row in rows:
+                existing.add(row[0] if not isinstance(row, sqlite3.Row) else row["manual_event_id"])
+            if force_requeue and rows:
+                c.execute(
+                    f"UPDATE ManualContextBacklog SET status = 'pending', updated_at = ?, error_message = NULL WHERE run_id IN ({placeholders})",
+                    [now] + normalized,
+                )
+                enqueued += c.rowcount
+
+        target_table = "ManualOvertakeContextBacklog" if has_new else "ManualContextBacklog"
+
+        events = c.execute(
+            f"SELECT * FROM ManualOvertakeEvents WHERE run_id IN ({placeholders})",
+            normalized,
+        ).fetchall()
+
+        import json
+        for event in events:
+            event_id = event["manual_event_id"] if isinstance(event, sqlite3.Row) else event[0]
+            if not force_requeue and event_id in existing:
+                continue
+            event_payload = dict(event)
+            payload_json = json.dumps(event_payload, ensure_ascii=False)
+            context_frames_json = event_payload.get("context_frames")
+            if isinstance(context_frames_json, list):
+                context_frames_json = json.dumps(context_frames_json, ensure_ascii=False)
+
+            if target_table == "ManualOvertakeContextBacklog":
+                c.execute(
+                    """
+                    INSERT INTO ManualOvertakeContextBacklog (
+                        manual_event_id,
+                        run_id,
+                        frame_num,
+                        event_payload_json,
+                        context_frames_json,
+                        created_at,
+                        status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                    """,
+                    (
+                        event_id,
+                        event_payload.get("run_id"),
+                        event_payload.get("frame_num"),
+                        payload_json,
+                        context_frames_json,
+                        now,
+                    ),
+                )
+            else:
+                c.execute(
+                    """
+                    INSERT INTO ManualContextBacklog (
+                        run_id,
+                        frame_num,
+                        manual_event_id,
+                        status,
+                        created_at,
+                        payload_json
+                    )
+                    VALUES (?, ?, ?, 'pending', ?, ?)
+                    """,
+                    (
+                        event_payload.get("run_id"),
+                        event_payload.get("frame_num"),
+                        event_id,
+                        now,
+                        payload_json,
+                    ),
+                )
+            enqueued += 1
+            enqueued_ids.append(event_id)
         conn.commit()
+
+    return enqueued, enqueued_ids
 
 def summarize_manual_overtake_events(run_id):
     with get_db_connection() as conn:
@@ -1658,35 +2527,167 @@ def summarize_manual_overtake_events(run_id):
         row = c.fetchone()
         return {"count": row[0] if row else 0}
 
-def enqueue_manual_context_backlog(run_id, frame_num, manual_event_id, payload=None, *args):
+def enqueue_manual_context_backlog(
+    manual_event_id,
+    run_id=None,
+    frame_num=None,
+    event_payload=None,
+    context_frames=None,
+):
     import json
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        payload_json = json.dumps(payload) if payload else None
-        c.execute("""
-            INSERT INTO ManualContextBacklog (run_id, frame_num, manual_event_id, status, created_at, payload_json)
-            VALUES (?, ?, ?, 'pending', ?, ?)
-        """, (run_id, frame_num, manual_event_id, datetime.now().isoformat(), payload_json))
-        conn.commit()
-
-def summarize_manual_context_backlog_by_status(run_ids=None):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        sql = "SELECT status, COUNT(*) FROM ManualContextBacklog"
-        params = []
-        if run_ids:
-             placeholders = ','.join(['?'] * len(run_ids))
-             sql += f" WHERE run_id IN ({placeholders})"
-             params.extend(run_ids)
-        sql += " GROUP BY status"
-        rows = c.execute(sql, params).fetchall()
-        return dict(rows)
-
-def list_manual_overtake_event_cores(run_id):
     with get_db_connection() as conn:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        rows = c.execute("SELECT manual_event_id, frame_num, overtaker_group_id, overtaken_group_id FROM ManualOvertakeEvents WHERE run_id = ?", (run_id,)).fetchall()
+        try:
+            ensure_manual_annotation_schema(conn)
+        except Exception:
+            pass
+
+        if manual_event_id is None:
+            return 0
+
+        if run_id is not None and frame_num is not None:
+            check = c.execute(
+                "SELECT run_id, frame_num FROM ManualOvertakeEvents WHERE manual_event_id = ?",
+                (manual_event_id,),
+            ).fetchone()
+            if check is None:
+                alt_row = c.execute(
+                    "SELECT run_id, frame_num FROM ManualOvertakeEvents WHERE manual_event_id = ?",
+                    (run_id,),
+                ).fetchone()
+                if alt_row is not None:
+                    manual_event_id = run_id
+                    run_id = (
+                        alt_row["run_id"] if isinstance(alt_row, sqlite3.Row) else alt_row[0]
+                    )
+                    frame_num = (
+                        alt_row["frame_num"] if isinstance(alt_row, sqlite3.Row) else alt_row[1]
+                    )
+
+        if event_payload is None and manual_event_id is not None:
+            row = c.execute(
+                "SELECT * FROM ManualOvertakeEvents WHERE manual_event_id = ?",
+                (manual_event_id,),
+            ).fetchone()
+            if row is not None:
+                event_payload = dict(row)
+
+        if event_payload:
+            if run_id is None:
+                run_id = event_payload.get("run_id")
+            if frame_num is None:
+                frame_num = event_payload.get("frame_num")
+
+        payload_json = json.dumps(event_payload or {}, ensure_ascii=False)
+        context_json = None
+        if context_frames:
+            context_json = json.dumps(context_frames, ensure_ascii=False)
+        elif event_payload and isinstance(event_payload.get("context_frames"), list):
+            context_json = json.dumps(event_payload.get("context_frames"), ensure_ascii=False)
+
+        now = datetime.now().isoformat()
+
+        if _table_exists(conn, "ManualOvertakeContextBacklog"):
+            c.execute(
+                """
+                INSERT INTO ManualOvertakeContextBacklog (
+                    manual_event_id,
+                    run_id,
+                    frame_num,
+                    event_payload_json,
+                    context_frames_json,
+                    created_at,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (manual_event_id, run_id, frame_num, payload_json, context_json, now),
+            )
+            conn.commit()
+            return c.lastrowid
+
+        if _table_exists(conn, "ManualContextBacklog"):
+            c.execute(
+                """
+                INSERT INTO ManualContextBacklog (
+                    run_id,
+                    frame_num,
+                    manual_event_id,
+                    status,
+                    created_at,
+                    payload_json
+                )
+                VALUES (?, ?, ?, 'pending', ?, ?)
+                """,
+                (run_id, frame_num, manual_event_id, now, payload_json),
+            )
+            conn.commit()
+            return c.lastrowid
+
+    return 0
+
+def summarize_manual_context_backlog_by_status(run_ids=None):
+    run_ids_norm = []
+    if run_ids:
+        if not isinstance(run_ids, (list, tuple, set)):
+            run_ids = [run_ids]
+        for value in run_ids:
+            try:
+                run_ids_norm.append(int(value))
+            except (TypeError, ValueError):
+                continue
+
+    summary = {}
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        if _table_exists(conn, "ManualOvertakeContextBacklog"):
+            sql = "SELECT status, COUNT(*) FROM ManualOvertakeContextBacklog"
+            params = []
+            if run_ids_norm:
+                placeholders = ",".join(["?"] * len(run_ids_norm))
+                sql += f" WHERE run_id IN ({placeholders})"
+                params.extend(run_ids_norm)
+            sql += " GROUP BY status"
+            rows = c.execute(sql, params).fetchall()
+            for status, count in rows:
+                summary[status] = summary.get(status, 0) + int(count or 0)
+
+        if _table_exists(conn, "ManualContextBacklog"):
+            sql = "SELECT status, COUNT(*) FROM ManualContextBacklog"
+            params = []
+            if run_ids_norm:
+                placeholders = ",".join(["?"] * len(run_ids_norm))
+                sql += f" WHERE run_id IN ({placeholders})"
+                params.extend(run_ids_norm)
+            sql += " GROUP BY status"
+            rows = c.execute(sql, params).fetchall()
+            for status, count in rows:
+                summary[status] = summary.get(status, 0) + int(count or 0)
+
+    return summary
+
+def list_manual_overtake_event_cores(run_ids):
+    if run_ids is None:
+        return []
+    if not isinstance(run_ids, (list, tuple, set)):
+        run_ids = [run_ids]
+    normalized = []
+    for value in run_ids:
+        try:
+            normalized.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if not normalized:
+        return []
+    with get_db_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        placeholders = ",".join(["?"] * len(normalized))
+        rows = c.execute(
+            f"SELECT manual_event_id, frame_num, overtaker_group_id, overtaken_group_id, notes FROM ManualOvertakeEvents WHERE run_id IN ({placeholders})",
+            normalized,
+        ).fetchall()
         return [dict(r) for r in rows]
     
 def get_all_process_logs():

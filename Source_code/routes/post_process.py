@@ -3,6 +3,8 @@ import os
 import threading
 import uuid
 import time
+import glob
+import datetime
 from typing import Dict, Any, Optional, List
 from . import main
 
@@ -27,6 +29,462 @@ queue_registry: Dict[str, Dict] = {}
 current_processing_task_id: Optional[str] = None
 
 is_worker_running = False
+
+def _postprocess_log_dir() -> str:
+    log_dir = os.path.abspath(os.path.join(os.getcwd(), "log"))
+    os.makedirs(log_dir, exist_ok=True)
+    return log_dir
+
+
+POSTPROCESS_COLUMNS = [
+    "group_id",
+    "travel_direction",
+    "scale_pixels_per_meter",
+    "x_pixels_per_meter",
+    "pixel_speed",
+    "speed_km_h",
+    "acceleration_m_s2",
+    "acceleration_state",
+    "measure_x",
+    "measure_y",
+    "l_line_distance",
+    "l_line_distance_m",
+    "l_line_distance_cm",
+    "r_line_distance",
+    "r_line_distance_m",
+    "r_line_distance_cm",
+    "line_distance",
+    "line_distance_m",
+    "line_distance_cm",
+    "lane_position_flag",
+    "l_line_cross_m",
+    "r_line_cross_m",
+    "center_line_overtake_status",
+    "white_line_overtake_status",
+    "overtake",
+    "overtake_after",
+    "overtake_by",
+    "overtake_by_second",
+    "overtake_window_offset",
+    "approach_distance_px",
+    "approach_distance_m",
+    "approach_partner_group_id",
+    "clearance_distance_px",
+    "clearance_distance_m",
+    "clearance_distance_cm",
+    "oncoming_flag",
+    "front_distance_m",
+    "front_vehicle_id",
+    "ttc_s",
+    "xy_px_speedpx",
+    "xy_px_karikm",
+    "xy_px_changeable",
+    "xy_px_changeable_name",
+]
+
+
+def _sanitize_log_label(label: str) -> str:
+    if not label:
+        return "batch"
+    safe = []
+    for ch in label:
+        if ch.isalnum() or ch in ("-", "_"):
+            safe.append(ch)
+        else:
+            safe.append("_")
+    return "".join(safe).strip("_") or "batch"
+
+
+def _write_bulk_summary_log(run_ids: List[int], label: str) -> Optional[str]:
+    if not run_ids:
+        return None
+    from ..modules.db_manager import MAIN_DB_PATH, configure_connection
+    from ..modules.xy_section_speed import collect_measurement_lengths
+    import sqlite3
+
+    run_ids = sorted(set(int(rid) for rid in run_ids))
+    with sqlite3.connect(MAIN_DB_PATH) as conn:
+        configure_connection(conn, mode="read")
+        cur = conn.cursor()
+        cur.execute("DROP TABLE IF EXISTS tmp_postprocess_run_ids")
+        cur.execute("CREATE TEMP TABLE tmp_postprocess_run_ids (run_id INTEGER PRIMARY KEY)")
+        cur.executemany(
+            "INSERT INTO tmp_postprocess_run_ids(run_id) VALUES (?)",
+            [(rid,) for rid in run_ids],
+        )
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM OvertakeEvents oe
+            JOIN tmp_postprocess_run_ids r ON oe.run_id = r.run_id
+            """
+        )
+        overtake_events = cur.fetchone()[0]
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM Detection d
+            JOIN tmp_postprocess_run_ids r ON d.run_id = r.run_id
+            WHERE d.overtake_by IS NOT NULL
+              AND TRIM(COALESCE(d.overtake_by, '')) != ''
+            """
+        )
+        overtake_by_rows = cur.fetchone()[0]
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM Detection d
+            JOIN tmp_postprocess_run_ids r ON d.run_id = r.run_id
+            WHERE d.overtake_by_second IS NOT NULL
+              AND TRIM(COALESCE(d.overtake_by_second, '')) != ''
+            """
+        )
+        overtake_by_second_rows = cur.fetchone()[0]
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM Detection d
+            JOIN tmp_postprocess_run_ids r ON d.run_id = r.run_id
+            WHERE d.overtake = 1
+            """
+        )
+        overtake_flag_rows = cur.fetchone()[0]
+
+        measurement_lengths = collect_measurement_lengths(run_ids)
+
+        cur.execute(
+            """
+            SELECT d.acceleration_state, COUNT(*)
+            FROM Detection d
+            JOIN tmp_postprocess_run_ids r ON d.run_id = r.run_id
+            WHERE d.overtake = 1
+            GROUP BY d.acceleration_state
+            """
+        )
+        accel_state_rows = cur.fetchall()
+        accel_state_counts = {
+            (row[0] if row[0] is not None else ""): row[1] for row in accel_state_rows
+        }
+        accel_count = accel_state_counts.get("加速", 0) + accel_state_counts.get("accelerating", 0)
+        decel_count = accel_state_counts.get("減速", 0) + accel_state_counts.get("decelerating", 0)
+        steady_count = accel_state_counts.get("等速", 0) + accel_state_counts.get("steady", 0)
+        unknown_count = max(
+            overtake_flag_rows - (accel_count + decel_count + steady_count), 0
+        )
+        change_count = accel_count + decel_count
+        change_rate = (change_count / overtake_flag_rows * 100) if overtake_flag_rows else 0.0
+
+        traffic_counts = []
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='TrafficCount'"
+        )
+        has_traffic = cur.fetchone() is not None
+        if has_traffic:
+            cur.execute(
+                """
+                SELECT tc.object_type, tc.direction, SUM(tc.count)
+                FROM TrafficCount tc
+                JOIN tmp_postprocess_run_ids r ON tc.run_id = r.run_id
+                GROUP BY tc.object_type, tc.direction
+                ORDER BY tc.object_type, tc.direction
+                """
+            )
+            traffic_counts = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM Detection d
+            JOIN tmp_postprocess_run_ids r ON d.run_id = r.run_id
+            """
+        )
+        detection_total = cur.fetchone()[0]
+
+        column_stats = []
+        cur.execute("PRAGMA table_info(Detection)")
+        columns_info = [(row[1], row[2] or "") for row in cur.fetchall()]
+        detection_columns = [col for col, _ in columns_info]
+        flag_columns = {"overtake", "overtake_after"}
+        for col, col_type in columns_info:
+            col_sql = f"\"{col}\""
+            type_upper = col_type.upper()
+            if col in flag_columns:
+                where_clause = f"d.{col_sql} IS NOT NULL AND d.{col_sql} != 0"
+            elif "CHAR" in type_upper or "TEXT" in type_upper or "CLOB" in type_upper:
+                where_clause = f"d.{col_sql} IS NOT NULL AND TRIM(d.{col_sql}) != ''"
+            else:
+                where_clause = f"d.{col_sql} IS NOT NULL"
+
+            cur.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM Detection d
+                JOIN tmp_postprocess_run_ids r ON d.run_id = r.run_id
+                WHERE {where_clause}
+                """
+            )
+            non_empty = cur.fetchone()[0]
+            percent = (non_empty / detection_total * 100) if detection_total else 0.0
+            column_stats.append((col, non_empty, percent))
+
+        postprocess_set = {col for col in POSTPROCESS_COLUMNS if col in detection_columns}
+        postprocess_stats = [
+            stat for stat in column_stats if stat[0] in postprocess_set
+        ]
+
+    log_dir = _postprocess_log_dir()
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_label = _sanitize_log_label(label)
+    log_path = os.path.join(log_dir, f"RAN_postprocess_summary_{safe_label}_{ts}.log")
+    md_path = os.path.join(log_dir, f"RAN_postprocess_summary_{safe_label}_{ts}.md")
+
+    measurement_lines = []
+    measurement_md_lines = []
+    if measurement_lengths:
+        import numpy as np
+        from collections import Counter
+
+        lengths_sorted = sorted(measurement_lengths)
+        median_len = float(np.median(lengths_sorted))
+        min_len = float(lengths_sorted[0])
+        max_len = float(lengths_sorted[-1])
+        peak_counts = Counter(round(val, 1) for val in measurement_lengths)
+        peaks = [item[0] for item in peak_counts.most_common(2)]
+        peak_text = ", ".join(f"{val:.1f}px" for val in peaks) if peaks else "-"
+        measurement_lines.extend([
+            "-" * 60,
+            "測定区間Y長さの統計:",
+            f"  最小: {min_len:.1f}px",
+            f"  最大: {max_len:.1f}px",
+            f"  中央値: {median_len:.1f}px",
+            f"  ピーク(上位2件): {peak_text}",
+        ])
+        measurement_md_lines.extend([
+            "## 測定区間Y長さの統計",
+            "",
+            f"- 最小: {min_len:.1f}px",
+            f"- 最大: {max_len:.1f}px",
+            f"- 中央値: {median_len:.1f}px",
+            f"- ピーク(上位2件): {peak_text}",
+            "",
+        ])
+    else:
+        measurement_lines.extend([
+            "-" * 60,
+            "測定区間Y長さの統計:",
+            "  (測定区間データがありません)",
+        ])
+        measurement_md_lines.extend([
+            "## 測定区間Y長さの統計",
+            "",
+            "(測定区間データがありません)",
+            "",
+        ])
+
+    lines = [
+        "RAN 後処理まとめログ",
+        f"作成日時: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"ラベル: {label}",
+        f"Run数: {len(run_ids)}",
+        "-" * 60,
+        "カウント線通過統計:",
+    ]
+    if not has_traffic:
+        lines.append("  (TrafficCount テーブルが見つかりません)")
+    elif not traffic_counts:
+        lines.append("  (カウントデータがありません)")
+    else:
+        totals = {}
+        normalized_totals = {"車": 0, "自転車": 0}
+        for obj_type, direction, cnt in traffic_counts:
+            lines.append(f"  {obj_type} / {direction}: {cnt}")
+            totals[obj_type] = totals.get(obj_type, 0) + (cnt or 0)
+            obj_text = str(obj_type or "").lower()
+            if any(key in obj_text for key in ["bicycle", "bike", "自転"]):
+                normalized_totals["自転車"] += cnt or 0
+            else:
+                normalized_totals["車"] += cnt or 0
+        lines.append("  合計:")
+        for obj_type, cnt in totals.items():
+            lines.append(f"    {obj_type}: {cnt}")
+        lines.append("  車種別合計:")
+        lines.append(f"    車: {normalized_totals['車']}")
+        lines.append(f"    自転車: {normalized_totals['自転車']}")
+
+    if measurement_lines:
+        lines.extend(measurement_lines)
+
+    lines.extend([
+        "-" * 60,
+        f"OvertakeEvents 行数: {overtake_events}",
+        f"overtake_by 行数: {overtake_by_rows}",
+        f"overtake_by_second 行数: {overtake_by_second_rows}",
+        f"overtake=1 行数: {overtake_flag_rows}",
+        "追い越し時の速度変化:",
+    ])
+    if overtake_flag_rows:
+        lines.append(
+            f"  変化あり: {change_count} / {overtake_flag_rows} ({change_rate:.1f}%)"
+        )
+        lines.append(
+            f"  内訳: 加速 {accel_count}, 減速 {decel_count}, 等速 {steady_count}, 不明 {unknown_count}"
+        )
+    else:
+        lines.append("  (追い越しデータがありません)")
+
+    lines.extend([
+        "-" * 60,
+        f"Detection 総行数: {detection_total}",
+        "Detection カラム別 行数/割合:",
+        "注記: overtake/overtake_after は 1 の行数を表示 (0は未検出扱い)",
+    ])
+    if detection_total and column_stats:
+        max_len = max(len(str(name)) for name in detection_columns)
+        header = f"  {'カラム名'.ljust(max_len)} | {'行数'.rjust(8)} | {'割合'.rjust(6)}"
+        lines.append(header)
+        lines.append("  " + "-" * len(header))
+        for col, count, pct in column_stats:
+            lines.append(
+                f"  {str(col).ljust(max_len)} | {str(count).rjust(8)} | {pct:5.1f}%"
+            )
+    else:
+        lines.append("  (対象データがありません)")
+
+    lines.append("-" * 60)
+    lines.append("後処理生成カラム 行数/割合:")
+    if detection_total and postprocess_stats:
+        max_len = max(len(str(name)) for name, _, _ in postprocess_stats)
+        header = f"  {'カラム名'.ljust(max_len)} | {'行数'.rjust(8)} | {'割合'.rjust(6)}"
+        lines.append(header)
+        lines.append("  " + "-" * len(header))
+        for col, count, pct in postprocess_stats:
+            lines.append(
+                f"  {str(col).ljust(max_len)} | {str(count).rjust(8)} | {pct:5.1f}%"
+            )
+    else:
+        lines.append("  (対象データがありません)")
+
+    lines.extend([
+        "Run ID一覧 (先頭20件):",
+        ", ".join(str(rid) for rid in run_ids[:20]),
+    ])
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+        f.write("\n")
+
+    md_lines = [
+        "# RAN 後処理まとめログ",
+        "",
+        f"- 作成日時: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- ラベル: {label}",
+        f"- Run数: {len(run_ids)}",
+        "",
+        "## カウント線通過統計",
+        "",
+    ]
+    if not has_traffic:
+        md_lines.append("(TrafficCount テーブルが見つかりません)")
+    elif not traffic_counts:
+        md_lines.append("(カウントデータがありません)")
+    else:
+        md_lines.append("|種別|方向|通過数|")
+        md_lines.append("|---|---|---:|")
+        totals = {}
+        normalized_totals = {"車": 0, "自転車": 0}
+        for obj_type, direction, cnt in traffic_counts:
+            md_lines.append(f"|{obj_type}|{direction}|{cnt}|")
+            totals[obj_type] = totals.get(obj_type, 0) + (cnt or 0)
+            obj_text = str(obj_type or "").lower()
+            if any(key in obj_text for key in ["bicycle", "bike", "自転"]):
+                normalized_totals["自転車"] += cnt or 0
+            else:
+                normalized_totals["車"] += cnt or 0
+        md_lines.append("")
+        md_lines.append("合計:")
+        for obj_type, cnt in totals.items():
+            md_lines.append(f"- {obj_type}: {cnt}")
+        md_lines.append("")
+        md_lines.append("車種別合計:")
+        md_lines.append(f"- 車: {normalized_totals['車']}")
+        md_lines.append(f"- 自転車: {normalized_totals['自転車']}")
+
+    if measurement_md_lines:
+        md_lines.extend(measurement_md_lines)
+
+    md_lines.extend([
+        "## 追い越し集計",
+        "",
+        f"- OvertakeEvents 行数: {overtake_events}",
+        f"- overtake_by 行数: {overtake_by_rows}",
+        f"- overtake_by_second 行数: {overtake_by_second_rows}",
+        f"- overtake=1 行数: {overtake_flag_rows}",
+        "",
+        "### 追い越し時の速度変化",
+        "",
+    ])
+    if overtake_flag_rows:
+        md_lines.append(
+            f"- 変化あり: {change_count} / {overtake_flag_rows} ({change_rate:.1f}%)"
+        )
+        md_lines.append(
+            f"- 内訳: 加速 {accel_count}, 減速 {decel_count}, 等速 {steady_count}, 不明 {unknown_count}"
+        )
+    else:
+        md_lines.append("(追い越しデータがありません)")
+
+    md_lines.extend([
+        "",
+        "## Detection カラム別 行数/割合",
+        "",
+        "> 注記: overtake/overtake_after は 1 の行数を表示 (0は未検出扱い)",
+        "",
+    ])
+    if detection_total and column_stats:
+        md_lines.append("|カラム名|行数|割合|")
+        md_lines.append("|---|---:|---:|")
+        for col, count, pct in column_stats:
+            md_lines.append(f"|{col}|{count}|{pct:.1f}%|")
+    else:
+        md_lines.append("(対象データがありません)")
+
+    md_lines.extend([
+        "",
+        "## 後処理生成カラム 行数/割合",
+        "",
+    ])
+    if detection_total and postprocess_stats:
+        md_lines.append("|カラム名|行数|割合|")
+        md_lines.append("|---|---:|---:|")
+        for col, count, pct in postprocess_stats:
+            md_lines.append(f"|{col}|{count}|{pct:.1f}%|")
+    else:
+        md_lines.append("(対象データがありません)")
+
+    md_lines.extend([
+        "",
+        "## Run ID一覧 (先頭20件)",
+        "",
+        ", ".join(str(rid) for rid in run_ids[:20]),
+        "",
+    ])
+
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(md_lines))
+
+    return log_path
+
+
+def _cleanup_postprocess_logs() -> None:
+    log_dir = _postprocess_log_dir()
+    patterns = ("RAN_*.log", "RAN_report_*.txt", "RAN_*.md")
+    for pattern in patterns:
+        for path in glob.glob(os.path.join(log_dir, pattern)):
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    continue
 
 @main.route("/post_process")
 def post_process():
@@ -175,6 +633,94 @@ def api_process_logs():
 def post_process_status():
     """現在の後処理の進捗状況を返す。"""
     return jsonify(post_process_progress)
+
+
+@main.route("/api/logs/list")
+def api_list_logs():
+    """ログファイル一覧を取得する (RAN_*.log, RAN_report_*.txt)"""
+    try:
+        log_dir = os.path.abspath(os.path.join(os.getcwd(), "log"))
+        if not os.path.exists(log_dir):
+            return jsonify({"logs": []})
+
+        files = []
+        # Error/Run/Summary Logs
+        files.extend(glob.glob(os.path.join(log_dir, "RAN_*.log")))
+        # Report Logs
+        files.extend(glob.glob(os.path.join(log_dir, "RAN_report_*.txt")))
+        # Markdown Summary Logs
+        files.extend(glob.glob(os.path.join(log_dir, "RAN_*.md")))
+        
+        results = []
+        for p in files:
+            fname = os.path.basename(p)
+            mtime = os.path.getmtime(p)
+            size = os.path.getsize(p)
+            dt_str = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+            lower_name = fname.lower()
+
+            if lower_name.startswith("ran_postprocess_summary_"):
+                file_type = "summary"
+                category = "summary"
+            elif lower_name.startswith("ran_postprocess_run_"):
+                file_type = "run"
+                category = "file"
+            elif lower_name.startswith("ran_report_"):
+                file_type = "report"
+                category = "file"
+            elif "error" in lower_name:
+                file_type = "error"
+                category = "file"
+            else:
+                file_type = "log"
+                category = "file"
+
+            results.append({
+                "filename": fname,
+                "mtime": mtime,
+                "datetime": dt_str,
+                "size": size,
+                "type": file_type,
+                "category": category
+            })
+            
+        # Sort by mtime desc
+        results.sort(key=lambda x: x["mtime"], reverse=True)
+        
+        return jsonify({"logs": results})
+    except Exception as e:
+        current_app.logger.exception("Failed to list logs")
+        return jsonify({"error": str(e)}), 500
+
+
+@main.route("/api/logs/content")
+def api_get_log_content():
+    """ログファイルの内容を取得する"""
+    filename = request.args.get("filename")
+    if not filename:
+        return jsonify({"error": "Filename required"}), 400
+        
+    # Security check: filename must be simple and exist in log dir
+    safe_name = os.path.basename(filename)
+    if safe_name != filename:
+        return jsonify({"error": "Invalid filename"}), 400
+        
+    try:
+        log_dir = os.path.abspath(os.path.join(os.getcwd(), "log"))
+        path = os.path.join(log_dir, safe_name)
+        
+        if not os.path.exists(path):
+            return jsonify({"error": "File not found"}), 404
+            
+        # Read content (limit size?)
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+            
+        return jsonify({"filename": safe_name, "content": content})
+    except Exception as e:
+        current_app.logger.exception(f"Failed to read log {filename}")
+        return jsonify({"error": str(e)}), 500
+
 
 
 
@@ -580,7 +1126,7 @@ def post_process_action():
                                 
                             task_queue.task_done()
                             continue
-                        
+
                         # ===== 動画生成処理 =====
                         if t_action == "generate_video":
                             from ..modules.video_generator import VideoGenerator, normalize_video_options
@@ -734,6 +1280,55 @@ def post_process_action():
                             task_queue.task_done()
                             continue
 
+                        # ===== Export Overtake Pair Summary CSV =====
+                        if t_action == "export_overtake_pairs_csv":
+                            target_runs = []
+                            from ..modules.db_manager import get_run_ids_by_folder, get_all_run_ids, get_run_ids_by_condition
+
+                            if t_mode == "all" or t_action == "process_all":
+                                target_runs = get_all_run_ids()
+                            elif t_mode == "folder":
+                                for folder in t_input_folders:
+                                    target_runs.extend(get_run_ids_by_folder(folder))
+                                target_runs = sorted(list(set(target_runs)))
+                            elif t_mode == "run" and t_run_id:
+                                target_runs = [int(t_run_id)]
+                            elif t_mode == "condition":
+                                t_road_type = t_req_data.get("condition_road_type")
+                                t_year = t_req_data.get("condition_year")
+                                target_runs = get_run_ids_by_condition(road_type=t_road_type, process_year=t_year)
+
+                            if not target_runs:
+                                post_process_progress.update({
+                                    "status": "error",
+                                    "message": "対象のチE�Eタが見つかりません"
+                                })
+                                task_queue.task_done()
+                                continue
+
+                            from ..modules.overtake_pair_export import generate_overtake_pair_csv
+                            file_bytes = generate_overtake_pair_csv(run_ids=target_runs)
+
+                            filename = f"overtake_pairs_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                            export_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'exports')
+                            os.makedirs(export_dir, exist_ok=True)
+                            file_path = os.path.join(export_dir, filename)
+
+                            with open(file_path, "wb") as f:
+                                f.write(file_bytes)
+
+                            post_process_progress.update({
+                                "status": "complete",
+                                "percent": 100,
+                                "message": "追い越しペアCSVを出力しました",
+                                "results": {
+                                    "download_url": f"/exports/{filename}",
+                                    "filename": filename
+                                }
+                            })
+                            task_queue.task_done()
+                            continue
+
                         # ===== 既存のバッチ処理 =====
                         if t_mode == "folder" and t_input_folders and t_profile_name:
                             from ..modules.db_manager import update_folder_profiles
@@ -806,6 +1401,7 @@ def post_process_action():
 
                         total_tasks = len(valid_batches)
                         post_process_progress["total"] = total_tasks
+                        all_run_ids = sorted({rid for _, runs in valid_batches for rid in runs})
                         
                         if total_tasks == 0:
                             post_process_progress.update({
@@ -818,6 +1414,11 @@ def post_process_action():
 
                         post_process_progress["message"] = f"並列処理を開始: {total_tasks} バッチ (残り予約: {remaining}件)"
                         
+                        try:
+                            _cleanup_postprocess_logs()
+                        except Exception:
+                            current_app.logger.exception("Failed to cleanup old logs")
+
                         # Setup Manager Queue for granular progress
                         manager = multiprocessing.Manager()
                         sub_queue = manager.Queue()
@@ -893,6 +1494,28 @@ def post_process_action():
                         # Stop listener
                         sub_queue.put("DONE")
                         listener.join()
+
+                        summary_log_path = None
+                        if all_run_ids:
+                            try:
+                                if t_action == "process_all" or (t_action == "all_postprocess" and t_mode == "all"):
+                                    log_label = "all"
+                                elif t_mode == "folder":
+                                    log_label = f"folders_{len(t_input_folders)}"
+                                elif t_mode == "condition":
+                                    log_label = "condition"
+                                else:
+                                    log_label = "batch"
+                                summary_log_path = _write_bulk_summary_log(all_run_ids, log_label)
+                                if summary_log_path:
+                                    post_process_progress["details"].append(
+                                        f"Summary log saved: {summary_log_path}"
+                                    )
+                            except Exception as e:
+                                current_app.logger.exception("Failed to write summary log")
+                                post_process_progress["details"].append(
+                                    f"Summary log failed: {e}"
+                                )
 
                         # 3. Completion
                         post_process_progress.update({

@@ -61,6 +61,152 @@
         </div>
     </div>
 
+    <!-- 追い越し統計（拡幅/未拡幅） -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-light fw-semibold">拡幅</div>
+                <div class="card-body py-2">
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr>
+                                <th style="width: 45%;">検知数</th>
+                                <td>{{ overtake_stats.widened.count }}</td>
+                            </tr>
+                            <tr>
+                                <th>中央線越え割合</th>
+                                <td>
+                                    {{ '%.1f%%'|format(overtake_stats.widened.center_ratio) if
+                                    overtake_stats.widened.center_ratio is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線越え割合</th>
+                                <td>
+                                    {{ '%.1f%%'|format(overtake_stats.widened.white_ratio) if
+                                    overtake_stats.widened.white_ratio is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 最小</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.clearance.min) if
+                                    overtake_stats.widened.clearance.min is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 中央値</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.clearance.median) if
+                                    overtake_stats.widened.clearance.median is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 最大</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.clearance['max']) if
+                                    overtake_stats.widened.clearance['max'] is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 最小</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.line.min) if
+                                    overtake_stats.widened.line.min is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 中央値</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.line.median) if
+                                    overtake_stats.widened.line.median is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 最大</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.line['max']) if
+                                    overtake_stats.widened.line['max'] is not none else '-' }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-light fw-semibold">未拡幅</div>
+                <div class="card-body py-2">
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr>
+                                <th style="width: 45%;">検知数</th>
+                                <td>{{ overtake_stats.unwidened.count }}</td>
+                            </tr>
+                            <tr>
+                                <th>中央線越え割合</th>
+                                <td>
+                                    {{ '%.1f%%'|format(overtake_stats.unwidened.center_ratio) if
+                                    overtake_stats.unwidened.center_ratio is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線越え割合</th>
+                                <td>
+                                    {{ '%.1f%%'|format(overtake_stats.unwidened.white_ratio) if
+                                    overtake_stats.unwidened.white_ratio is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 最小</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.clearance.min) if
+                                    overtake_stats.unwidened.clearance.min is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 中央値</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.clearance.median) if
+                                    overtake_stats.unwidened.clearance.median is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 最大</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.clearance['max']) if
+                                    overtake_stats.unwidened.clearance['max'] is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 最小</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.line.min) if
+                                    overtake_stats.unwidened.line.min is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 中央値</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.line.median) if
+                                    overtake_stats.unwidened.line.median is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 最大</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.line['max']) if
+                                    overtake_stats.unwidened.line['max'] is not none else '-' }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ソートコントロール -->
     <div class="d-flex justify-content-end align-items-center gap-2 mb-3">
         <label class="text-muted small mb-0">並び替え:</label>
@@ -141,8 +287,28 @@
                 <div class="row">
                     <!-- 左側: 拡大写真 -->
                     <div class="col-lg-6 mb-3">
-                        <img id="modalImage" src="" class="img-fluid rounded shadow" alt="Overtake Photo"
-                            style="max-height: 500px; width: 100%; object-fit: contain; background: #f0f0f0;">
+                        <div class="position-relative" style="max-height: 500px;">
+                            <img id="modalImage" src="" class="img-fluid rounded shadow" alt="Overtake Photo"
+                                style="max-height: 500px; width: 100%; object-fit: contain; background: #f0f0f0;">
+                            <canvas id="modalOverlay"
+                                style="position: absolute; inset: 0; pointer-events: none;"></canvas>
+                        </div>
+                        <div class="mt-2 small">
+                            <div class="fw-semibold mb-1">表示モード</div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input overlay-toggle" type="checkbox" id="overlayClearance"
+                                    checked>
+                                <label class="form-check-label" for="overlayClearance">離隔距離</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input overlay-toggle" type="checkbox" id="overlayCenter">
+                                <label class="form-check-label" for="overlayCenter">中央線</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input overlay-toggle" type="checkbox" id="overlayWhite">
+                                <label class="form-check-label" for="overlayWhite">白線</label>
+                            </div>
+                        </div>
                         <div class="text-center mt-2">
                             <a id="modalImageLink" href="" target="_blank" class="btn btn-outline-primary btn-sm">
                                 <i class="bi bi-box-arrow-up-right me-1"></i>新しいタブで開く
@@ -181,6 +347,18 @@
                                             <tr>
                                                 <th>動画ファイル</th>
                                                 <td id="infoVideoFilename">-</td>
+                                            </tr>
+                                            <tr>
+                                                <th>自動出力</th>
+                                                <td id="infoAutoOutput">-</td>
+                                            </tr>
+                                            <tr>
+                                                <th>再実行出力</th>
+                                                <td id="infoRerunOutput">-</td>
+                                            </tr>
+                                            <tr>
+                                                <th>手動出力</th>
+                                                <td id="infoManualOutput">-</td>
                                             </tr>
                                         </tbody>
                                     </table>
@@ -238,6 +416,14 @@
                                                 <td id="carDirection">-</td>
                                             </tr>
                                             <tr>
+                                                <th>離隔距離</th>
+                                                <td id="carClearance">-</td>
+                                            </tr>
+                                            <tr>
+                                                <th>白線距離</th>
+                                                <td id="carLineDistance">-</td>
+                                            </tr>
+                                            <tr>
                                                 <th>中央線判定</th>
                                                 <td id="carCenterLineStatus">-</td>
                                             </tr>
@@ -247,12 +433,20 @@
                                             </tr>
                                         </tbody>
                                     </table>
+                                    <div class="mt-2">
+                                        <label class="form-label mb-1 small">中央線判定(編集)</label>
+                                        <select id="carCenterStatusSelect" class="form-select form-select-sm">
+                                            <option value="">-</option>
+                                            <option value="中央線越え">中央線越え</option>
+                                            <option value="中央線内側">中央線内側</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                             <!-- 被追い越し車 (自転車) -->
                             <div class="card mb-3">
                                 <div class="card-header bg-info text-white py-2">
-                                    <i class="bi bi-bicycle me-1"></i>被追い越し車 (BIKE)
+                                    <i class="bi bi-bicycle me-1"></i>追い越され自転車 (BIKE)
                                     <button class="btn btn-sm btn-outline-light float-end" id="btnShowBikeGroup">
                                         <i class="bi bi-list-ul me-1"></i>グループ詳細
                                     </button>
@@ -277,6 +471,14 @@
                                                 <td id="bikeDirection">-</td>
                                             </tr>
                                             <tr>
+                                                <th>離隔距離</th>
+                                                <td id="bikeClearance">-</td>
+                                            </tr>
+                                            <tr>
+                                                <th>白線距離</th>
+                                                <td id="bikeLineDistance">-</td>
+                                            </tr>
+                                            <tr>
                                                 <th>中央線判定</th>
                                                 <td id="bikeCenterLineStatus">-</td>
                                             </tr>
@@ -286,6 +488,22 @@
                                             </tr>
                                         </tbody>
                                     </table>
+                                    <div class="mt-2">
+                                        <label class="form-label mb-1 small">白線判定(編集)</label>
+                                        <select id="bikeWhiteStatusSelect" class="form-select form-select-sm">
+                                            <option value="">-</option>
+                                            <option value="白線越え">白線越え</option>
+                                            <option value="白線内側">白線内側</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-center mb-3">
+                                <button type="button" class="btn btn-outline-primary btn-sm" id="btnSaveLineStatus">
+                                    <i class="bi bi-save me-1"></i>判定を保存
+                                </button>
+                                <div id="saveStatusMsg" class="text-success mt-2 d-none">
+                                    <i class="bi bi-check-circle me-1"></i>保存しました
                                 </div>
                             </div>
                             <!-- コピーボタン -->
@@ -483,6 +701,25 @@
 
         // 削除ボタン
         document.getElementById('btnDeleteOvertake').addEventListener('click', deleteOvertakeSnapshot);
+
+        // 判定保存ボタン
+        document.getElementById('btnSaveLineStatus').addEventListener('click', saveLineStatus);
+
+        // モード切り替え
+        document.querySelectorAll('.overlay-toggle').forEach(el => {
+            el.addEventListener('change', () => {
+                if (currentEventData) {
+                    drawCalibrationOverlay(currentEventData);
+                }
+            });
+        });
+
+        // 画像ロード後にオーバーレイ再描画
+        document.getElementById('modalImage').addEventListener('load', () => {
+            if (currentEventData) {
+                drawCalibrationOverlay(currentEventData);
+            }
+        });
     });
 
     // 全カードのバッジを初期化（コピー回数表示 + API呼び出しでRUN_ID・データ状態取得）
@@ -504,6 +741,41 @@
             const imgPath = card.dataset.imgPath;
             fetchCardMetadata(imgPath);
         }
+    }
+
+    // 判定ステータスを決定（DB値優先、なければ距離から判定）
+    function determineLineStatus(det, type) {
+        if (!det) return '-';
+
+        // 1. DBのステータス文字列があればそれを使う
+        const dbStatus = det[`${type}_line_overtake_status`];
+        if (dbStatus && dbStatus.trim() !== '') {
+            return dbStatus;
+        }
+
+        // 2. なければ距離から判定 (F: Left=White/Right=Center, B: Left=Center/Right=White)
+        const direction = (det.travel_direction || 'B').trim().toUpperCase();
+        const l_cross = det.l_line_cross_m;
+        const r_cross = det.r_line_cross_m;
+
+        let crossVal = null;
+        if (type === 'center') {
+            // Center check
+            if (direction === 'F') crossVal = r_cross; // F: Right is Center
+            else crossVal = l_cross;                   // B: Left is Center
+
+            if (crossVal != null && crossVal > 0) return '中央線越え(判定)';
+            if (crossVal != null && crossVal <= 0) return '中央線内側(判定)';
+        } else {
+            // White check
+            if (direction === 'F') crossVal = l_cross; // F: Left is White
+            else crossVal = r_cross;                   // B: Right is White
+
+            if (crossVal != null && crossVal > 0) return '白線越え(判定)';
+            if (crossVal != null && crossVal <= 0) return '白線内側(判定)';
+        }
+
+        return '-';
     }
 
     // 個別カードのメタデータをAPIから取得
@@ -538,10 +810,12 @@
                     statusBadge.style.display = 'inline-block';
                 }
 
-                const centerStatus = data.car_detection?.center_line_overtake_status ||
-                    data.bike_detection?.center_line_overtake_status;
-                const whiteStatus = data.bike_detection?.white_line_overtake_status ||
-                    data.car_detection?.white_line_overtake_status;
+                const car = data.car_detection || {};
+                const bike = data.bike_detection || {};
+
+                const centerStatus = determineLineStatus(car, 'center');
+                const whiteStatus = determineLineStatus(bike, 'white');
+
                 updateLineStatusBadge(imgPath, 'center', centerStatus);
                 updateLineStatusBadge(imgPath, 'white', whiteStatus);
             }
@@ -611,42 +885,63 @@
             currentImgPath = imgPath;  // コピー用にパスを保持
 
             // 基本情報
-            document.getElementById('infoFrameNum').textContent = data.frame_num || '-';
-            document.getElementById('infoRunId').textContent = data.run_id || '-';
-            document.getElementById('infoVideoFilename').textContent = data.video_filename || '-';
+            document.getElementById('infoFrameNum').textContent = data.frame_num ?? '-';
+            document.getElementById('infoRunId').textContent = data.run_id ?? '-';
+            document.getElementById('infoVideoFilename').textContent = data.video_filename ?? '-';
+            const outputs = data.outputs || {};
+            document.getElementById('infoAutoOutput').textContent = outputs.auto ? 'あり' : '-';
+            document.getElementById('infoRerunOutput').textContent = outputs.rerun ? 'あり' : '-';
+            document.getElementById('infoManualOutput').textContent = outputs.manual ? 'あり' : '-';
 
             // イベント情報
             const event = data.event || {};
             const clearanceCm = event.clearance_distance_cm;
-            const clearanceM = event.clearance_distance_m;
+            const eventClearanceM = event.clearance_distance_m;
             document.getElementById('eventClearance').textContent =
                 clearanceCm != null ? `${clearanceCm.toFixed(0)} cm` :
-                    (clearanceM != null ? `${clearanceM.toFixed(2)} m` : '-');
+                    (eventClearanceM != null ? `${eventClearanceM.toFixed(2)} m` : '-');
             document.getElementById('eventApproach').textContent =
                 event.approach_distance_m != null ? `${event.approach_distance_m.toFixed(2)} m` : '-';
             document.getElementById('eventLineDistance').textContent =
                 event.line_distance_m != null ? `${event.line_distance_m.toFixed(2)} m` : '-';
 
             // 追い越し車（車）
-            document.getElementById('carGroupId').textContent = data.car_group_id || '-';
+            document.getElementById('carGroupId').textContent = data.car_group_id ?? '-';
             const car = data.car_detection || {};
             document.getElementById('carClassName').textContent = car.class_name || '-';
             document.getElementById('carSpeed').textContent = car.speed_km_h != null ? `${car.speed_km_h.toFixed(1)} km/h` : '-';
             document.getElementById('carDirection').textContent = car.travel_direction || '-';
-            document.getElementById('carCenterLineStatus').textContent = car.center_line_overtake_status || '-';
-            document.getElementById('carWhiteLineStatus').textContent = car.white_line_overtake_status || '-';
+            document.getElementById('carCenterLineStatus').textContent = determineLineStatus(car, 'center');
+            document.getElementById('carWhiteLineStatus').textContent = determineLineStatus(car, 'white');
+            const bike = data.bike_detection || {};
+            const clearanceM = event.clearance_distance_m ?? car.clearance_distance_m ?? bike.clearance_distance_m;
+            document.getElementById('carClearance').textContent =
+                clearanceM != null ? `${clearanceM.toFixed(2)} m` : '-';
+            document.getElementById('carLineDistance').textContent =
+                car.line_distance_m != null ? `${car.line_distance_m.toFixed(2)} m` :
+                    (event.line_distance_m != null ? `${event.line_distance_m.toFixed(2)} m` : '-');
 
             // 被追い越し車（自転車）
-            document.getElementById('bikeGroupId').textContent = data.bike_group_id || '-';
-            const bike = data.bike_detection || {};
+            document.getElementById('bikeGroupId').textContent = data.bike_group_id ?? '-';
             document.getElementById('bikeClassName').textContent = bike.class_name || '-';
             document.getElementById('bikeSpeed').textContent = bike.speed_km_h != null ? `${bike.speed_km_h.toFixed(1)} km/h` : '-';
             document.getElementById('bikeDirection').textContent = bike.travel_direction || '-';
-            document.getElementById('bikeCenterLineStatus').textContent = bike.center_line_overtake_status || '-';
-            document.getElementById('bikeWhiteLineStatus').textContent = bike.white_line_overtake_status || '-';
+            document.getElementById('bikeCenterLineStatus').textContent = determineLineStatus(bike, 'center');
+            document.getElementById('bikeWhiteLineStatus').textContent = determineLineStatus(bike, 'white');
+            document.getElementById('bikeClearance').textContent =
+                clearanceM != null ? `${clearanceM.toFixed(2)} m` : '-';
+            document.getElementById('bikeLineDistance').textContent =
+                bike.line_distance_m != null ? `${bike.line_distance_m.toFixed(2)} m` :
+                    (event.line_distance_m != null ? `${event.line_distance_m.toFixed(2)} m` : '-');
 
             // Store full data for copy function
             currentEventData = data;
+
+            // 編集用セレクト初期化
+            setLineStatusSelectors(data);
+
+            // オーバーレイ描画
+            drawCalibrationOverlay(data);
 
             contentEl.classList.remove('d-none');
 
@@ -866,6 +1161,146 @@
             alert(detailMessage);
         } catch (err) {
             alert('通信エラー: ' + err.message);
+        }
+    }
+
+    function setLineStatusSelectors(data) {
+        const car = data.car_detection || {};
+        const bike = data.bike_detection || {};
+        const carSelect = document.getElementById('carCenterStatusSelect');
+        const bikeSelect = document.getElementById('bikeWhiteStatusSelect');
+        carSelect.value = car.center_line_overtake_status || '';
+        bikeSelect.value = bike.white_line_overtake_status || '';
+        document.getElementById('saveStatusMsg').classList.add('d-none');
+    }
+
+    function drawCalibrationOverlay(data) {
+        const calib = data.calibration;
+        const overlay = data.overlay || {};
+        const img = document.getElementById('modalImage');
+        const canvas = document.getElementById('modalOverlay');
+        if (!calib || !img.naturalWidth || !img.naturalHeight) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+
+        const rect = img.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        const scaleX = rect.width / img.naturalWidth;
+        const scaleY = rect.height / img.naturalHeight;
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        drawPolyline(ctx, calib.left_line, scaleX, scaleY, '#ffffff');
+        drawPolyline(ctx, calib.right_line, scaleX, scaleY, '#ffffff');
+        drawPolyline(ctx, calib.center_line, scaleX, scaleY, '#ff4d4d');
+
+        const mode = getOverlayMode();
+        const carMeasure = overlay.car_measure_point || overlay.car_point;
+        const bikeMeasure = overlay.bike_measure_point || overlay.bike_point;
+
+        if (mode.clearance) {
+            drawLine(ctx, carMeasure, bikeMeasure, scaleX, scaleY, '#00d084');
+            drawPoint(ctx, carMeasure, scaleX, scaleY, '#00d084');
+            drawPoint(ctx, bikeMeasure, scaleX, scaleY, '#00d084');
+        }
+
+        if (mode.center) {
+            drawLine(ctx, overlay.car_point, overlay.car_center_line_point, scaleX, scaleY, '#ff4d4d');
+            drawPoint(ctx, overlay.car_point, scaleX, scaleY, '#ff4d4d');
+            drawPoint(ctx, overlay.car_center_line_point, scaleX, scaleY, '#ff4d4d');
+        }
+
+        if (mode.white) {
+            drawLine(ctx, overlay.bike_point, overlay.bike_white_line_point, scaleX, scaleY, '#ffffff');
+            drawPoint(ctx, overlay.bike_point, scaleX, scaleY, '#ffffff');
+            drawPoint(ctx, overlay.bike_white_line_point, scaleX, scaleY, '#ffffff');
+        }
+    }
+
+    function getOverlayMode() {
+        return {
+            clearance: document.getElementById('overlayClearance')?.checked,
+            center: document.getElementById('overlayCenter')?.checked,
+            white: document.getElementById('overlayWhite')?.checked
+        };
+    }
+
+    function drawPolyline(ctx, points, scaleX, scaleY, color) {
+        if (!Array.isArray(points) || points.length < 2) return;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        points.forEach((pt, idx) => {
+            const x = pt[0] * scaleX;
+            const y = pt[1] * scaleY;
+            if (idx === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        });
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawPoint(ctx, point, scaleX, scaleY, color) {
+        if (!point || point.x == null || point.y == null) return;
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(point.x * scaleX, point.y * scaleY, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawLine(ctx, fromPoint, toPoint, scaleX, scaleY, color) {
+        if (!fromPoint || !toPoint) return;
+        if (fromPoint.x == null || fromPoint.y == null || toPoint.x == null || toPoint.y == null) return;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(fromPoint.x * scaleX, fromPoint.y * scaleY);
+        ctx.lineTo(toPoint.x * scaleX, toPoint.y * scaleY);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    async function saveLineStatus() {
+        if (!currentEventData) return;
+        const event = currentEventData.event || {};
+        const payload = {
+            car_auto_id: event.overtaker_auto_id,
+            bike_auto_id: event.overtaken_auto_id,
+            car_center_status: document.getElementById('carCenterStatusSelect').value,
+            bike_white_status: document.getElementById('bikeWhiteStatusSelect').value
+        };
+
+        try {
+            const res = await fetch('/api/overtake_photo/update_line_status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!data.ok) {
+                alert(data.error || '判定の保存に失敗しました');
+                return;
+            }
+
+            const carStatus = payload.car_center_status || '-';
+            const bikeStatus = payload.bike_white_status || '-';
+            document.getElementById('carCenterLineStatus').textContent = carStatus;
+            document.getElementById('bikeWhiteLineStatus').textContent = bikeStatus;
+            document.getElementById('saveStatusMsg').classList.remove('d-none');
+        } catch (err) {
+            alert(`通信エラー: ${err.message}`);
         }
     }
 
