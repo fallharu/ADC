@@ -27,12 +27,23 @@ app.register_blueprint(results_bp)
 
 # データベースマイグレーション
 import sqlite3
-from .modules.db_manager import ensure_video_metadata_columns, MAIN_DB_PATH
+from .modules.db_manager import (
+    ensure_video_metadata_columns,
+    ensure_detection_columns,
+    ensure_manual_overtake_event_columns,
+    ensure_overtake_event_columns,
+    ensure_manual_annotation_schema,
+    MAIN_DB_PATH,
+)
 
 with app.app_context():
     with sqlite3.connect(MAIN_DB_PATH) as conn:
         ensure_video_metadata_columns(conn)
-        print("✅ Database migration completed: video metadata columns ensured")
+        ensure_detection_columns(conn)
+        ensure_manual_overtake_event_columns(conn)
+        ensure_overtake_event_columns(conn)
+        print("✅ Database migration completed: all schema columns ensured")
+    ensure_manual_annotation_schema()  # 内部でDB接続を管理
     
     # [ABC-B] ルート診断: 全エンドポイントを出力
     print("\n" + "="*80)

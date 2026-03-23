@@ -31,7 +31,7 @@ def generate_report_insight(report_data: Dict[str, Any]) -> str:
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-flash-latest') 
+        model = genai.GenerativeModel('gemini-2.0-flash') 
         
         # Construct a concise prompt
         metadata = report_data.get("summary", {}).get("metadata", {})

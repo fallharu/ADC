@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import contextlib
+import json
 from typing import Optional, Any, List, Dict, Union
 from datetime import datetime
 from pathlib import Path
@@ -48,6 +49,18 @@ SQLITE_CACHE_MB = -2000 # Default to ~2GB (negative value in kb) or use positive
 # Using standard default if not sure, but let's try to be smart
 SQLITE_CACHE_MB = int(os.getenv("SQLITE_CACHE_MB", "512")) 
 POSTPROCESS_MEMORY_MB = int(os.getenv("POSTPROCESS_MEMORY_MB", "4096"))
+
+# Load Best model class mapping
+BEST_MODEL_CLASSES = {}
+try:
+    config_dir = _PROJECT_ROOT / 'config'
+    best_classes_path = config_dir / 'best_model_classes.json'
+    if best_classes_path.exists():
+        with open(best_classes_path, 'r', encoding='utf-8') as f:
+            BEST_MODEL_CLASSES = json.load(f)
+        print(f'[INFO] Loaded Best model classes: {BEST_MODEL_CLASSES}')
+except Exception as e:
+    print(f'[WARNING] Failed to load best_model_classes.json: {e}')
 SQLITE_MAX_MMAP_BYTES = int(os.getenv("SQLITE_MAX_MMAP_BYTES", "0"))
 
 DETECTION_COLUMN_ORDER = [
@@ -373,7 +386,11 @@ def ensure_detection_columns(conn=None):
             "overtake_after": "INTEGER",
             "overtake_by": "TEXT",
             "l_line_cross_m": "REAL",
-            "r_line_cross_m": "REAL"
+            "r_line_cross_m": "REAL",
+            "xy_px_speedpx": "REAL",
+            "xy_px_karikm": "REAL",
+            "xy_px_changeable": "REAL",
+            "xy_px_changeable_name": "TEXT"
         }
         
         for col, dtype in required.items():
@@ -510,7 +527,13 @@ def ensure_manual_annotation_schema(conn=None):
 
 
 def ensure_overtake_stats_table(conn=None):
-    """Ensure OvertakeStats table exists. (Statistics Feature)"""
+    """Ensure OvertakeStats table exists. (Statistics Feature)
+    
+    TODO: OvertakeStatsへのデータ書き込みロジックが未実装。
+    テーブル定義のみ存在。後処理パイプライン内で duration_s, is_out_of_bounds,
+    area_m2, trajectory_image_path を計算してINSERTする処理が必要。
+    対象モジュール: modules/inference.py の run_postprocess_pipeline_sync 内
+    """
     should_close = False
     if conn is None:
         conn = sqlite3.connect(MAIN_DB_PATH)
@@ -3103,7 +3126,9 @@ def get_track_data_for_export(run_id=None):
                 d.group_id,
                 d.approach_partner_group_id,
                 d.track_id,
-                cm.class_name,
+                d.model_name,
+                d.class_id,
+                c.class_name,
                 d.x1, d.y1, d.x2, d.y2,
                 d.measure_x, d.measure_y,
                 
@@ -3126,7 +3151,7 @@ def get_track_data_for_export(run_id=None):
             FROM Detection d
             JOIN ProcessLog pl ON d.run_id = pl.run_id
             JOIN Video v ON pl.video_id = v.video_id
-            LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id
+            LEFT JOIN Class c ON d.class_id = c.class_id
             LEFT JOIN OvertakeEvents oe ON d.run_id = oe.run_id 
                 AND d.frame_num = oe.event_frame_num 
                 AND (d.group_id = oe.overtaker_group_id OR d.group_id = oe.overtaken_group_id)
@@ -3148,6 +3173,34 @@ def get_track_data_for_export(run_id=None):
 
         if df.empty:
              return {'bicycle': pd.DataFrame(), 'overtake': pd.DataFrame()}
+        
+        # Apply Best model class mapping (sorted by class_id)
+        if BEST_MODEL_CLASSES:
+            best_mask = df['model_name'].str.lower() == 'best'
+            if best_mask.any():
+                # Get unique class_ids for best model and sort them
+                best_class_ids = sorted(df.loc[best_mask, 'class_id'].unique())
+                print(f'[DEBUG] Best model class_ids (sorted): {best_class_ids}')
+                
+                # Create mapping: actual class_id -> sorted index
+                class_id_to_index = {class_id: idx for idx, class_id in enumerate(best_class_ids)}
+                print(f'[DEBUG] class_id_to_index mapping: {class_id_to_index}')
+                
+                # Convert JSON dict to list (assuming keys are "0", "1", "2", ...)
+                class_names_list = [BEST_MODEL_CLASSES.get(str(i), f'Unknown_{i}') for i in range(len(BEST_MODEL_CLASSES))]
+                print(f'[DEBUG] class_names_list: {class_names_list}')
+                
+                # Map class_id to class_name via sorted index
+                def get_best_class_name(class_id):
+                    sorted_idx = class_id_to_index.get(class_id)
+                    if sorted_idx is not None and sorted_idx < 3:  # Only 0, 1, 2
+                        result = class_names_list[sorted_idx] if sorted_idx < len(class_names_list) else None
+                        print(f'[DEBUG] class_id={class_id} -> sorted_idx={sorted_idx} -> {result}')
+                        return result
+                    print(f'[DEBUG] class_id={class_id} -> sorted_idx={sorted_idx} -> NULL (out of range)')
+                    return None  # NULL for others
+                
+                df.loc[best_mask, 'class_name'] = df.loc[best_mask, 'class_id'].apply(get_best_class_name)
 
         # 3. Post-process in Pandas
         result_rows = []
@@ -3226,7 +3279,9 @@ def get_track_data_for_export(run_id=None):
                  'Group ID': row.get('group_id'),
                  '相手Group': row.get('approach_partner_group_id'),
                  'トラックID': row.get('track_id'),
-                 'クラス': row.get('class_name'),
+                 'モデル': row.get('model_name'),
+                 'クラスID': row.get('class_id'),
+                 'クラス名': row.get('class_name'),
                  'BBOX x1': round(x1, 1),
                  'BBOX y1': round(y1, 1),
                  'BBOX x2': round(x2, 1),

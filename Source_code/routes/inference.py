@@ -1,5 +1,6 @@
 from flask import render_template, request, jsonify, redirect, url_for, flash, current_app
 import os
+import json
 import threading
 import time
 import glob
@@ -22,6 +23,7 @@ from ..modules.inference import (
     ResolvedFolderSettings, 
     FolderProcessingResult,
     SubfolderSettingsResolver,
+    run_postprocess_pipeline_sync,
 )
 from ..modules.resource_monitor import capture_system_metrics, SystemMetrics
 from ..tools.calibration_tool import apply_calibration_profile
@@ -304,9 +306,14 @@ def detect():
                         return
 
                 try:
-                    # Note: PostProcessHandler implementation skipped for brevity/complexity in refactor unless needed.
-                    # Assuming we can pass None or implement a dummy if necessary.
-                    def postprocess_handler(run_id, settings): return None 
+                    def postprocess_handler(run_id, _settings):
+                        """バッチ処理後に後処理パイプラインを同期実行する"""
+                        try:
+                            completed, errors, skips = run_postprocess_pipeline_sync(run_id)
+                            if errors:
+                                current_app.logger.warning(f"[PostProcess] run_id={run_id} errors: {errors}")
+                        except Exception as exc:
+                            current_app.logger.error(f"[PostProcess] run_id={run_id} 失敗: {exc}")
 
                     folder_result = process_video_folder(
                         folder_path,

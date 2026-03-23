@@ -7,7 +7,6 @@ import threading
 import cv2
 import numpy as np
 from Source_code.modules.db_manager import MAIN_DB_PATH, insert_manual_overtake_event, apply_manual_overtake_flags
-from Source_code.modules.db_manager import MAIN_DB_PATH, insert_manual_overtake_event, apply_manual_overtake_flags
 from Source_code.modules.inference import process_video
 from typing import Dict, Any
 import json
@@ -416,8 +415,6 @@ def process_check_sheet(text_data):
             res_entry['run_id'] = run_id
             
             results.append(res_entry)
-
-    return results
 
     return results
 
