@@ -48,6 +48,8 @@ Thumbs.db
 output/
 uploads/
 db.zips/
+bench_out/
+yolo26test/
 
 # ---- Database ----
 *.db

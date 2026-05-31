@@ -334,94 +334,8 @@ def _export_overtake_snapshots(
             print(f"[assign_overtake] フレーム {frame_num} の読み込みに失敗しました。")
             continue
 
-        annotated = frame.copy()
-        car_box = request.get("car_box")
-        bike_box = request.get("bike_box")
-        car_measure = _as_point(request.get("car_measure"))
-        bike_measure = _as_point(request.get("bike_measure"))
-
-        if car_box and all(v is not None and not pd.isna(v) for v in car_box):
-            x1, y1, x2, y2 = [int(round(float(v))) for v in car_box]
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 3)
-            label = f"CAR G{request.get('car_group')}"
-            annotated = _put_text_pil(
-                annotated,
-                label,
-                (x1, max(y1 - 60, 0)),
-                font_size=48,
-                color=(0, 255, 255),
-            )
-
-        if bike_box and all(v is not None and not pd.isna(v) for v in bike_box):
-            x1, y1, x2, y2 = [int(round(float(v))) for v in bike_box]
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (255, 255, 0), 3)
-            label = f"BIKE G{request.get('bike_group')}"
-            annotated = _put_text_pil(
-                annotated,
-                label,
-                (x1, max(y1 - 60, 0)),
-                font_size=48,
-                color=(255, 255, 0),
-            )
-
-        if car_measure and bike_measure:
-            cv2.line(annotated, bike_measure, car_measure, (0, 0, 255), 3, cv2.LINE_AA)
-            mid_x = int(round((bike_measure[0] + car_measure[0]) / 2))
-            mid_y = int(round((bike_measure[1] + car_measure[1]) / 2))
-            label = _format_clearance_label(request)
-            if label:
-                # フォントサイズを拡大し、PILで描画
-                annotated = _put_text_pil(
-                    annotated,
-                    label,
-                    (mid_x - 120, mid_y - 40),
-                    font_size=56,
-                    color=(255, 255, 255),
-                    bg_color=(0, 0, 0),
-                )
-
-        if bike_measure:
-            cv2.circle(annotated, bike_measure, 5, (64, 255, 255), -1, cv2.LINE_AA)
-
-            nearest = None
-            nearest_side = None
-            if left_line_points is not None:
-                left_x = _interpolate_lane_x(left_line_points, bike_measure[1])
-                if left_x is not None:
-                    dist = abs(left_x - bike_measure[0])
-                    nearest = (int(round(left_x)), bike_measure[1], dist)
-                    nearest_side = "L"
-            if right_line_points is not None:
-                right_x = _interpolate_lane_x(right_line_points, bike_measure[1])
-                if right_x is not None:
-                    dist = abs(right_x - bike_measure[0])
-                    if nearest is None or dist < nearest[2]:
-                        nearest = (int(round(right_x)), bike_measure[1], dist)
-                        nearest_side = "R"
-
-            if nearest is not None:
-                lane_point = (nearest[0], nearest[1])
-                cv2.line(annotated, bike_measure, lane_point, (255, 128, 0), 3, cv2.LINE_AA)
-                cv2.circle(annotated, lane_point, 5, (255, 255, 255), -1, cv2.LINE_AA)
-
-                lane_value = None
-                if nearest_side == "L":
-                    lane_value = request.get("l_line_distance")
-                elif nearest_side == "R":
-                    lane_value = request.get("r_line_distance")
-
-                lane_label = _format_lane_label(nearest_side, lane_value if lane_value is not None else nearest[2])
-                if lane_label:
-                    text_x = min(bike_measure[0], lane_point[0])
-                    text_y = max(0, bike_measure[1] - 60)
-                    annotated = _put_text_pil(
-                        annotated,
-                        lane_label,
-                        (text_x, text_y),
-                        font_size=40,
-                        color=(255, 255, 255),
-                        bg_color=(0, 0, 0),
-                    )
+        # annotated = frame.copy() # No annotation needed
+        # Just save the raw frame
 
         filename = (
             f"overtake_{frame_num:06d}_car{request.get('car_group')}_"
@@ -429,12 +343,12 @@ def _export_overtake_snapshots(
         )
         output_path = snapshot_dir / filename
         try:
-            cv2.imwrite(str(output_path), annotated)
+            cv2.imwrite(str(output_path), frame) # Save raw frame
             created += 1
             
             # 離隔距離をターミナルに出力
             label = _format_clearance_label(request) or "距離不明"
-            print(f"[Overtake Snapshot] Saved: {output_path.name} | {label}")
+            print(f"[Overtake Snapshot] Saved (Raw): {output_path.name} | {label}")
         except Exception as exc:  # noqa: BLE001
             print(f"[assign_overtake] スナップショットの保存に失敗しました ({output_path}): {exc}")
 
@@ -1126,8 +1040,6 @@ def assign_overtake(run_id: int) -> int:
                     "tuple": events_for_overtake_table[-1],
                     "stats": stats_payload
                 })
-            )
-        )
 
     created_count = _export_overtake_snapshots(
         run_id,

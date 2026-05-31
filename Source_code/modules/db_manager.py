@@ -371,7 +371,10 @@ def ensure_detection_columns(conn=None):
         required = {
             "x1": "REAL", "y1": "REAL", "x2": "REAL", "y2": "REAL",
             "video_id": "INTEGER", "class_id": "INTEGER",
+            "model_name": "TEXT",
+            "class_name": "TEXT",
             "track_id": "INTEGER", "group_id": "INTEGER",
+            "confidence": "REAL",
             "front_distance_m": "REAL",
             "acceleration_m_s2": "REAL",
             "acceleration_state": "TEXT",
@@ -397,6 +400,76 @@ def ensure_detection_columns(conn=None):
             if col not in columns:
                 print(f"Migrating Detection: Adding {col}")
                 c.execute(f"ALTER TABLE Detection ADD COLUMN {col} {dtype}")
+                columns.append(col)
+
+        if "class_name" in columns:
+            best_class_map = BEST_MODEL_CLASSES or {
+                "0": "Tire",
+                "1": "Number_plate",
+                "2": "Bicycle_Tires",
+            }
+            best_cases = []
+            best_case_params = []
+            best_ids = []
+            for raw_id, raw_name in best_class_map.items():
+                try:
+                    class_id = int(raw_id)
+                except (TypeError, ValueError):
+                    continue
+                class_name = str(raw_name).strip()
+                if not class_name:
+                    continue
+                best_ids.append(class_id)
+                best_cases.append("WHEN class_id = ? THEN ?")
+                best_case_params.extend([class_id, class_name])
+
+            has_class_table = bool(
+                c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='Class'").fetchone()
+            )
+            has_class_name_column = False
+            if has_class_table:
+                class_columns = [row[1] for row in c.execute("PRAGMA table_info(Class)").fetchall()]
+                has_class_name_column = "class_name" in class_columns and "class_id" in class_columns
+
+            fillable_predicates = []
+            fillable_params = []
+            if best_ids:
+                best_id_placeholders = ",".join("?" for _ in best_ids)
+                fillable_predicates.append(
+                    f"(LOWER(COALESCE(model_name, '')) LIKE '%best%' AND class_id IN ({best_id_placeholders}))"
+                )
+                fillable_params.extend(best_ids)
+            if has_class_name_column:
+                fillable_predicates.append(
+                    "(LOWER(COALESCE(model_name, '')) NOT LIKE '%best%' "
+                    "AND TRIM(COALESCE(model_name, '')) != '' "
+                    "AND EXISTS (SELECT 1 FROM Class WHERE Class.class_id = Detection.class_id))"
+                )
+
+            if fillable_predicates:
+                missing_predicate = "(class_name IS NULL OR TRIM(class_name) = '')"
+                fillable_sql = (
+                    f"SELECT 1 FROM Detection WHERE {missing_predicate} "
+                    f"AND ({' OR '.join(fillable_predicates)}) LIMIT 1"
+                )
+                if c.execute(fillable_sql, fillable_params).fetchone():
+                    print("Migrating Detection: Backfilling class_name")
+                    best_expr = "class_name"
+                    if best_cases:
+                        best_expr = f"CASE {' '.join(best_cases)} ELSE class_name END"
+                    standard_expr = "class_name"
+                    if has_class_name_column:
+                        standard_expr = (
+                            "COALESCE((SELECT Class.class_name FROM Class "
+                            "WHERE Class.class_id = Detection.class_id), class_name)"
+                        )
+                    update_sql = (
+                        "UPDATE Detection SET class_name = CASE "
+                        f"WHEN LOWER(COALESCE(model_name, '')) LIKE '%best%' THEN {best_expr} "
+                        f"ELSE {standard_expr} END "
+                        f"WHERE {missing_predicate} AND ({' OR '.join(fillable_predicates)})"
+                    )
+                    c.execute(update_sql, best_case_params + fillable_params)
         
         conn.commit()
     except Exception as e:

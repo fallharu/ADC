@@ -131,7 +131,7 @@ def _median_of_three(values: pd.Series) -> Optional[float]:
     if values.empty:
         return None
     median_val = values.median()
-    closest = values.iloc[(values - median_val).abs().sort_values().index[:3]]
+    closest = values.loc[(values - median_val).abs().sort_values().index[:3]]
     if closest.empty:
         return None
     return float(closest.mean())
@@ -244,6 +244,8 @@ def assign_xy_section_speed(run_id: int) -> Optional[float]:
     xy_px_speedpx / xy_px_karikm / xy_px_changeable / xy_px_changeable_name を更新する。
     """
     load_dotenv()
+    ensure_detection_xy_speed_columns()
+
     accel_threshold = float(os.getenv("ACCELERATION_THRESHOLD", 0.5))
     decel_threshold = float(os.getenv("DECELERATION_THRESHOLD", -0.5))
 
@@ -258,8 +260,6 @@ def assign_xy_section_speed(run_id: int) -> Optional[float]:
     df = _assign_segments(df, measurement_range)
     df = _compute_xy_speed(df, fps)
     df.loc[df["segment_index"] < 0, "xy_px_speedpx"] = np.nan
-
-    ensure_detection_xy_speed_columns()
 
     # Persist speed for this run before baseline calculations.
     with sqlite3.connect(MAIN_DB_PATH) as conn:

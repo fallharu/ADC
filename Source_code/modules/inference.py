@@ -23,11 +23,10 @@ from .db_manager import (
     MAIN_DB_PATH,
     configure_connection,
     get_or_create_video_id,
-    get_or_create_class_id,
+    ensure_detection_columns,
     create_process_log,
     update_process_log,
     log_error,
-    init_db,
     delete_runs_for_video,
     get_manual_events_for_run,
     restore_manual_events,
@@ -52,6 +51,7 @@ MODEL_FILES_PATH = os.getenv("Model_files", "models").strip('"')
 OPT_FILES_PATH = os.getenv("Opt_files", "output").strip('"')
 
 VEHICLE_MODEL_FALLBACKS = [
+    "yolo26x.pt",
     "yolo11x.pt",
     "yolo11x6.pt",
     "yolov8x.pt",
@@ -65,6 +65,20 @@ TIRE_MODEL_FALLBACKS = [
 ]
 
 YOLO_DB_BUFFER_MB = int(os.getenv("YOLO_DB_BUFFER_MB", "1536"))
+BEST_TIRE_CLASS_KEYS = {
+    "tire",
+    "tyre",
+    "wheel",
+    "bicycle_tire",
+    "bicycle_tires",
+}
+BEST_EXCLUDED_CLASS_KEYS = {
+    "number_plate",
+    "numberplate",
+    "license_plate",
+    "licence_plate",
+    "plate",
+}
 
 
 def _atomic_write_json(path: str, payload: Dict[str, object]) -> None:
@@ -93,6 +107,123 @@ def _normalize_model_name(name: Optional[str]) -> Optional[str]:
         return None
     candidate = str(name).strip().strip('"').strip("'")
     return candidate or None
+
+
+def _read_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        print(f"[YOLO] Invalid {name}={raw!r}; using {default}")
+        return default
+
+
+def _read_optional_int_env(name: str, default: Optional[int] = None) -> Optional[int]:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        print(f"[YOLO] Invalid {name}={raw!r}; using {default}")
+        return default
+    return value if value > 0 else default
+
+
+def _normalize_class_label(name: Any) -> str:
+    return str(name or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _load_best_class_overrides() -> Dict[int, str]:
+    config_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "config", "best_model_classes.json")
+    )
+    if not os.path.exists(config_path):
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[YOLO] Failed to load best model class map: {exc}")
+        return {}
+
+    overrides: Dict[int, str] = {}
+    if isinstance(payload, dict):
+        for raw_id, raw_name in payload.items():
+            try:
+                cid = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            name = str(raw_name).strip()
+            if name:
+                overrides[cid] = name
+    return overrides
+
+
+BEST_CLASS_OVERRIDES = _load_best_class_overrides()
+
+
+def _iter_class_name_items(names_source: Any) -> Iterable[tuple[int, str]]:
+    if not names_source:
+        return []
+    if isinstance(names_source, dict):
+        items = names_source.items()
+    else:
+        items = enumerate(names_source)
+
+    normalized = []
+    for raw_id, raw_name in items:
+        try:
+            cid = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        name = str(raw_name).strip()
+        if name:
+            normalized.append((cid, name))
+    return normalized
+
+
+def _class_name_from_names(names_source: Any, class_id: int, fallback: Optional[str] = None) -> str:
+    raw_name = None
+    if isinstance(names_source, dict):
+        raw_name = names_source.get(class_id, names_source.get(str(class_id)))
+    elif names_source:
+        try:
+            raw_name = names_source[class_id]
+        except (IndexError, TypeError, KeyError):
+            raw_name = None
+
+    name = str(raw_name).strip() if raw_name is not None else ""
+    if name:
+        return name
+    if fallback:
+        return fallback
+    return str(class_id)
+
+
+def _resolve_class_ids_by_names(
+    names_source: Any,
+    allowed_keys: set[str],
+    excluded_keys: Optional[set[str]] = None,
+) -> tuple[List[int], List[str]]:
+    excluded_keys = excluded_keys or set()
+    target_ids: List[int] = []
+    found_names: List[str] = []
+    for cid, class_name in _iter_class_name_items(names_source):
+        key = _normalize_class_label(class_name)
+        if key in excluded_keys:
+            continue
+        if key in allowed_keys:
+            target_ids.append(cid)
+            found_names.append(class_name)
+    return target_ids, found_names
+
+
+def _is_best_tire_class(class_name: str) -> bool:
+    key = _normalize_class_label(class_name)
+    return key in BEST_TIRE_CLASS_KEYS and key not in BEST_EXCLUDED_CLASS_KEYS
 
 
 def _sanitize_track_value(value: Any) -> Optional[int]:
@@ -732,11 +863,13 @@ def process_video(
 
     run_id = None
     # conn = None # Handled by context manager
-    class_cache: Dict[str, int] = {}
     model_detection_counts: Dict[str, int] = defaultdict(int)
+    model_inference_settings: Dict[str, Dict[str, object]] = {}
+    model_track_stats: Dict[str, Dict[str, object]] = {}
     try:
         conn = sqlite3.connect(MAIN_DB_PATH)
         configure_connection(conn, mode="write", memory_mb=YOLO_DB_BUFFER_MB)
+        ensure_detection_columns(conn)
         conn.execute("PRAGMA foreign_keys=ON;")
         
         duration, fps, total_frames = get_video_properties(abs_video_path)
@@ -841,6 +974,18 @@ def process_video(
                 print(f"[YOLO] 警告: 手動追い越しイベントのリストアに失敗しました: {e}")
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        if os.getenv("YOLO_FORCE_CPU", "0") == "1":
+            device = "cpu"
+            print("[YOLO] YOLO_FORCE_CPU設定によりCPU推論を強制します。")
+        elif device == "cuda":
+            try:
+                # no kernel image エラー等を事前に捕捉するためダミー演算をテスト
+                _dummy = torch.randn(1, 1, 3, 3, device="cuda")
+                _dummy_conv = torch.nn.functional.conv2d(_dummy, torch.randn(1, 1, 1, 1, device="cuda"))
+            except Exception as e:
+                print(f"[YOLO] 警告: CUDA演算テストに失敗しました。CPUへフォールバックします: {e}")
+                device = "cpu"
+
         if device == "cuda":
             configure_cuda_memory_budget(0.8)
             cuda.empty_cache()
@@ -918,47 +1063,85 @@ def process_video(
             except (AttributeError, RuntimeError):
                 pass
 
+            is_best_model = "best" in model_name_lower
+            is_vehicle_detector = model_name_lower.startswith("yolo") and not is_best_model
+            base_conf = _read_float_env("YOLO_CONF", 0.3)
+            conf_env = "YOLO_TIRE_CONF" if is_best_model else "YOLO_VEHICLE_CONF"
+            conf_threshold = _read_float_env(conf_env, base_conf)
+            iou_threshold = _read_float_env("YOLO_IOU", 0.7)
+            base_imgsz = _read_optional_int_env("YOLO_IMGSZ")
+            imgsz_env = "YOLO_TIRE_IMGSZ" if is_best_model else "YOLO_VEHICLE_IMGSZ"
+            imgsz = _read_optional_int_env(imgsz_env, base_imgsz)
+
             inference_kwargs = tracker_kwargs.copy()
+            class_filter_names: List[str] = []
             if "best" in model_name_lower:
-                # ユーザー要望: ナンバープレート(ID:1)の検出自体を行わないようにフィルタ
-                # ID:0=Tire, ID:2=Bicycle_Tires
-                inference_kwargs["classes"] = [0, 2]
-                print(f"[YOLO] {model_name} は classes=[0, 2] (Tire, Bicycle_Tires) で推論します。")
+                target_ids, found_names = _resolve_class_ids_by_names(
+                    getattr(model, "names", {}),
+                    BEST_TIRE_CLASS_KEYS,
+                    BEST_EXCLUDED_CLASS_KEYS,
+                )
+                if not target_ids and BEST_CLASS_OVERRIDES:
+                    target_ids, found_names = _resolve_class_ids_by_names(
+                        BEST_CLASS_OVERRIDES,
+                        BEST_TIRE_CLASS_KEYS,
+                        BEST_EXCLUDED_CLASS_KEYS,
+                    )
+                if target_ids:
+                    inference_kwargs["classes"] = target_ids
+                    class_filter_names = found_names
+                    print(f"[YOLO] {model_name} classes={target_ids} {found_names}")
+                else:
+                    print(f"[YOLO] Warning: {model_name} tire class ids were not resolved; filtering by class name after inference")
             else:
                  # 標準モデル (yolov8x等) の場合
                  # class_filters.py で定義された許可クラスのみを推論対象にする
                  # これにより "person" (ID:0) 等のログ出力を抑制し、推論負荷を下げる
-                 allowed_names = vehicle_allowed_classes()
                  target_ids = []
                  found_names = []
                  
                  # model.names は {0: 'person', 1: 'bicycle', ...} の辞書
-                 if hasattr(model, "names"):
-                     for cid, cname in model.names.items():
-                         if cname.lower() in allowed_names:
-                             target_ids.append(cid)
-                             found_names.append(cname)
+                 for cid, cname in _iter_class_name_items(getattr(model, "names", {})):
+                     if is_vehicle_class(cname):
+                         target_ids.append(cid)
+                         found_names.append(cname)
                  
                  if target_ids:
                      inference_kwargs["classes"] = target_ids
+                     class_filter_names = found_names
                      print(f"[YOLO] {model_name} は以下のクラスのみ推論します: {found_names} (IDs: {target_ids})")
                  else:
                      # マッチするクラスが無い場合は全クラス推論 (あるいは警告)
+                     allowed_names = sorted(vehicle_allowed_classes())
                      print(f"[警告] {model_name} で許可クラス {allowed_names} に一致するクラスIDが見つかりませんでした。全クラスで推論します。")
 
-            results = model.track(
-                source=abs_video_path,
-                device=device,
-                stream=True,
-                conf=0.3,
-                persist=True,
-                batch=tuned_frames,
-                half=False,
-                **inference_kwargs,
-            )
+            track_call_kwargs = {
+                "source": abs_video_path,
+                "device": device,
+                "stream": True,
+                "conf": conf_threshold,
+                "iou": iou_threshold,
+                "persist": True,
+                "batch": tuned_frames,
+                "half": False,
+            }
+            if imgsz is not None:
+                track_call_kwargs["imgsz"] = imgsz
+
+            model_inference_settings[model_name] = {
+                "conf": conf_threshold,
+                "iou": iou_threshold,
+                "imgsz": imgsz,
+                "classes": list(inference_kwargs.get("classes", [])),
+                "class_names": class_filter_names,
+            }
+
+            results = model.track(**track_call_kwargs, **inference_kwargs)
 
             frame_num = 0
             missing_track_warning_emitted = False
+            model_track_box_count = 0
+            model_track_id_count = 0
             with torch.inference_mode():
                 for r in tqdm(results, total=total_frames, desc=f"推論中: {model_name}"):
                     frame_num += 1
@@ -979,6 +1162,8 @@ def process_video(
                     class_ids_int = r.boxes.cls.int().cpu().tolist()
                     confs = r.boxes.conf.cpu().tolist()
                     xyxys = r.boxes.xyxy.cpu().tolist()
+                    model_track_box_count += len(xyxys)
+                    model_track_id_count += sum(1 for track_id in track_ids if track_id is not None)
 
                     is_vehicle_detector = (
                         model_name_lower.startswith("yolo")
@@ -986,10 +1171,14 @@ def process_video(
                     )
 
                     for i in range(len(xyxys)):
-                        raw_class_name = r.names[class_ids_int[i]]
-                        class_name = str(raw_class_name).strip()
-                        if not class_name:
-                            class_name = str(raw_class_name)
+                        class_id = class_ids_int[i]
+                        class_name = _class_name_from_names(getattr(r, "names", {}), class_id)
+                        if is_best_model and BEST_CLASS_OVERRIDES:
+                            class_name = _class_name_from_names(
+                                BEST_CLASS_OVERRIDES,
+                                class_id,
+                                fallback=class_name,
+                            )
 
                         if class_name.lower() == "person":
                             continue
@@ -998,19 +1187,11 @@ def process_video(
                             continue
 
                         # ユーザー要望: 'best'モデルの場合はタイヤ関連クラスのみ保存する
-                        if "best" in model_name_lower:
-                            # 許可するクラス名リスト (表記ゆれ考慮)
-                            allowed_best_classes = ["tire", "tyre", "wheel", "bicycle_tire", "bicycle tire", "bicycle_tires", "bicycle tires"]
-                            if class_name.lower() not in allowed_best_classes:
+                        if is_best_model:
+                            if not _is_best_tire_class(class_name):
                                 continue
 
-                        cache_key = class_name.lower()
                         # ユーザー要望により独自IDではなくYOLOの生クラスIDを使用
-                        class_id = class_ids_int[i]
-                        # class_id = class_cache.get(cache_key)
-                        # if class_id is None:
-                        #     class_id = get_or_create_class_id(conn, class_name)
-                        #     class_cache[cache_key] = class_id
 
                         detections_buffer.append((
                             run_id,
@@ -1022,6 +1203,7 @@ def process_video(
                             xyxys[i][2],
                             xyxys[i][3],
                             model_name,
+                            class_name,
                             track_ids[i],
                             confs[i],
                         ))
@@ -1031,8 +1213,8 @@ def process_video(
                     if len(detections_buffer) >= buffer_limit:
                         conn.executemany(
                             """
-                            INSERT INTO Detection (run_id, video_id, class_id, frame_num, x1, y1, x2, y2, model_name, track_id, confidence)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO Detection (run_id, video_id, class_id, frame_num, x1, y1, x2, y2, model_name, class_name, track_id, confidence)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             detections_buffer,
                         )
@@ -1040,6 +1222,22 @@ def process_video(
 
             if device == "cuda":
                 cuda.empty_cache()
+
+            track_ratio = (
+                model_track_id_count / model_track_box_count
+                if model_track_box_count
+                else None
+            )
+            model_track_stats[model_name] = {
+                "boxes": model_track_box_count,
+                "with_track_id": model_track_id_count,
+                "ratio": track_ratio,
+            }
+            if is_vehicle_detector and model_track_box_count and model_track_id_count == 0:
+                raise RuntimeError(
+                    f"{model_name} returned detections but no track_id values. "
+                    "Check YOLO_TRACKER_CONFIG / Ultralytics tracking before post-processing."
+                )
 
             current_count = model_detection_counts.get(model_name, 0)
             if current_count:
@@ -1050,8 +1248,8 @@ def process_video(
         if detections_buffer:
             conn.executemany(
                 """
-                INSERT INTO Detection (run_id, video_id, class_id, frame_num, x1, y1, x2, y2, model_name, track_id, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO Detection (run_id, video_id, class_id, frame_num, x1, y1, x2, y2, model_name, class_name, track_id, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 detections_buffer,
             )
@@ -1071,6 +1269,14 @@ def process_video(
                 f.write("Detections by model:\n")
                 for model_name, count in model_detection_counts.items():
                     f.write(f"  - {model_name}: {count}\n")
+            if model_inference_settings:
+                f.write("Inference settings:\n")
+                for model_name, settings in model_inference_settings.items():
+                    f.write(f"  - {model_name}: {json.dumps(settings, ensure_ascii=False)}\n")
+            if model_track_stats:
+                f.write("Track ID stats:\n")
+                for model_name, stats in model_track_stats.items():
+                    f.write(f"  - {model_name}: {json.dumps(stats, ensure_ascii=False)}\n")
 
         return VideoProcessResult(
             run_id=run_id,
@@ -1204,6 +1410,8 @@ def process_video_folder(
             effective_alias = f"{base_alias}/{normalized_subdir}" if base_alias else normalized_subdir
 
         stored_alias = effective_alias or None
+
+        run_id = None
 
         result: Dict[str, Optional[str]] = {
             'video': video_path,

@@ -1490,31 +1490,49 @@ def overtake_photo_detail():
                 car_line_point = None
                 bike_line_point = None
 
-                if car_detection and car_detection.get("x1") is not None and car_detection.get("y2") is not None:
-                    car_measure_point = {
-                        "x": car_detection.get("x1"),
-                        "y": car_detection.get("y2"),
-                    }
+                car_source = "bbox_fallback"
+                if car_detection:
+                    c_mx = car_detection.get("measure_x")
+                    c_my = car_detection.get("measure_y")
+                    if c_mx is not None and c_my is not None:
+                        car_measure_point = {"x": c_mx, "y": c_my}
+                        car_source = "detection"
+                    elif car_detection.get("x1") is not None and car_detection.get("y2") is not None:
+                        car_measure_point = {"x": car_detection.get("x1"), "y": car_detection.get("y2")}
 
                 if car_detection and car_detection.get("x1") is not None and car_detection.get("y2") is not None:
                     car_point = {"x": car_detection.get("x1"), "y": car_detection.get("y2")}
                     if center_line:
-                        cx = get_line_x_at_y(car_detection.get("y2"), center_line)
+                        # Use measure point Y if available for line intersection, else bottom Y
+                        use_y = car_measure_point["y"] if car_measure_point else car_detection.get("y2")
+                        cx = get_line_x_at_y(use_y, center_line)
                         if cx is not None:
-                            car_line_point = {"x": cx, "y": car_detection.get("y2")}
+                            car_line_point = {"x": cx, "y": use_y}
 
-                if bike_detection and bike_detection.get("measure_x") is not None and bike_detection.get("measure_y") is not None:
-                    bike_measure_point = {
-                        "x": bike_detection.get("measure_x"),
-                        "y": bike_detection.get("measure_y"),
-                    }
+                bike_source = "bbox_fallback"
+                if bike_detection:
+                    b_mx = bike_detection.get("measure_x")
+                    b_my = bike_detection.get("measure_y")
+                    if b_mx is not None and b_my is not None:
+                        bike_measure_point = {"x": b_mx, "y": b_my}
+                        bike_source = "detection"
+                    elif bike_detection.get("measure_x") is not None and bike_detection.get("measure_y") is not None:
+                         # Fallback to existing measure fields if above check fails
+                        bike_measure_point = {"x": bike_detection.get("measure_x"), "y": bike_detection.get("measure_y")}
+                        bike_source = "detection"
+                    elif bike_detection.get("x1") is not None and bike_detection.get("y2") is not None:
+                         # Fallback to bbox
+                         bike_measure_point = {"x": bike_detection.get("x1"), "y": bike_detection.get("y2")}
 
-                if bike_detection and bike_detection.get("measure_x") is not None and bike_detection.get("measure_y") is not None:
-                    bike_point = {"x": bike_detection.get("measure_x"), "y": bike_detection.get("measure_y")}
+                if bike_detection and bike_detection.get("x1") is not None: # Ensure bike exists
+                    bike_point = {"x": bike_detection.get("measure_x") or bike_detection.get("x1"),
+                                  "y": bike_detection.get("measure_y") or bike_detection.get("y2")}
+
                     if calibration_data.get("right_line"):
-                        bx = get_line_x_at_y(bike_detection.get("measure_y"), calibration_data.get("right_line"))
+                        use_y = bike_measure_point["y"] if bike_measure_point else bike_detection.get("y2")
+                        bx = get_line_x_at_y(use_y, calibration_data.get("right_line"))
                         if bx is not None:
-                            bike_line_point = {"x": bx, "y": bike_detection.get("measure_y")}
+                            bike_line_point = {"x": bx, "y": use_y}
 
                 overlay_data = {
                     "car_point": car_point,
@@ -1523,6 +1541,8 @@ def overtake_photo_detail():
                     "bike_measure_point": bike_measure_point,
                     "car_center_line_point": car_line_point,
                     "bike_white_line_point": bike_line_point,
+                    "car_source": car_source,
+                    "bike_source": bike_source,
                 }
 
             if event_data:
@@ -1558,6 +1578,17 @@ def overtake_photo_detail():
                         (car_detection or {}).get("line_distance_m"),
                     )
             
+            # フレーム内の全Detectionを取得 (選択変更用)
+            all_detections = []
+            if run_id is not None:
+                all_det_sql = "SELECT d.auto_id, d.group_id, d.track_id, d.class_id, cm.class_name, d.confidence, d.x1, d.y1, d.x2, d.y2, d.measure_x, d.measure_y, d.speed_km_h, d.line_distance_m, d.lane_position_flag FROM Detection d LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id WHERE d.run_id = ? AND d.frame_num = ? ORDER BY d.auto_id"
+                all_rows = conn.execute(all_det_sql, (run_id, frame_num)).fetchall()
+                for r in all_rows:
+                    det = dict(r)
+                    if not det.get("class_name"):
+                        det["class_name"] = class_name_map.get(det["class_id"], "unknown")
+                    all_detections.append(det)
+
             # run_idから動画ファイル名も取得
             video_filename = None
             if run_id:
@@ -1581,6 +1612,7 @@ def overtake_photo_detail():
                 "event": event_data,
                 "car_detection": car_detection,
                 "bike_detection": bike_detection,
+                "all_detections": all_detections,
                 "outputs": {
                     "auto": bool(event_row),
                     "rerun": check_sheet_event is not None,

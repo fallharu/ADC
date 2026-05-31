@@ -1,0 +1,4 @@
+Checking database at: C:\Users\kurok\Downloads\G_ADC\ADC_08\db\my_app_data.db
+PASS: All required columns exist in Detection table.
+Attempting to run assign_xy_section_speed for run_id=100659...
+PASS: assign_xy_section_speed completed without schema error.

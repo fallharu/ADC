@@ -29,6 +29,55 @@ def _resolve_detection_columns(cursor: sqlite3.Cursor) -> list[str]:
     return ordered_columns + additional_columns
 
 
+def _table_exists(cursor: sqlite3.Cursor, table_name: str) -> bool:
+    row = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _build_detection_select(
+    cursor: sqlite3.Cursor,
+    select_columns: Sequence[str],
+) -> tuple[list[str], str, str]:
+    """Detection出力列とclass_name参照JOINを組み立てる。"""
+
+    output_columns = list(select_columns)
+    if "class_name" not in output_columns:
+        insert_at = (
+            output_columns.index("model_name") + 1
+            if "model_name" in output_columns
+            else len(output_columns)
+        )
+        output_columns.insert(insert_at, "class_name")
+
+    class_sources: list[str] = []
+    if "class_name" in select_columns:
+        class_sources.append("d.class_name")
+
+    joins: list[str] = []
+    if _table_exists(cursor, "ClassMaster"):
+        joins.append("LEFT JOIN ClassMaster cm ON d.class_id = cm.class_id")
+        class_sources.append("cm.class_name")
+    if _table_exists(cursor, "Class"):
+        joins.append("LEFT JOIN Class legacy_class ON d.class_id = legacy_class.class_id")
+        class_sources.append("legacy_class.class_name")
+
+    if len(class_sources) > 1:
+        class_expr = "COALESCE({})".format(", ".join(class_sources))
+    elif class_sources:
+        class_expr = class_sources[0]
+    else:
+        class_expr = "NULL"
+    select_exprs = [
+        f"{class_expr} AS class_name" if col == "class_name" else f"d.{col}"
+        for col in output_columns
+    ]
+
+    return output_columns, ", ".join(select_exprs), " ".join(joins)
+
+
 def create_all_save(run_id: int):
     load_dotenv()
 
@@ -49,11 +98,12 @@ def create_all_save(run_id: int):
         output_folder, _video_name = res[0], res[1]
 
         select_columns = _resolve_detection_columns(c)
+        output_headers, columns_clause, class_join_clause = _build_detection_select(c, select_columns)
 
-        columns_clause = ", ".join(select_columns)
         query = (
-            f"SELECT {columns_clause} FROM Detection "
-            "WHERE run_id = ? ORDER BY frame_num, auto_id"
+            f"SELECT {columns_clause} FROM Detection d "
+            f"{class_join_clause} "
+            "WHERE d.run_id = ? ORDER BY d.frame_num, d.auto_id"
         )
         rows = c.execute(query, (run_id,)).fetchall()
 
@@ -68,7 +118,7 @@ def create_all_save(run_id: int):
 
         with open(csv_path, mode="w", newline="", encoding="utf-8-sig") as f:
             writer = csv.writer(f)
-            writer.writerow(select_columns)
+            writer.writerow(output_headers)
             writer.writerows(rows)
 
         return csv_path
@@ -139,7 +189,8 @@ def create_combined_detection_csv(
         cursor = conn.cursor()
 
         select_columns = _resolve_detection_columns(cursor)
-        column_clause = ", ".join(f"d.{col}" for col in select_columns)
+        detection_headers, column_clause, class_join_clause = _build_detection_select(cursor, select_columns)
+        output_headers = detection_headers + ["video_filename"]
 
         metadata = cursor.execute(
             f"""
@@ -159,6 +210,7 @@ def create_combined_detection_csv(
             f"""
             SELECT {column_clause}, v.filename AS video_filename
             FROM Detection d
+            {class_join_clause}
             JOIN ProcessLog p ON d.run_id = p.run_id
             JOIN Video v ON p.video_id = v.video_id
             WHERE d.run_id IN ({placeholders})
@@ -183,11 +235,9 @@ def create_combined_detection_csv(
     combined_name = f"{stem}_detections_combined_{timestamp}.csv"
     combined_path = os.path.join(base_dir, combined_name)
 
-    header = select_columns + ["video_filename"]
-
     with open(combined_path, mode="w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.writer(fh)
-        writer.writerow(header)
+        writer.writerow(output_headers)
         writer.writerows(rows)
 
     return combined_path

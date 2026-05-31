@@ -140,16 +140,10 @@ class TrafficCounter:
                 trajectory = []
                 counts = {}  # Key: (line_index, object_type, direction), Value: count
                 
-                def get_vehicle_type(class_id):
-                    """Count using class_id only (YOLO results)."""
-                    if class_id in bicycle_ids:
-                        return '???'
-                    if class_id in car_ids:
-                        return '?'
-                    return '?'
+
 
                 for row in rows:
-                    obj_id, frame_num, x1, y1, x2, y2, class_id = row
+                    obj_id, frame_num, x1, y1, x2, y2, class_id, model_name = row
                     
                     cx = (x1 + x2) / 2
                     cy = (y1 + y2) / 2
@@ -224,11 +218,11 @@ class TrafficCounter:
         # クラス名を車両タイプに変換
         def get_vehicle_type(class_id):
             """Count using class_id only (YOLO results)."""
-            if class_id in bicycle_ids:
-                return '???'
-            if class_id in car_ids:
-                return '?'
-            return '?'
+            if class_id in self._bicycle_ids:
+                return '自転車'
+            if class_id in self._car_ids:
+                return '車'
+            return 'その他'
         
         object_type = get_vehicle_type(class_id)
         

@@ -293,230 +293,320 @@
                             <canvas id="modalOverlay"
                                 style="position: absolute; inset: 0; pointer-events: none;"></canvas>
                         </div>
-                        <div class="mt-2 small">
-                            <div class="fw-semibold mb-1">表示モード</div>
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input overlay-toggle" type="checkbox" id="overlayClearance"
-                                    checked>
-                                <label class="form-check-label" for="overlayClearance">離隔距離</label>
+                        <div class="mt-2 small border rounded p-2 bg-light">
+                            <div class="fw-semibold mb-1">表示設定</div>
+                            <div class="row g-1">
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayVehicleBox">
+                                        <label class="form-check-label" for="overlayVehicleBox">車両BBOX表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayTireBox">
+                                        <label class="form-check-label" for="overlayTireBox">タイヤBBOX表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayLeftLine" checked>
+                                        <label class="form-check-label" for="overlayLeftLine">白線表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayCenterLine" checked>
+                                        <label class="form-check-label" for="overlayCenterLine">中央線表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayLeftLineDistance" checked>
+                                        <label class="form-check-label" for="overlayLeftLineDistance">白線距離表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayCenterLineDistance" checked>
+                                        <label class="form-check-label" for="overlayCenterLineDistance">中央線距離表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayClearanceDistance" checked>
+                                        <label class="form-check-label" for="overlayClearanceDistance">離隔距離表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayLabels">
+                                        <label class="form-check-label" for="overlayLabels">ラベル表示</label>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input overlay-toggle" type="checkbox" id="overlayCenter">
-                                <label class="form-check-label" for="overlayCenter">中央線</label>
-                            </div>
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input overlay-toggle" type="checkbox" id="overlayWhite">
-                                <label class="form-check-label" for="overlayWhite">白線</label>
-                            </div>
-                        </div>
-                        <div class="text-center mt-2">
-                            <a id="modalImageLink" href="" target="_blank" class="btn btn-outline-primary btn-sm">
-                                <i class="bi bi-box-arrow-up-right me-1"></i>新しいタブで開く
-                            </a>
                         </div>
                     </div>
-                    <!-- 右側: データ表示 -->
-                    <div class="col-lg-6">
-                        <!-- ローディング -->
-                        <div id="detailLoading" class="text-center py-5">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2 text-muted">データを取得中...</p>
+
+                    <!-- 関連ID情報パネル -->
+                    <div class="mt-3 small border rounded p-2 bg-light">
+                        <div class="fw-semibold mb-1">関連ID情報</div>
+                        <div class="row g-1" id="trackInfoPanel">
+                            <div class="col-12 text-muted">データなし</div>
                         </div>
-                        <!-- エラー -->
-                        <div id="detailError" class="alert alert-danger d-none"></div>
-                        <!-- データ表示領域 -->
-                        <div id="detailContent" class="d-none">
-                            <!-- 基本情報 -->
-                            <div class="card mb-3">
-                                <div class="card-header bg-secondary text-white py-2">
-                                    <i class="bi bi-info-circle me-1"></i>基本情報
-                                </div>
-                                <div class="card-body py-2">
-                                    <table class="table table-sm mb-0">
-                                        <tbody>
-                                            <tr>
-                                                <th style="width: 40%;">フレーム番号</th>
-                                                <td id="infoFrameNum">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>Run ID</th>
-                                                <td id="infoRunId">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>動画ファイル</th>
-                                                <td id="infoVideoFilename">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>自動出力</th>
-                                                <td id="infoAutoOutput">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>再実行出力</th>
-                                                <td id="infoRerunOutput">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>手動出力</th>
-                                                <td id="infoManualOutput">-</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
+                    </div>
+
+                    <div class="text-center mt-2 d-flex justify-content-center gap-2">
+                        <a id="modalImageLink" href="" target="_blank" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>オリジナル
+                        </a>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="downloadPhotoWithOverlay()">
+                            <i class="bi bi-download me-1"></i>画像保存 (描画付き)
+                        </button>
+                    </div>
+                </div>
+                <!-- 右側: データ表示 -->
+                <div class="col-lg-6">
+                    <!-- ローディング -->
+                    <div id="detailLoading" class="text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">データを取得中...</p>
+                    </div>
+                    <!-- エラー -->
+                    <div id="detailError" class="alert alert-danger d-none"></div>
+                    <!-- データ表示領域 -->
+                    <div id="detailContent" class="d-none">
+                        <!-- 基本情報 -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-secondary text-white py-2">
+                                <i class="bi bi-info-circle me-1"></i>基本情報
                             </div>
-                            <!-- 追い越しイベント情報 -->
-                            <div class="card mb-3">
-                                <div class="card-header bg-danger text-white py-2">
-                                    <i class="bi bi-exclamation-triangle me-1"></i>追い越しイベント
-                                </div>
-                                <div class="card-body py-2">
-                                    <table class="table table-sm mb-0">
-                                        <tbody>
-                                            <tr>
-                                                <th style="width: 40%;">離隔距離</th>
-                                                <td id="eventClearance">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>接近距離</th>
-                                                <td id="eventApproach">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>白線距離</th>
-                                                <td id="eventLineDistance">-</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
+                            <div class="card-body py-2">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th style="width: 40%;">フレーム番号</th>
+                                            <td id="infoFrameNum">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>Run ID</th>
+                                            <td id="infoRunId">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>動画ファイル</th>
+                                            <td id="infoVideoFilename">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>自動出力</th>
+                                            <td id="infoAutoOutput">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>再実行出力</th>
+                                            <td id="infoRerunOutput">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>手動出力</th>
+                                            <td id="infoManualOutput">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
-                            <!-- 追い越し車 (車) -->
-                            <div class="card mb-3">
-                                <div class="card-header bg-warning py-2">
-                                    <i class="bi bi-car-front me-1"></i>追い越し車 (CAR)
-                                    <button class="btn btn-sm btn-outline-dark float-end" id="btnShowCarGroup">
-                                        <i class="bi bi-list-ul me-1"></i>グループ詳細
-                                    </button>
-                                </div>
-                                <div class="card-body py-2">
-                                    <table class="table table-sm mb-0">
-                                        <tbody>
-                                            <tr>
-                                                <th style="width: 40%;">グループID</th>
-                                                <td id="carGroupId">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>クラス</th>
-                                                <td id="carClassName">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>速度</th>
-                                                <td id="carSpeed">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>進行方向</th>
-                                                <td id="carDirection">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>離隔距離</th>
-                                                <td id="carClearance">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>白線距離</th>
-                                                <td id="carLineDistance">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>中央線判定</th>
-                                                <td id="carCenterLineStatus">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>白線判定</th>
-                                                <td id="carWhiteLineStatus">-</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                    <div class="mt-2">
-                                        <label class="form-label mb-1 small">中央線判定(編集)</label>
-                                        <select id="carCenterStatusSelect" class="form-select form-select-sm">
-                                            <option value="">-</option>
-                                            <option value="中央線越え">中央線越え</option>
-                                            <option value="中央線内側">中央線内側</option>
-                                        </select>
+                        </div>
+
+                        <!-- 検出選択 (Override) -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-dark text-white py-2">
+                                <i class="bi bi-hand-index-thumb me-1"></i>検出対象の選択 (BBOX変更)
+                            </div>
+                            <div class="card-body py-2">
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">追い越し車 (CAR)</label>
+                                        <select id="selectCarDetection" class="form-select form-select-sm"></select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">被追い越し車 (BIKE)</label>
+                                        <select id="selectBikeDetection" class="form-select form-select-sm"></select>
                                     </div>
                                 </div>
-                            </div>
-                            <!-- 被追い越し車 (自転車) -->
-                            <div class="card mb-3">
-                                <div class="card-header bg-info text-white py-2">
-                                    <i class="bi bi-bicycle me-1"></i>追い越され自転車 (BIKE)
-                                    <button class="btn btn-sm btn-outline-light float-end" id="btnShowBikeGroup">
-                                        <i class="bi bi-list-ul me-1"></i>グループ詳細
+                                <div class="mt-2 text-end">
+                                    <button class="btn btn-outline-secondary btn-sm"
+                                        onclick="resetDetectionSelection()">
+                                        <i class="bi bi-arrow-counterclockwise"></i> リセット
                                     </button>
                                 </div>
-                                <div class="card-body py-2">
-                                    <table class="table table-sm mb-0">
-                                        <tbody>
-                                            <tr>
-                                                <th style="width: 40%;">グループID</th>
-                                                <td id="bikeGroupId">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>クラス</th>
-                                                <td id="bikeClassName">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>速度</th>
-                                                <td id="bikeSpeed">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>進行方向</th>
-                                                <td id="bikeDirection">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>離隔距離</th>
-                                                <td id="bikeClearance">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>白線距離</th>
-                                                <td id="bikeLineDistance">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>中央線判定</th>
-                                                <td id="bikeCenterLineStatus">-</td>
-                                            </tr>
-                                            <tr>
-                                                <th>白線判定</th>
-                                                <td id="bikeWhiteLineStatus">-</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                    <div class="mt-2">
-                                        <label class="form-label mb-1 small">白線判定(編集)</label>
-                                        <select id="bikeWhiteStatusSelect" class="form-select form-select-sm">
-                                            <option value="">-</option>
-                                            <option value="白線越え">白線越え</option>
-                                            <option value="白線内側">白線内側</option>
-                                        </select>
-                                    </div>
+                            </div>
+                        </div>
+                        <!-- 追い越しイベント情報 -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-danger text-white py-2">
+                                <i class="bi bi-exclamation-triangle me-1"></i>追い越しイベント
+                            </div>
+                            <div class="card-body py-2">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th style="width: 40%;">離隔距離</th>
+                                            <td id="eventClearance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>接近距離</th>
+                                            <td id="eventApproach">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線距離</th>
+                                            <td id="eventLineDistance">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <!-- 追い越し車 (車) -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-warning py-2">
+                                <i class="bi bi-car-front me-1"></i>追い越し車 (CAR)
+                                <button class="btn btn-sm btn-outline-dark float-end" id="btnShowCarGroup">
+                                    <i class="bi bi-list-ul me-1"></i>グループ詳細
+                                </button>
+                            </div>
+                            <div class="card-body py-2">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th style="width: 40%;">グループID</th>
+                                            <td id="carGroupId">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>計測点ソース</th>
+                                            <td id="carSource">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>クラス</th>
+                                            <td id="carClassName">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>速度</th>
+                                            <td id="carSpeed">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>進行方向</th>
+                                            <td id="carDirection">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>離隔距離</th>
+                                            <td id="carClearance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線距離</th>
+                                            <td id="carLineDistance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>中央線判定</th>
+                                            <td id="carCenterLineStatus">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線判定</th>
+                                            <td id="carWhiteLineStatus">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <div class="mt-2">
+                                    <label class="form-label mb-1 small">中央線判定(編集)</label>
+                                    <select id="carCenterStatusSelect" class="form-select form-select-sm">
+                                        <option value="">-</option>
+                                        <option value="中央線越え">中央線越え</option>
+                                        <option value="中央線内側">中央線内側</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="text-center mb-3">
-                                <button type="button" class="btn btn-outline-primary btn-sm" id="btnSaveLineStatus">
-                                    <i class="bi bi-save me-1"></i>判定を保存
+                        </div>
+                        <!-- 被追い越し車 (自転車) -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-info text-white py-2">
+                                <i class="bi bi-bicycle me-1"></i>追い越され自転車 (BIKE)
+                                <button class="btn btn-sm btn-outline-light float-end" id="btnShowBikeGroup">
+                                    <i class="bi bi-list-ul me-1"></i>グループ詳細
                                 </button>
-                                <div id="saveStatusMsg" class="text-success mt-2 d-none">
-                                    <i class="bi bi-check-circle me-1"></i>保存しました
+                            </div>
+                            <div class="card-body py-2">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th style="width: 40%;">グループID</th>
+                                            <td id="bikeGroupId">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>計測点ソース</th>
+                                            <td id="bikeSource">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>クラス</th>
+                                            <td id="bikeClassName">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>速度</th>
+                                            <td id="bikeSpeed">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>進行方向</th>
+                                            <td id="bikeDirection">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>離隔距離</th>
+                                            <td id="bikeClearance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線距離</th>
+                                            <td id="bikeLineDistance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>中央線判定</th>
+                                            <td id="bikeCenterLineStatus">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線判定</th>
+                                            <td id="bikeWhiteLineStatus">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <div class="mt-2">
+                                    <label class="form-label mb-1 small">白線判定(編集)</label>
+                                    <select id="bikeWhiteStatusSelect" class="form-select form-select-sm">
+                                        <option value="">-</option>
+                                        <option value="白線越え">白線越え</option>
+                                        <option value="白線内側">白線内側</option>
+                                    </select>
                                 </div>
                             </div>
-                            <!-- コピーボタン -->
-                            <div class="text-center mt-3">
-                                <button type="button" class="btn btn-success" id="btnCopyData">
-                                    <i class="bi bi-clipboard me-1"></i>データをコピー (Excel形式)
-                                </button>
-                                <button type="button" class="btn btn-outline-danger ms-2" id="btnDeleteOvertake">
-                                    <i class="bi bi-trash me-1"></i>この追い越しを削除
-                                </button>
-                                <div id="copySuccess" class="text-success mt-2 d-none">
-                                    <i class="bi bi-check-circle me-1"></i>コピーしました！
-                                </div>
+                        </div>
+                        <div class="text-center mb-3">
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="btnSaveLineStatus">
+                                <i class="bi bi-save me-1"></i>判定を保存
+                            </button>
+                            <div id="saveStatusMsg" class="text-success mt-2 d-none">
+                                <i class="bi bi-check-circle me-1"></i>保存しました
+                            </div>
+                        </div>
+                        <!-- コピーボタン -->
+                        <div class="text-center mt-3">
+                            <button type="button" class="btn btn-success" id="btnCopyData">
+                                <i class="bi bi-clipboard me-1"></i>データをコピー (Excel形式)
+                            </button>
+                            <button type="button" class="btn btn-outline-danger ms-2" id="btnDeleteOvertake">
+                                <i class="bi bi-trash me-1"></i>この追い越しを削除
+                            </button>
+                            <div id="copySuccess" class="text-success mt-2 d-none">
+                                <i class="bi bi-check-circle me-1"></i>コピーしました！
                             </div>
                         </div>
                     </div>
@@ -524,6 +614,7 @@
             </div>
         </div>
     </div>
+</div>
 </div>
 
 <!-- グループデータモーダル -->
@@ -720,6 +811,10 @@
                 drawCalibrationOverlay(currentEventData);
             }
         });
+
+        // 検出選択変更
+        document.getElementById('selectCarDetection').addEventListener('change', (e) => updateStartDetection('car', e.target.value));
+        document.getElementById('selectBikeDetection').addEventListener('change', (e) => updateStartDetection('bike', e.target.value));
     });
 
     // 全カードのバッジを初期化（コピー回数表示 + API呼び出しでRUN_ID・データ状態取得）
@@ -913,6 +1008,16 @@
             document.getElementById('carDirection').textContent = car.travel_direction || '-';
             document.getElementById('carCenterLineStatus').textContent = determineLineStatus(car, 'center');
             document.getElementById('carWhiteLineStatus').textContent = determineLineStatus(car, 'white');
+
+            // 計測点ソース (Car)
+            const carSourceEl = document.getElementById('carSource');
+            if (carSourceEl) {
+                // overlayから取得、またはAPIレスポンスの構造次第。
+                // analysis.pyでは overlay_data に入っている。
+                const src = data.overlay?.car_source === 'detection' ? 'タイヤ検出' : 'BBOX推定';
+                carSourceEl.textContent = src;
+            }
+
             const bike = data.bike_detection || {};
             const clearanceM = event.clearance_distance_m ?? car.clearance_distance_m ?? bike.clearance_distance_m;
             document.getElementById('carClearance').textContent =
@@ -928,6 +1033,14 @@
             document.getElementById('bikeDirection').textContent = bike.travel_direction || '-';
             document.getElementById('bikeCenterLineStatus').textContent = determineLineStatus(bike, 'center');
             document.getElementById('bikeWhiteLineStatus').textContent = determineLineStatus(bike, 'white');
+
+            // 計測点ソース (Bike)
+            const bikeSourceEl = document.getElementById('bikeSource');
+            if (bikeSourceEl) {
+                const src = data.overlay?.bike_source === 'detection' ? 'タイヤ検出' : 'BBOX推定';
+                bikeSourceEl.textContent = src;
+            }
+
             document.getElementById('bikeClearance').textContent =
                 clearanceM != null ? `${clearanceM.toFixed(2)} m` : '-';
             document.getElementById('bikeLineDistance').textContent =
@@ -936,6 +1049,12 @@
 
             // Store full data for copy function
             currentEventData = data;
+
+            // 検出選択肢の更新
+            populateDetectionSelectors(data);
+
+            // Track情報パネル更新
+            updateTrackInfoPanel(data);
 
             // 編集用セレクト初期化
             setLineStatusSelectors(data);
@@ -1176,7 +1295,6 @@
 
     function drawCalibrationOverlay(data) {
         const calib = data.calibration;
-        const overlay = data.overlay || {};
         const img = document.getElementById('modalImage');
         const canvas = document.getElementById('modalOverlay');
         if (!calib || !img.naturalWidth || !img.naturalHeight) {
@@ -1195,39 +1313,103 @@
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        drawPolyline(ctx, calib.left_line, scaleX, scaleY, '#ffffff');
-        drawPolyline(ctx, calib.right_line, scaleX, scaleY, '#ffffff');
-        drawPolyline(ctx, calib.center_line, scaleX, scaleY, '#ff4d4d');
+        // Use shared drawing logic
+        performDraw(ctx, data, scaleX, scaleY);
+    }
 
+    function getOverlayMode() {
+        return {
+            vehicleBox: document.getElementById('overlayVehicleBox')?.checked,
+            tireBox: document.getElementById('overlayTireBox')?.checked,
+            leftLine: document.getElementById('overlayLeftLine')?.checked,
+            centerLine: document.getElementById('overlayCenterLine')?.checked,
+            leftLineDistance: document.getElementById('overlayLeftLineDistance')?.checked,
+            centerLineDistance: document.getElementById('overlayCenterLineDistance')?.checked,
+            clearanceDistance: document.getElementById('overlayClearanceDistance')?.checked,
+            labels: document.getElementById('overlayLabels')?.checked
+        };
+    }
+
+    function performDraw(ctx, data, scaleX, scaleY) {
+        const calib = data.calibration;
+        const overlay = data.overlay || {};
         const mode = getOverlayMode();
+
+        if (!calib) {
+            console.warn("No calibration data for overlay");
+            return;
+        }
+
+        // 1. Calibration Lines (White & Center)
+        if (mode.leftLine) {
+            drawPolyline(ctx, calib.left_line, scaleX, scaleY, '#ffffff');
+            drawPolyline(ctx, calib.right_line, scaleX, scaleY, '#ffffff');
+        }
+        if (mode.centerLine) {
+            drawPolyline(ctx, calib.center_line, scaleX, scaleY, '#ff4d4d');
+        }
+
+        // 2. Vehicle BBOXs
+        if (mode.vehicleBox) {
+            const car = data.car_detection;
+            const bike = data.bike_detection;
+            if (car) drawRect(ctx, car, scaleX, scaleY, '#ffc107', `Car ID:${car.auto_id}`, mode.labels); // Yellow/Orange
+            if (bike) drawRect(ctx, bike, scaleX, scaleY, '#0d6efd', `Bike ID:${bike.auto_id}`, mode.labels); // Blue
+        }
+
+        // 3. Tire BBOXs
+        if (mode.tireBox && data.all_detections) {
+            data.all_detections.forEach(det => {
+                const cls = (det.class_name || "").toLowerCase();
+                const isTire = cls.includes("tire") || cls.includes("wheel") || cls.includes("disk");
+                const isPlate = cls.includes("plate") || cls.includes("number");
+
+                if (isTire && !isPlate) {
+                    drawRect(ctx, det, scaleX, scaleY, '#fd7e14', `Tire ID:${det.auto_id}`, mode.labels); // Orange
+                }
+            });
+        }
+
+        // 4. Measurement Info (Lines & Points)
         const carMeasure = overlay.car_measure_point || overlay.car_point;
         const bikeMeasure = overlay.bike_measure_point || overlay.bike_point;
 
-        if (mode.clearance) {
+        if (mode.clearanceDistance && carMeasure && bikeMeasure) {
             drawLine(ctx, carMeasure, bikeMeasure, scaleX, scaleY, '#00d084');
             drawPoint(ctx, carMeasure, scaleX, scaleY, '#00d084');
             drawPoint(ctx, bikeMeasure, scaleX, scaleY, '#00d084');
+
+            let text = '';
+            if (data.event?.clearance_distance_cm != null) {
+                text = `離隔: ${data.event.clearance_distance_cm.toFixed(0)}cm`;
+            } else if (data.event?.clearance_distance_m != null) {
+                text = `離隔: ${data.event.clearance_distance_m.toFixed(2)}m`;
+            }
+            if (text) {
+                const mx = (carMeasure.x + bikeMeasure.x) / 2 * scaleX;
+                const my = (carMeasure.y + bikeMeasure.y) / 2 * scaleY;
+                drawText(ctx, text, mx, my - 10, '#00d084');
+            }
         }
 
-        if (mode.center) {
+        // Center Line Distance
+        if (mode.centerLineDistance && overlay.car_center_line_point && overlay.car_point) {
             drawLine(ctx, overlay.car_point, overlay.car_center_line_point, scaleX, scaleY, '#ff4d4d');
             drawPoint(ctx, overlay.car_point, scaleX, scaleY, '#ff4d4d');
             drawPoint(ctx, overlay.car_center_line_point, scaleX, scaleY, '#ff4d4d');
         }
 
-        if (mode.white) {
+        // White Line Distance
+        if (mode.leftLineDistance && overlay.bike_white_line_point && overlay.bike_point) {
             drawLine(ctx, overlay.bike_point, overlay.bike_white_line_point, scaleX, scaleY, '#ffffff');
             drawPoint(ctx, overlay.bike_point, scaleX, scaleY, '#ffffff');
             drawPoint(ctx, overlay.bike_white_line_point, scaleX, scaleY, '#ffffff');
-        }
-    }
 
-    function getOverlayMode() {
-        return {
-            clearance: document.getElementById('overlayClearance')?.checked,
-            center: document.getElementById('overlayCenter')?.checked,
-            white: document.getElementById('overlayWhite')?.checked
-        };
+            if (data.bike_detection?.line_distance_m != null) {
+                const distText = `白線: ${(data.bike_detection.line_distance_m * 100).toFixed(0)}cm`;
+                drawText(ctx, distText, overlay.bike_point.x * scaleX, (overlay.bike_point.y * scaleY) + 20, '#ffffff');
+            }
+        }
     }
 
     function drawPolyline(ctx, points, scaleX, scaleY, color) {
@@ -1269,6 +1451,26 @@
         ctx.moveTo(fromPoint.x * scaleX, fromPoint.y * scaleY);
         ctx.lineTo(toPoint.x * scaleX, toPoint.y * scaleY);
         ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawRect(ctx, det, scaleX, scaleY, color, label, showLabel) {
+        if (!det || det.x1 == null || det.y1 == null || det.x2 == null || det.y2 == null) return;
+        const x = det.x1 * scaleX;
+        const y = det.y1 * scaleY;
+        const w = (det.x2 - det.x1) * scaleX;
+        const h = (det.y2 - det.y1) * scaleY;
+
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+
+        if (showLabel && label) {
+            ctx.font = "11px sans-serif";
+            ctx.fillStyle = color;
+            ctx.fillText(label, x, y - 4);
+        }
         ctx.restore();
     }
 
@@ -1347,6 +1549,212 @@
             btn.disabled = false;
             btn.innerHTML = originalText;
         }
+    }
+
+    // -------------------------------------------------------------
+    // Additional Functions for Photo Output & Selection
+    // -------------------------------------------------------------
+
+    function populateDetectionSelectors(data) {
+        const carSelect = document.getElementById('selectCarDetection');
+        const bikeSelect = document.getElementById('selectBikeDetection');
+        carSelect.innerHTML = '';
+        bikeSelect.innerHTML = '';
+
+        const allDets = data.all_detections || [];
+        // Sort by ID
+        allDets.sort((a, b) => a.auto_id - b.auto_id);
+
+        allDets.forEach(det => {
+            const confidence = det.confidence != null ? det.confidence.toFixed(2) : '-';
+            const label = `ID:${det.auto_id} [${det.class_name || 'unknown'}] conf:${confidence}`;
+
+            // Car Option
+            const carOpt = document.createElement('option');
+            carOpt.value = det.auto_id;
+            carOpt.textContent = label;
+            carSelect.appendChild(carOpt);
+
+            // Bike Option
+            const bikeOpt = document.createElement('option');
+            bikeOpt.value = det.auto_id;
+            bikeOpt.textContent = label;
+            bikeSelect.appendChild(bikeOpt);
+        });
+
+        // Set current selection
+        if (data.car_detection) carSelect.value = data.car_detection.auto_id;
+        if (data.bike_detection) bikeSelect.value = data.bike_detection.auto_id;
+    }
+
+    function updateStartDetection(role, autoId) {
+        if (!currentEventData || !currentEventData.all_detections) return;
+
+        const newDet = currentEventData.all_detections.find(d => d.auto_id == autoId);
+        if (!newDet) return;
+
+        if (role === 'car') {
+            currentEventData.car_detection = newDet;
+            // Update displayed data
+            document.getElementById('carClassName').textContent = newDet.class_name;
+            document.getElementById('carSpeed').textContent = newDet.speed_km_h != null ? `${newDet.speed_km_h.toFixed(1)} km/h` : '-';
+        } else {
+            currentEventData.bike_detection = newDet;
+            // Update displayed data
+            document.getElementById('bikeClassName').textContent = newDet.class_name;
+            document.getElementById('bikeSpeed').textContent = newDet.speed_km_h != null ? `${newDet.speed_km_h.toFixed(1)} km/h` : '-';
+            if (newDet.line_distance_m != null) {
+                document.getElementById('bikeLineDistance').textContent = `${newDet.line_distance_m.toFixed(2)} m`;
+            }
+        }
+
+        // Re-calculate basic overlay points locally (simple version)
+        // Note: For full accuracy (re-calculating line distances etc), we might need backend logic,
+        // but for now we update the points used for drawing.
+        refreshOverlayPoints(currentEventData);
+
+        // Re-draw
+        drawCalibrationOverlay(currentEventData);
+    }
+
+
+
+    function updateTrackInfoPanel(data) {
+        const panel = document.getElementById('trackInfoPanel');
+        if (!data || !data.event) {
+            panel.innerHTML = '<div class="col-12 text-muted">データなし</div>';
+            return;
+        }
+
+        const carGroupId = data.car_group_id;
+        const bikeGroupId = data.bike_group_id;
+        const allDets = data.all_detections || [];
+
+        // ---------------------------------------------------------
+        // Car Info
+        // ---------------------------------------------------------
+        const carDets = allDets.filter(d => d.group_id == carGroupId);
+        const carMain = carDets.find(d => !isTireClass(d.class_name));
+        const carTires = carDets.filter(d => isTireClass(d.class_name));
+
+        const carTrackId = carMain ? carMain.track_id : '-';
+        const carTireIds = carTires.map(d => d.track_id).filter(id => id != null).join(', ') || '-';
+
+        // ---------------------------------------------------------
+        // Bike Info
+        // ---------------------------------------------------------
+        const bikeDets = allDets.filter(d => d.group_id == bikeGroupId);
+        const bikeMain = bikeDets.find(d => !isTireClass(d.class_name));
+        const bikeTires = bikeDets.filter(d => isTireClass(d.class_name));
+
+        const bikeTrackId = bikeMain ? bikeMain.track_id : '-';
+        const bikeTireIds = bikeTires.map(d => d.track_id).filter(id => id != null).join(', ') || '-';
+
+        // Build HTML
+        let html = '';
+
+        // Car Section
+        html += `<div class="col-12 mt-1 fw-bold text-warning"><i class="bi bi-car-front me-1"></i>Car (Group ${carGroupId})</div>`;
+        html += `<div class="col-12 ps-3">本体TrackID: ${carTrackId}</div>`;
+        html += `<div class="col-12 ps-3">タイヤTrackIDs: ${carTireIds}</div>`;
+
+        // Bike Section
+        html += `<div class="col-12 mt-2 fw-bold text-primary"><i class="bi bi-bicycle me-1"></i>Bike (Group ${bikeGroupId})</div>`;
+        html += `<div class="col-12 ps-3">本体TrackID: ${bikeTrackId}</div>`;
+        html += `<div class="col-12 ps-3">タイヤTrackIDs: ${bikeTireIds}</div>`;
+
+        panel.innerHTML = html;
+    }
+
+    function isTireClass(className) {
+        if (!className) return false;
+        const cls = className.toLowerCase();
+        const isTire = cls.includes("tire") || cls.includes("wheel") || cls.includes("disk");
+        const isPlate = cls.includes("plate") || cls.includes("number");
+        return isTire && !isPlate;
+    }
+
+    function refreshOverlayPoints(data) {
+        // Update overlay points based on new detections and current calibration
+        const calib = data.calibration;
+        if (!calib) return;
+
+        const car = data.car_detection;
+        const bike = data.bike_detection;
+        const overlay = data.overlay || {};
+        data.overlay = overlay;
+
+        if (car) {
+            overlay.car_point = { x: car.x1, y: car.y2 }; // Or whatever logic used in backend
+            overlay.car_measure_point = {
+                x: car.measure_x ?? car.x1,
+                y: car.measure_y ?? car.y2
+            };
+            // Simple center line projection if possible, else keep old or clear
+            // Since we can't easily run Python `get_line_x_at_y` here without logic duplication,
+            // we will try to preserve or clear if Y changed significantly.
+            // Ideally we should call an API to recalculate, but for visualization:
+            // Let's assume the user just wants to switch ID.
+
+            // If we want to be correct, we should probably fetch details again for the new pair?
+            // But that might change the "Event" context.
+            // For "Photo Output" visualization, we just use the new detection's measure points.
+        }
+        if (bike) {
+            overlay.bike_point = {
+                x: bike.measure_x ?? bike.x1,
+                y: bike.measure_y ?? bike.y2
+            };
+            overlay.bike_measure_point = {
+                x: bike.measure_x ?? bike.x1,
+                y: bike.measure_y ?? bike.y2
+            };
+        }
+    }
+
+    function resetDetectionSelection() {
+        if (currentImgPath) showOvertakeDetail(currentImgPath);
+    }
+
+    function drawText(ctx, text, x, y, color, bg = true) {
+        ctx.save();
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const metrics = ctx.measureText(text);
+        const padding = 4;
+
+        if (bg) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(x - metrics.width / 2 - padding, y - 10 - padding, metrics.width + padding * 2, 20 + padding * 2);
+        }
+
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+        ctx.restore();
+    }
+
+    function downloadPhotoWithOverlay() {
+        const img = document.getElementById('modalImage');
+        if (!img || !currentEventData) return;
+
+        // Create a new canvas to combine them
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+
+        // Draw image
+        ctx.drawImage(img, 0, 0);
+
+        performDraw(ctx, currentEventData, 1, 1);
+
+        // Trigger download
+        const link = document.createElement('a');
+        link.download = `overtake_output_${currentEventData.frame_num}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
     }
 
 </script>
