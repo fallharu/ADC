@@ -12,6 +12,7 @@ class LaneScaleDetailsTest(unittest.TestCase):
         self.right_mid_line = [[40.0, 0.0], [40.0, 100.0]]
 
     def test_anchor_points_include_mid_lines(self):
+        expected_ppm = 40.0 / 7.0
         details = lane_scale_details_at_y(
             50.0,
             self.left_line,
@@ -21,12 +22,11 @@ class LaneScaleDetailsTest(unittest.TestCase):
             right_inner_line=self.right_mid_line,
         )
         self.assertTrue(details.is_available)
-        # 全幅は40px -> 8m なので 5px/m
-        self.assertAlmostEqual(details.pixels_per_meter, 5.0)
-        self.assertAlmostEqual(details.left_pixels_per_meter, 5.0)
-        self.assertAlmostEqual(details.right_pixels_per_meter, 5.0)
-        self.assertAlmostEqual(details.left_mid_pixels_per_meter, 5.0)
-        self.assertAlmostEqual(details.right_mid_pixels_per_meter, 5.0)
+        self.assertAlmostEqual(details.pixels_per_meter, expected_ppm)
+        self.assertAlmostEqual(details.left_pixels_per_meter, expected_ppm)
+        self.assertAlmostEqual(details.right_pixels_per_meter, expected_ppm)
+        self.assertAlmostEqual(details.left_mid_pixels_per_meter, expected_ppm)
+        self.assertAlmostEqual(details.right_mid_pixels_per_meter, expected_ppm)
         anchors = details.anchor_points
         self.assertIsNotNone(anchors)
         self.assertGreaterEqual(len(anchors), 5)
@@ -35,6 +35,7 @@ class LaneScaleDetailsTest(unittest.TestCase):
         self.assertIn(40.0, xs)
 
     def test_scale_at_point_uses_segment_interpolation(self):
+        expected_ppm = 40.0 / 7.0
         scale_left = lane_scale_at_point(
             12.0,
             50.0,
@@ -62,9 +63,9 @@ class LaneScaleDetailsTest(unittest.TestCase):
             left_inner_line=self.left_mid_line,
             right_inner_line=self.right_mid_line,
         )
-        self.assertAlmostEqual(scale_left, 5.0)
-        self.assertAlmostEqual(scale_mid, 5.0)
-        self.assertAlmostEqual(scale_right, 5.0)
+        self.assertAlmostEqual(scale_left, expected_ppm)
+        self.assertAlmostEqual(scale_mid, expected_ppm)
+        self.assertAlmostEqual(scale_right, expected_ppm)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ from ..calibration_loader import load_calibration_json
 from ..white_line import get_line_x_at_y
 
 
-LANE_WIDTH_METERS = 8.0
+LANE_WIDTH_METERS = 7.0
 CM_PER_METER = 100.0
 VERTICAL_TOLERANCE_PX = 5.0
 
