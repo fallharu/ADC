@@ -1,0 +1,440 @@
+{% extends "base.html" %}
+
+{% block title %}高度分析{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+  <div>
+    <h2 class="mb-1"><i class="bi bi-graph-up-arrow me-2"></i>高度分析</h2>
+    <p class="text-muted mb-0">追い越しイベントの回帰分析、t検定、分布グラフをまとめて確認します。</p>
+  </div>
+  <a href="{{ url_for('main.overtake_gallery') }}" class="btn btn-outline-primary">
+    <i class="bi bi-images me-1"></i>写真ギャラリー
+  </a>
+</div>
+
+{% if options.error %}
+<div class="alert alert-warning">{{ options.error }}</div>
+{% endif %}
+
+<div class="card mb-4">
+  <div class="card-header">分析条件</div>
+  <div class="card-body">
+    <form id="advancedAnalysisForm" class="row g-3">
+      <div class="col-lg-3 col-md-6">
+        <label class="form-label fw-semibold">収集年度</label>
+        <div class="border rounded p-2" style="min-height: 120px; max-height: 180px; overflow-y: auto;">
+          {% for year in options.years %}
+          <div class="form-check">
+            <input class="form-check-input adv-year" type="checkbox" value="{{ year }}" id="advYear{{ year }}" checked>
+            <label class="form-check-label" for="advYear{{ year }}">{{ year }}年</label>
+          </div>
+          {% endfor %}
+          {% if not options.years %}
+          <div class="text-muted small">年度データなし</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-lg-3 col-md-6">
+        <label class="form-label fw-semibold">道路タイプ</label>
+        <div class="border rounded p-2" style="min-height: 120px; max-height: 180px; overflow-y: auto;">
+          {% for road_type in options.road_types %}
+          <div class="form-check">
+            <input class="form-check-input adv-road" type="checkbox" value="{{ road_type }}" id="advRoad{{ loop.index }}" checked>
+            <label class="form-check-label" for="advRoad{{ loop.index }}">{{ road_type }}</label>
+          </div>
+          {% endfor %}
+          {% if not options.road_types %}
+          <div class="text-muted small">道路タイプデータなし</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-lg-3 col-md-6">
+        <label class="form-label fw-semibold">方向・データ種別</label>
+        <div class="border rounded p-2">
+          <div class="form-check">
+            <input class="form-check-input adv-direction" type="checkbox" value="B" id="advDirB" checked>
+            <label class="form-check-label" for="advDirB">B</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input adv-direction" type="checkbox" value="F" id="advDirF" checked>
+            <label class="form-check-label" for="advDirF">F</label>
+          </div>
+          <label class="form-label small mt-2 mb-1" for="advSource">対象</label>
+          <select id="advSource" class="form-select form-select-sm">
+            <option value="both">自動 + 手動</option>
+            <option value="auto">自動検出のみ ({{ options.auto_count }})</option>
+            <option value="manual">手動追加のみ ({{ options.manual_count }})</option>
+          </select>
+        </div>
+      </div>
+      <div class="col-lg-3 col-md-6 d-flex flex-column justify-content-end">
+        <button type="submit" class="btn btn-primary btn-lg" id="runAdvancedAnalysisBtn">
+          <i class="bi bi-play-circle me-2"></i>分析を実行
+        </button>
+        <p class="form-text mb-0">表の数値をクリックすると、該当イベントの写真を開きます。</p>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="advancedAnalysisError" class="alert alert-danger d-none"></div>
+<div id="advancedAnalysisLoading" class="text-center py-5 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+  <div class="text-muted mt-2">分析中...</div>
+</div>
+
+<div id="advancedAnalysisResults" class="d-none">
+  <ul class="nav nav-tabs mb-3" id="advancedAnalysisTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#advOverview" type="button">概要</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#advGraphs" type="button">グラフ</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#advTests" type="button">回帰・t検定</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#advEvents" type="button">イベント</button>
+    </li>
+  </ul>
+
+  <div class="tab-content">
+    <div class="tab-pane fade show active" id="advOverview">
+      <div id="advSummaryCards" class="row g-3 mb-4"></div>
+      <div class="card mb-4">
+        <div class="card-header">道路タイプ・年度別</div>
+        <div class="card-body">
+          <div id="advGroupTable" class="table-responsive"></div>
+        </div>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="advGraphs">
+      <div class="row g-4">
+        <div class="col-xl-6">
+          <div class="border rounded p-3 h-100">
+            <h5 class="mb-3">離隔距離の分布</h5>
+            <div id="clearanceHistogram"></div>
+          </div>
+        </div>
+        <div class="col-xl-6">
+          <div class="border rounded p-3 h-100">
+            <h5 class="mb-3">速度 × 離隔距離</h5>
+            <div id="speedClearanceScatter"></div>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="border rounded p-3">
+            <h5 class="mb-3">グループ別 平均値</h5>
+            <div id="groupMeanChart"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="advTests">
+      <div class="card mb-4">
+        <div class="card-header">回帰分析</div>
+        <div class="card-body">
+          <div id="advRegressionTable" class="table-responsive"></div>
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="card-header">t検定</div>
+        <div class="card-body">
+          <div id="advTTestTable" class="table-responsive"></div>
+        </div>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="advEvents">
+      <div class="card mb-4">
+        <div class="card-header">イベント別データ</div>
+        <div class="card-body">
+          <div id="advEventTable" class="table-responsive"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  const metricLabels = {{ options.metrics|tojson|safe }};
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('advancedAnalysisForm');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      runAdvancedAnalysis();
+    });
+    runAdvancedAnalysis();
+  });
+
+  function selectedValues(selector) {
+    return Array.from(document.querySelectorAll(selector + ':checked')).map(el => el.value);
+  }
+
+  async function runAdvancedAnalysis() {
+    const loading = document.getElementById('advancedAnalysisLoading');
+    const results = document.getElementById('advancedAnalysisResults');
+    const error = document.getElementById('advancedAnalysisError');
+    const btn = document.getElementById('runAdvancedAnalysisBtn');
+    loading.classList.remove('d-none');
+    results.classList.add('d-none');
+    error.classList.add('d-none');
+    btn.disabled = true;
+
+    try {
+      const response = await fetch('/api/advanced_analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          years: selectedValues('.adv-year'),
+          road_types: selectedValues('.adv-road'),
+          directions: selectedValues('.adv-direction'),
+          source: document.getElementById('advSource').value
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || '分析に失敗しました');
+      }
+      renderAdvancedAnalysis(data);
+      results.classList.remove('d-none');
+    } catch (err) {
+      error.textContent = err.message;
+      error.classList.remove('d-none');
+    } finally {
+      loading.classList.add('d-none');
+      btn.disabled = false;
+    }
+  }
+
+  function fmt(value, digits = 2) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+    return Number(value).toFixed(digits);
+  }
+
+  function metricLink(value, url, suffix = '', digits = 2) {
+    const text = fmt(value, digits) + suffix;
+    if (!url || text === '-') return `<span>${text}</span>`;
+    return `<a href="${url}" target="_blank" class="fw-semibold text-decoration-none" title="写真を開く">${text}</a>`;
+  }
+
+  function renderAdvancedAnalysis(data) {
+    renderSummaryCards(data);
+    renderGroupTable(data);
+    renderRegressionTable(data);
+    renderTTestTable(data);
+    renderEventTable(data);
+    drawHistogram('clearanceHistogram', data.histograms.clearance_m || [], '離隔距離(m)');
+    drawScatter('speedClearanceScatter', data.scatter || [], '追い越し側速度(km/h)', '離隔距離(m)');
+    drawGroupMeanChart('groupMeanChart', data.groups || [], 'clearance_m');
+  }
+
+  function renderSummaryCards(data) {
+    const summaries = data.metric_summaries || {};
+    const firstPhoto = (data.events && data.events[0]) ? data.events[0].photo_url : null;
+    const cards = [
+      ['追い越しイベント', data.total_events, '', 0],
+      ['平均 離隔距離', summaries.clearance_m?.mean, ' m', 2],
+      ['平均 白線距離', summaries.line_m?.mean, ' m', 2],
+      ['平均 追い越し速度', summaries.car_speed_kmh?.mean, ' km/h', 1],
+    ];
+    document.getElementById('advSummaryCards').innerHTML = cards.map(([label, value, suffix, digits]) => `
+      <div class="col-md-3">
+        <div class="border rounded p-3 h-100 bg-light">
+          <div class="text-muted small">${label}</div>
+          <div class="fs-3">${metricLink(value, firstPhoto, suffix, digits)}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderGroupTable(data) {
+    const rows = (data.groups || []).map(group => `
+      <tr>
+        <td>${group.road_type ?? '-'}</td>
+        <td>${group.collection_year ?? '-'}</td>
+        <td>${metricLink(group.count, group.photo_url, '', 0)}</td>
+        <td>${metricLink(group.metrics.clearance_m?.mean, group.photo_url, ' m')}</td>
+        <td>${metricLink(group.metrics.line_m?.mean, group.photo_url, ' m')}</td>
+        <td>${metricLink(group.metrics.car_speed_kmh?.mean, group.photo_url, ' km/h', 1)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('advGroupTable').innerHTML = `
+      <table class="table table-sm table-striped align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>道路タイプ</th><th>年度</th><th>件数</th>
+            <th>平均離隔</th><th>平均白線距離</th><th>平均速度</th>
+          </tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="6" class="text-center text-muted">データなし</td></tr>'}</tbody>
+      </table>
+    `;
+  }
+
+  function renderRegressionTable(data) {
+    const rows = (data.regressions || []).map(reg => `
+      <tr>
+        <td>${metricLabels[reg.x_metric] || reg.x_metric}</td>
+        <td>${metricLabels[reg.y_metric] || reg.y_metric}</td>
+        <td>${metricLink(reg.count, reg.photo_url, '', 0)}</td>
+        <td>${fmt(reg.slope, 4)}</td>
+        <td>${fmt(reg.intercept, 4)}</td>
+        <td>${fmt(reg.r, 3)}</td>
+        <td>${fmt(reg.r2, 3)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('advRegressionTable').innerHTML = `
+      <table class="table table-sm table-bordered align-middle">
+        <thead class="table-light">
+          <tr><th>X</th><th>Y</th><th>n</th><th>傾き</th><th>切片</th><th>相関 r</th><th>決定係数 R2</th></tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="7" class="text-center text-muted">回帰分析に十分なデータがありません</td></tr>'}</tbody>
+      </table>
+    `;
+  }
+
+  function renderTTestTable(data) {
+    const rows = (data.tests || []).map(test => `
+      <tr>
+        <td>${test.metric_label}</td>
+        <td>${test.group_a} / ${test.group_b}</td>
+        <td>${test.n_a} / ${test.n_b}</td>
+        <td>${fmt(test.mean_a)} / ${fmt(test.mean_b)}</td>
+        <td>${fmt(test.t_stat, 4)}</td>
+        <td>${fmt(test.df, 1)}</td>
+        <td>${fmt(test.p_value, 5)}${test.p_value_approx ? ' <span class="badge bg-warning text-dark">近似</span>' : ''}</td>
+        <td>${fmt(test.effect_size_d, 3)}</td>
+        <td><span class="badge bg-${test.significant ? 'success' : 'secondary'}">${test.significant ? '有意差あり' : '有意差なし'}</span></td>
+      </tr>
+    `).join('');
+    document.getElementById('advTTestTable').innerHTML = `
+      <table class="table table-sm table-bordered align-middle">
+        <thead class="table-light">
+          <tr><th>指標</th><th>比較</th><th>n</th><th>平均</th><th>t</th><th>自由度</th><th>p値</th><th>効果量 d</th><th>判定</th></tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="9" class="text-center text-muted">t検定に十分な2群データがありません</td></tr>'}</tbody>
+      </table>
+    `;
+  }
+
+  function renderEventTable(data) {
+    const rows = (data.events || []).map(row => `
+      <tr>
+        <td>${row.source_type}</td>
+        <td>${metricLink(row.run_id, row.photo_url, '', 0)}</td>
+        <td>${metricLink(row.frame, row.photo_url, '', 0)}</td>
+        <td>${row.road_type ?? '-'}</td>
+        <td>${row.collection_year ?? '-'}</td>
+        <td>${metricLink(row.clearance_m, row.photo_url, ' m')}</td>
+        <td>${metricLink(row.line_m, row.photo_url, ' m')}</td>
+        <td>${metricLink(row.car_speed_kmh, row.photo_url, ' km/h', 1)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('advEventTable').innerHTML = `
+      <table class="table table-sm table-hover align-middle">
+        <thead class="table-light">
+          <tr><th>種別</th><th>Run</th><th>Frame</th><th>道路</th><th>年度</th><th>離隔</th><th>白線距離</th><th>速度</th></tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="8" class="text-center text-muted">イベントデータがありません</td></tr>'}</tbody>
+      </table>
+    `;
+  }
+
+  function svgWrap(inner, height = 280) {
+    return `<svg viewBox="0 0 720 ${height}" width="100%" height="${height}" role="img">${inner}</svg>`;
+  }
+
+  function drawHistogram(targetId, bins, label) {
+    const target = document.getElementById(targetId);
+    if (!bins.length) {
+      target.innerHTML = '<p class="text-muted">表示できるデータがありません。</p>';
+      return;
+    }
+    const maxCount = Math.max(...bins.map(b => b.count), 1);
+    const chartW = 620;
+    const chartH = 190;
+    const barW = chartW / bins.length;
+    const bars = bins.map((bin, idx) => {
+      const h = (bin.count / maxCount) * chartH;
+      const x = 70 + idx * barW;
+      const y = 230 - h;
+      return `<rect x="${x}" y="${y}" width="${Math.max(barW - 2, 1)}" height="${h}" fill="#0d6efd">
+        <title>${fmt(bin.start)}-${fmt(bin.end)}: ${bin.count}</title>
+      </rect>`;
+    }).join('');
+    target.innerHTML = svgWrap(`
+      <line x1="70" y1="230" x2="690" y2="230" stroke="#333"/>
+      <line x1="70" y1="40" x2="70" y2="230" stroke="#333"/>
+      ${bars}
+      <text x="360" y="268" text-anchor="middle" font-size="13">${label}</text>
+      <text x="20" y="135" transform="rotate(-90 20 135)" text-anchor="middle" font-size="13">件数</text>
+    `);
+  }
+
+  function drawScatter(targetId, points, xLabel, yLabel) {
+    const target = document.getElementById(targetId);
+    if (!points.length) {
+      target.innerHTML = '<p class="text-muted">表示できるデータがありません。</p>';
+      return;
+    }
+    const xs = points.map(p => p.x);
+    const ys = points.map(p => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const spanX = maxX - minX || 1;
+    const spanY = maxY - minY || 1;
+    const circles = points.map(p => {
+      const x = 70 + ((p.x - minX) / spanX) * 610;
+      const y = 230 - ((p.y - minY) / spanY) * 185;
+      const color = String(p.road_type || '').includes('widened') ? '#0d6efd' : '#198754';
+      return `<a href="${p.photo_url}" target="_blank"><circle cx="${x}" cy="${y}" r="4" fill="${color}" opacity="0.75">
+        <title>${xLabel}: ${fmt(p.x, 1)}, ${yLabel}: ${fmt(p.y)}</title>
+      </circle></a>`;
+    }).join('');
+    target.innerHTML = svgWrap(`
+      <line x1="70" y1="230" x2="690" y2="230" stroke="#333"/>
+      <line x1="70" y1="40" x2="70" y2="230" stroke="#333"/>
+      ${circles}
+      <text x="360" y="268" text-anchor="middle" font-size="13">${xLabel}</text>
+      <text x="20" y="135" transform="rotate(-90 20 135)" text-anchor="middle" font-size="13">${yLabel}</text>
+    `);
+  }
+
+  function drawGroupMeanChart(targetId, groups, metric) {
+    const target = document.getElementById(targetId);
+    const rows = groups
+      .map(group => ({ label: `${group.road_type}/${group.collection_year}`, value: group.metrics[metric]?.mean, url: group.photo_url }))
+      .filter(row => row.value !== null && row.value !== undefined);
+    if (!rows.length) {
+      target.innerHTML = '<p class="text-muted">表示できるデータがありません。</p>';
+      return;
+    }
+    const maxValue = Math.max(...rows.map(row => row.value), 1);
+    const chartW = 620;
+    const barW = chartW / rows.length;
+    const bars = rows.map((row, idx) => {
+      const h = (row.value / maxValue) * 185;
+      const x = 70 + idx * barW;
+      const y = 230 - h;
+      return `<a href="${row.url}" target="_blank">
+        <rect x="${x}" y="${y}" width="${Math.max(barW - 8, 2)}" height="${h}" fill="#6f42c1">
+          <title>${row.label}: ${fmt(row.value)}</title>
+        </rect>
+      </a>`;
+    }).join('');
+    target.innerHTML = svgWrap(`
+      <line x1="70" y1="230" x2="690" y2="230" stroke="#333"/>
+      <line x1="70" y1="40" x2="70" y2="230" stroke="#333"/>
+      ${bars}
+      <text x="360" y="268" text-anchor="middle" font-size="13">グループ</text>
+      <text x="20" y="135" transform="rotate(-90 20 135)" text-anchor="middle" font-size="13">${metricLabels[metric]}</text>
+    `);
+  }
+</script>
+{% endblock %}

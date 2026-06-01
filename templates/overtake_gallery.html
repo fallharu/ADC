@@ -815,7 +815,43 @@
         // 検出選択変更
         document.getElementById('selectCarDetection').addEventListener('change', (e) => updateStartDetection('car', e.target.value));
         document.getElementById('selectBikeDetection').addEventListener('change', (e) => updateStartDetection('bike', e.target.value));
+
+        setTimeout(openFocusedPhotoFromQuery, 250);
     });
+
+    function findCardByImagePath(imagePath) {
+        if (!imagePath) return null;
+        const normalized = imagePath.replace(/\\/g, '/');
+        return Array.from(document.querySelectorAll('.overtake-card'))
+            .find(card => (card.dataset.imgPath || '').replace(/\\/g, '/') === normalized) || null;
+    }
+
+    function findCardByEventParams(params) {
+        const frame = params.get('frame');
+        const carGroup = params.get('car_group_id') || params.get('car');
+        const bikeGroup = params.get('bike_group_id') || params.get('bike');
+        if (!frame || !carGroup || !bikeGroup) return null;
+        const frameText = String(parseInt(frame, 10)).padStart(6, '0');
+        const prefix = `overtake_${frameText}_car${parseInt(carGroup, 10)}_bike${parseInt(bikeGroup, 10)}_`;
+        return Array.from(document.querySelectorAll('.overtake-card')).find(card => {
+            const parts = (card.dataset.imgPath || '').replace(/\\/g, '/').split('/');
+            const basename = parts[parts.length - 1] || '';
+            return basename.startsWith(prefix);
+        }) || null;
+    }
+
+    function openFocusedPhotoFromQuery() {
+        const params = new URLSearchParams(window.location.search);
+        const imagePath = params.get('image') || params.get('filename');
+        const card = findCardByImagePath(imagePath) || findCardByEventParams(params);
+        if (!card) return;
+        card.classList.add('border', 'border-4', 'border-warning');
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const imgPath = card.dataset.imgPath;
+        if (imgPath) {
+            setTimeout(() => showOvertakeDetail(imgPath), 300);
+        }
+    }
 
     // 全カードのバッジを初期化（コピー回数表示 + API呼び出しでRUN_ID・データ状態取得）
     async function initializeCardBadges() {

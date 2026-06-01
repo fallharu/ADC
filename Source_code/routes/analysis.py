@@ -22,6 +22,10 @@ from ..modules.statistics_exporter import (
     generate_statistics_preview,
     export_statistics_workbook,
 )
+from ..modules.advanced_analysis import (
+    build_advanced_analysis,
+    get_advanced_analysis_options,
+)
 
 # Reuse checking logic if needed
 def _ensure_database_ready():
@@ -268,7 +272,7 @@ def statistics_view():
                 # Ideally flash a message
     
     return render_template(
-        "statistics.html", 
+        "statistics.html",
         title="Statistics",
         runs=runs,
         preview=preview,
@@ -277,6 +281,40 @@ def statistics_view():
         downward_only=downward_only,
         chart_json=chart_json
     )
+
+
+@main.route("/advanced_analysis")
+def advanced_analysis_view():
+    """回帰分析・t検定・グラフ表示用の分析画面。"""
+    try:
+        options = get_advanced_analysis_options()
+    except Exception as e:
+        current_app.logger.exception("Failed to load advanced analysis options")
+        options = {
+            "years": [],
+            "road_types": [],
+            "metrics": {},
+            "auto_count": 0,
+            "manual_count": 0,
+            "error": str(e),
+        }
+    return render_template(
+        "advanced_analysis.html",
+        title="高度分析",
+        options=options,
+    )
+
+
+@main.route("/api/advanced_analysis", methods=["POST"])
+def advanced_analysis_api():
+    """回帰分析・t検定・グラフ用データを返す。"""
+    try:
+        payload = request.get_json(silent=True) or {}
+        result = build_advanced_analysis(payload)
+        return jsonify(result)
+    except Exception as e:
+        current_app.logger.exception("Advanced analysis failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @main.route("/api/global_stats", methods=["GET"])
 def global_stats_api():
