@@ -31,6 +31,7 @@ from .db_manager import (
     get_manual_events_for_run,
     restore_manual_events,
     update_run_profile,
+    sync_normalized_detection_tables,
 )
 from .resource_monitor import (
     capture_system_metrics,
@@ -765,6 +766,18 @@ def run_postprocess_pipeline_sync(run_id: int) -> tuple[List[str], List[str], Li
             # Log to RAN_error.log
             _log_ran_error(f"Run ID: {run_id} | Step: {label}", str(exc), tb)
 
+    try:
+        with sqlite3.connect(MAIN_DB_PATH) as sync_conn:
+            configure_connection(sync_conn, mode="write")
+            sync_normalized_detection_tables(sync_conn, run_id=run_id)
+            sync_conn.commit()
+        completed.append("正規化DB同期")
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        tb = traceback.format_exc()
+        errors.append(f"正規化DB同期: {exc}")
+        _log_ran_error(f"Run ID: {run_id} | Step: 正規化DB同期", str(exc), tb)
+
     return completed, errors, skip_logs
 
 def regenerate_manual_snapshots(
@@ -1255,6 +1268,7 @@ def process_video(
             )
             detections_buffer.clear()
 
+        sync_normalized_detection_tables(conn, run_id=run_id, include_manual=False)
         conn.commit()
 
         end_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

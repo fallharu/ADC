@@ -5,6 +5,12 @@ import json
 from typing import Optional, Any, List, Dict, Union
 from datetime import datetime
 from pathlib import Path
+from .normalized_detection_schema import (
+    archive_database,
+    ensure_normalized_detection_schema,
+    record_schema_migration,
+    sync_normalized_detection_tables,
+)
 
 # --- Constants ---
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -1048,9 +1054,11 @@ def init_db():
                 payload_json TEXT
             )
         """)
+        ensure_normalized_detection_schema(conn)
         # Run table compatibility (view or alias)
         # Some old code query 'Run'
         conn.execute("CREATE VIEW IF NOT EXISTS Run AS SELECT * FROM ProcessLog")
+        conn.commit()
 
 def get_or_create_video_id(conn, filename, duration, fps, source_path=None, road_type=None, collection_year=None):
     cur = conn.cursor()
@@ -1108,9 +1116,16 @@ def delete_runs_for_video(conn, video_id):
     placeholders = ','.join('?' for _ in run_ids)
     
     tables_to_clean = [
-        "Detection", 
-        "OvertakeEvents", 
-        "ManualOvertakeEvents", 
+        "ManualDetectionOverrides",
+        "DetectionMetrics",
+        "DetectionRaw",
+        "ManualOvertakeContext",
+        "ManualOvertakeContextBacklog",
+        "ManualContextBacklog",
+        "ManualOvertakeTimeline",
+        "Detection",
+        "OvertakeEvents",
+        "ManualOvertakeEvents",
         "TrafficCount",
         # Add other tables if they have run_id FK
     ]
@@ -3261,6 +3276,17 @@ def reset_run_records():
             c = conn.cursor()
             # 外部キー制約により、ProcessLogを削除するとDetectionも削除される
             # ただし、安全のため明示的に削除する
+            for table in (
+                "ManualDetectionOverrides",
+                "DetectionMetrics",
+                "DetectionRaw",
+                "ManualOvertakeContext",
+                "ManualOvertakeContextBacklog",
+                "ManualContextBacklog",
+                "ManualOvertakeTimeline",
+            ):
+                if _table_exists(conn, table):
+                    c.execute(f"DELETE FROM {table}")
             c.execute("DELETE FROM Detection")
             c.execute("DELETE FROM ProcessLog")
             conn.commit()

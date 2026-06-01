@@ -33,6 +33,7 @@ from .modules.db_manager import (
     ensure_manual_overtake_event_columns,
     ensure_overtake_event_columns,
     ensure_manual_annotation_schema,
+    ensure_normalized_detection_schema,
     MAIN_DB_PATH,
 )
 
@@ -42,6 +43,7 @@ with app.app_context():
         ensure_detection_columns(conn)
         ensure_manual_overtake_event_columns(conn)
         ensure_overtake_event_columns(conn)
+        ensure_normalized_detection_schema(conn)
         print("[OK] Database migration completed: all schema columns ensured")
     ensure_manual_annotation_schema()  # 内部でDB接続を管理
     
