@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import math
+from typing import Any, Mapping, Optional
+
+
 def _float_or_none(value: Any) -> Optional[float]:
     try:
         if value is None:
@@ -66,3 +72,4 @@ def _manual_event_detection_from_prefix(
 
 
 def _collect_tire_bboxes(event: Mapping[str, Any]) -> dict[str, list[tuple[int, int, int, int]]]:
+    return {}

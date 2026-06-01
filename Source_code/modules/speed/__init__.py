@@ -73,13 +73,14 @@ def assign_kinematics(run_id: int):
         fps = fps_result[0] if fps_result and fps_result[0] else 30.0
 
         df = pd.read_sql_query(
-            f"""
+            """
             SELECT auto_id, track_id, frame_num, group_id, x1, x2, y1, y2
             FROM Detection
-            WHERE run_id = {run_id} AND track_id IS NOT NULL AND model_name != 'best'
+            WHERE run_id = ? AND track_id IS NOT NULL AND model_name != 'best'
             ORDER BY track_id, frame_num
         """,
             conn,
+            params=(run_id,),
         )
 
     if df.empty:

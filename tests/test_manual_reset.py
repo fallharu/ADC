@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import types
 import unittest
+import contextlib
 
 import sys
 
@@ -19,7 +20,7 @@ class ManualOvertakeResetTest(unittest.TestCase):
         self.tmp_db.close()
         self.original_path = db_manager.MAIN_DB_PATH
         db_manager.MAIN_DB_PATH = self.tmp_db.name
-        with sqlite3.connect(db_manager.MAIN_DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(db_manager.MAIN_DB_PATH)) as conn:
             conn.execute("PRAGMA foreign_keys=OFF")
             conn.execute(
                 "CREATE TABLE ProcessLog (run_id INTEGER PRIMARY KEY, calibration_profile TEXT)"
@@ -70,7 +71,7 @@ class ManualOvertakeResetTest(unittest.TestCase):
         events_deleted, detections_reset = db_manager.reset_manual_overtake_for_runs([1])
         self.assertGreaterEqual(events_deleted, 1)
         self.assertGreaterEqual(detections_reset, 1)
-        with sqlite3.connect(db_manager.MAIN_DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(db_manager.MAIN_DB_PATH)) as conn:
             event_count = conn.execute("SELECT COUNT(*) FROM ManualOvertakeEvents").fetchone()[0]
             context_count = conn.execute("SELECT COUNT(*) FROM ManualOvertakeContext").fetchone()[0]
             timeline_count = conn.execute("SELECT COUNT(*) FROM ManualOvertakeTimeline").fetchone()[0]
@@ -84,7 +85,7 @@ class ManualOvertakeResetTest(unittest.TestCase):
 
     def test_reset_manual_overtake_handles_large_batches(self):
         run_ids = list(range(1, 1205))
-        with sqlite3.connect(db_manager.MAIN_DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(db_manager.MAIN_DB_PATH)) as conn:
             cursor = conn.cursor()
             for rid in run_ids[1:]:  # setUp ですでに Run1 分を作成済み
                 cursor.execute("INSERT INTO Detection (run_id) VALUES (?)", (rid,))
@@ -110,7 +111,7 @@ class ManualOvertakeResetTest(unittest.TestCase):
         self.assertGreaterEqual(events_deleted, len(run_ids))
         self.assertGreaterEqual(detections_reset, len(run_ids))
 
-        with sqlite3.connect(db_manager.MAIN_DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(db_manager.MAIN_DB_PATH)) as conn:
             remaining_events = conn.execute("SELECT COUNT(*) FROM ManualOvertakeEvents").fetchone()[0]
             remaining_context = conn.execute("SELECT COUNT(*) FROM ManualOvertakeContext").fetchone()[0]
             remaining_timeline = conn.execute("SELECT COUNT(*) FROM ManualOvertakeTimeline").fetchone()[0]
@@ -125,7 +126,7 @@ class ManualOvertakeResetTest(unittest.TestCase):
 
     def test_clear_manual_run_progress_handles_large_batches(self):
         run_ids = list(range(1, 1205))
-        with sqlite3.connect(db_manager.MAIN_DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(db_manager.MAIN_DB_PATH)) as conn:
             db_manager.ensure_manual_run_progress_columns(conn)
             cursor = conn.cursor()
             timestamp = "2025-01-01T00:00:00"
@@ -140,7 +141,7 @@ class ManualOvertakeResetTest(unittest.TestCase):
         deleted = db_manager.clear_manual_run_progress(run_ids)
         self.assertEqual(deleted, len(run_ids))
 
-        with sqlite3.connect(db_manager.MAIN_DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(db_manager.MAIN_DB_PATH)) as conn:
             remaining = conn.execute("SELECT COUNT(*) FROM ManualRunProgress").fetchone()[0]
 
         self.assertEqual(remaining, 0)

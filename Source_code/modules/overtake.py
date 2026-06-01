@@ -60,6 +60,13 @@ _OVERTAKE_EVENT_INSERT_SQL = (
 load_dotenv()
 
 
+def _max_event_clearance_m() -> float:
+    try:
+        return float(os.getenv("OVERTAKE_MAX_CLEARANCE_M", "10.0"))
+    except (TypeError, ValueError):
+        return 10.0
+
+
 def _resolve_aliases(env_key: str, defaults: str) -> set[str]:
     raw = os.getenv(env_key, defaults)
     return {token.strip().lower() for token in raw.split(",") if token.strip()}
@@ -80,6 +87,15 @@ def _safe_float(value) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     if not np.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _safe_event_distance_m(value) -> Optional[float]:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return None
+    if numeric < 0 or numeric > _max_event_clearance_m():
         return None
     return numeric
 
@@ -355,7 +371,7 @@ def _export_overtake_snapshots(
     cap.release()
 
     if created:
-        print(f"✅ [assign_overtake] 追い越しスナップショット {created} 枚を以下に保存しました:\n   📂 {snapshot_dir}")
+        print(f"[assign_overtake] 追い越しスナップショット {created} 枚を保存しました: {snapshot_dir}")
     else:
         print(f"[assign_overtake] スナップショットリクエスト {len(snapshot_requests)} 件に対し、生成された画像は 0 件でした。")
 
@@ -930,8 +946,8 @@ def assign_overtake(run_id: int) -> int:
                 # ユーザー要望: 離隔距離は「接近距離」を使用する
                 # そのため、OvertakeEventsテーブルの clearance カラムにも approach の値をセットする
                 approach_px = _safe_float(bike_row.get("approach_distance_px"))
-                approach_m = _safe_float(bike_row.get("approach_distance_m"))
-                
+                approach_m = _safe_event_distance_m(bike_row.get("approach_distance_m"))
+
                 # cm換算
                 approach_cm = None
                 if approach_m is not None:

@@ -10,6 +10,7 @@ matplotlib.use('Agg') # Backend for saving files without UI
 
 # ADC_08 specific imports
 from ..modules.db_manager import get_db_connection, get_run_video_info
+from ..modules.path_security import IMAGE_EXTENSIONS, PathValidationError, resolve_allowed_file
 from ..modules.white_line import get_line_x_at_y, calculate_metric_x_from_lines
 
 # Blueprint definition
@@ -448,12 +449,15 @@ def verify_calibration():
 @verify_bp.route('/api/verify_image', methods=['GET'])
 def verify_image():
     path = request.args.get('path')
-    if not path:
-        return "Path required", 400
-    
-    if "output" not in path:
-        return "Invalid path", 403
-        
-    directory = os.path.dirname(path)
-    filename = os.path.basename(path)
+    try:
+        resolved_path = resolve_allowed_file(
+            path,
+            allowed_extensions=IMAGE_EXTENSIONS,
+            upload_folder=current_app.config.get("UPLOAD_FOLDER"),
+        )
+    except PathValidationError as exc:
+        return exc.message, exc.status_code
+
+    directory = str(resolved_path.parent)
+    filename = resolved_path.name
     return send_from_directory(directory, filename)

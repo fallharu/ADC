@@ -72,10 +72,6 @@ def generate_summary_csv(db_path: str = MAIN_DB_PATH) -> bytes:
         if 'approach_distance_m' in df.columns:
             df['approach_distance_m'] = pd.to_numeric(df['approach_distance_m'], errors='coerce').round(4)
 
-        # Fallback: Use approach_distance_m for clearance_distance_m if null (User Requirement aligned with overtake.py)
-        if 'clearance_distance_m' in df.columns and 'approach_distance_m' in df.columns:
-             df['clearance_distance_m'] = df['clearance_distance_m'].fillna(df['approach_distance_m'])
-        
         # Calculate/Fill clearance_distance_cm
         if 'clearance_distance_cm' in df.columns:
             # If still null, calc from m

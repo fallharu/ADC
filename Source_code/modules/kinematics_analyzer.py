@@ -30,12 +30,12 @@ def assign_kinematics(run_id: int):
         fps_result = conn.execute(fps_sql, (run_id,)).fetchone()
         fps = fps_result[0] if fps_result and fps_result[0] else 30.0
 
-        df = pd.read_sql_query(f"""
+        df = pd.read_sql_query("""
             SELECT auto_id, track_id, frame_num, group_id, x1, x2, y1, y2, model_name, travel_direction
             FROM Detection
-            WHERE run_id = {run_id} AND track_id IS NOT NULL
+            WHERE run_id = ? AND track_id IS NOT NULL
             ORDER BY track_id, frame_num
-        """, conn)
+        """, conn, params=(run_id,))
 
     if df.empty:
         print(f"Run ID {run_id}: 運動学情報の計算対象データがありません。")
@@ -110,9 +110,7 @@ def assign_kinematics(run_id: int):
             high = y_scale_positions[i + 1]
             if min(low, high) <= y <= max(low, high):
                 return y_ppm_intervals[i]
-        if y > y_scale_positions[-1]:
-            return y_ppm_intervals[-1]
-        return y_ppm_intervals[0]
+        return None
     
     tyre_points = compute_front_right_tire_points(
         df[df['model_name'] == 'best'],

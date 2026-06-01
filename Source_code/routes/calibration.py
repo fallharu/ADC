@@ -32,6 +32,12 @@ from ..modules.db_manager import MAIN_DB_PATH
 
 from ..modules.folder_utils import find_source_video_path
 
+from ..modules.path_security import (
+    PathValidationError,
+    VIDEO_EXTENSIONS,
+    resolve_allowed_file,
+)
+
 
 
 from dotenv import load_dotenv
@@ -1047,11 +1053,17 @@ def calibration_check_thumbnail_api():
 def calibration_check_file_thumbnail_api():
     """個別動画ファイルのサムネイル画像を返す（100フレーム目、リサイズ済み）"""
     video_path = request.args.get("video_path", "")
-    
-    if not video_path or not os.path.exists(video_path):
-        # 1x1 transparent PNG fallback
-        fallback = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
-        return send_file(io.BytesIO(fallback), mimetype='image/png')
+
+    try:
+        video_path = str(
+            resolve_allowed_file(
+                video_path,
+                allowed_extensions=VIDEO_EXTENSIONS,
+                upload_folder=current_app.config.get("UPLOAD_FOLDER"),
+            )
+        )
+    except PathValidationError as exc:
+        return jsonify({"error": exc.message}), exc.status_code
 
     try:
         cap = cv2.VideoCapture(video_path)
@@ -1096,9 +1108,17 @@ def calibration_check_file_preview_api():
     
     if not video_path:
         return jsonify({"error": "動画パスが指定されていません"}), 400
-    
-    if not os.path.exists(video_path):
-        return jsonify({"error": f"動画ファイルが見つかりません: {video_path}"}), 404
+
+    try:
+        video_path = str(
+            resolve_allowed_file(
+                video_path,
+                allowed_extensions=VIDEO_EXTENSIONS,
+                upload_folder=current_app.config.get("UPLOAD_FOLDER"),
+            )
+        )
+    except PathValidationError as exc:
+        return jsonify({"error": exc.message}), exc.status_code
     
     filename = os.path.basename(video_path)
     
@@ -1951,7 +1971,14 @@ def _invalidate_thumbnail_cache_for_runs(run_ids):
 # --- Calibration Editor API ---
 
 def _get_video_path_calib(run_id, path_hint=None):
-    if path_hint: return path_hint
+    if path_hint:
+        return str(
+            resolve_allowed_file(
+                path_hint,
+                allowed_extensions=VIDEO_EXTENSIONS,
+                upload_folder=current_app.config.get("UPLOAD_FOLDER"),
+            )
+        )
     if not run_id: return None
     path = None
     if os.path.exists(MAIN_DB_PATH):
@@ -1968,12 +1995,23 @@ def _get_video_path_calib(run_id, path_hint=None):
                 row = cursor.fetchone()
                 if row: path = row[0]
         except: pass
-    return path
+    if not path:
+        return None
+    return str(
+        resolve_allowed_file(
+            path,
+            allowed_extensions=VIDEO_EXTENSIONS,
+            upload_folder=current_app.config.get("UPLOAD_FOLDER"),
+        )
+    )
 
 @main.route("/api/calibration/<int:run_id>/metadata")
 def calibration_metadata(run_id):
     path_hint = request.args.get("path_hint")
-    path = _get_video_path_calib(run_id, path_hint)
+    try:
+        path = _get_video_path_calib(run_id, path_hint)
+    except PathValidationError as exc:
+        return jsonify({"error": exc.message}), exc.status_code
     
     if not path or not os.path.exists(path):
         current_app.logger.warning(f"Video not found for run {run_id}, path {path}")
@@ -1998,7 +2036,10 @@ def calibration_metadata(run_id):
 def calibration_frame(run_id):
     path_hint = request.args.get("path_hint")
     frame_idx = request.args.get("frame", 0, type=int)
-    path = _get_video_path_calib(run_id, path_hint)
+    try:
+        path = _get_video_path_calib(run_id, path_hint)
+    except PathValidationError as exc:
+        return exc.message, exc.status_code
     
     if not path or not os.path.exists(path):
         return "Video/File not found", 404

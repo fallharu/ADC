@@ -106,15 +106,7 @@ def prepare_vertical_context(df: pd.DataFrame, scale_meta: dict) -> VerticalCont
                     for start_y, end_y, ppm_value in intervals:
                         if start_y <= y_value <= end_y or end_y <= y_value <= start_y:
                             return ppm_value
-                    first_start, first_end, first_ppm = intervals[0]
-                    last_start, last_end, last_ppm = intervals[-1]
-                    min_first = min(first_start, first_end)
-                    max_last = max(last_start, last_end)
-                    if y_value < min_first:
-                        return first_ppm
-                    if y_value > max_last:
-                        return last_ppm
-                    return intervals[0][2]
+                    return np.nan
 
                 base_y = df["smooth_center_y"].fillna(df["center_y"])
                 vertical_ppm_series = base_y.apply(get_local_scale)

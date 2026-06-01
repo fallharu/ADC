@@ -205,7 +205,21 @@ def configure_connection(conn: sqlite3.Connection, mode: str = "default", memory
     """
     cache_mb = memory_mb if memory_mb is not None else SQLITE_CACHE_MB
     
-    conn.execute("PRAGMA journal_mode=WAL")
+    enable_wal = True
+    try:
+        db_path_row = conn.execute("PRAGMA database_list").fetchone()
+        db_path = db_path_row[2] if db_path_row and len(db_path_row) > 2 else ""
+        if db_path:
+            resolved_db_path = Path(db_path).resolve(strict=False)
+            try:
+                resolved_db_path.relative_to(_PROJECT_ROOT)
+            except ValueError:
+                enable_wal = False
+    except sqlite3.Error:
+        enable_wal = True
+
+    if enable_wal:
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute(f"PRAGMA cache_size={-1024 * cache_mb}")  # Negative value = KB
     conn.execute("PRAGMA foreign_keys=ON")
@@ -488,6 +502,75 @@ def ensure_manual_annotation_schema(conn=None):
     try:
         c = conn.cursor()
 
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ManualOvertakeEvents (
+                manual_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER,
+                frame_num INTEGER,
+                video_time_s REAL,
+                overtaker_group_id INTEGER,
+                overtaker_track_id INTEGER,
+                overtaker_class_name TEXT,
+                overtaker_speed_km_h REAL,
+                overtaker_pixel_speed REAL,
+                overtaker_pixel_speed_frame REAL,
+                overtaken_group_id INTEGER,
+                overtaken_track_id INTEGER,
+                overtaken_class_name TEXT,
+                overtaken_speed_km_h REAL,
+                overtaken_pixel_speed REAL,
+                overtaken_pixel_speed_frame REAL,
+                approach_distance_m REAL,
+                approach_distance_px REAL,
+                clearance_distance_m REAL,
+                clearance_distance_cm REAL,
+                clearance_distance_px REAL,
+                clearance_distance_px_ratio REAL,
+                overtaker_line_distance_m REAL,
+                overtaker_line_distance_cm REAL,
+                overtaker_line_distance_px REAL,
+                overtaker_line_distance_px_ratio REAL,
+                overtaken_line_distance_m REAL,
+                overtaken_line_distance_cm REAL,
+                overtaken_line_distance_px REAL,
+                overtaken_line_distance_px_ratio REAL,
+                overtaker_left_line_distance_m REAL,
+                overtaker_left_line_distance_cm REAL,
+                overtaker_left_line_distance_px REAL,
+                overtaker_right_line_distance_m REAL,
+                overtaker_right_line_distance_cm REAL,
+                overtaker_right_line_distance_px REAL,
+                overtaken_left_line_distance_m REAL,
+                overtaken_left_line_distance_cm REAL,
+                overtaken_left_line_distance_px REAL,
+                overtaken_right_line_distance_m REAL,
+                overtaken_right_line_distance_cm REAL,
+                overtaken_right_line_distance_px REAL,
+                overtaker_measure_x REAL,
+                overtaker_measure_y REAL,
+                overtaken_measure_x REAL,
+                overtaken_measure_y REAL,
+                overtaker_x1 REAL,
+                overtaker_y1 REAL,
+                overtaker_x2 REAL,
+                overtaker_y2 REAL,
+                overtaken_x1 REAL,
+                overtaken_y1 REAL,
+                overtaken_x2 REAL,
+                overtaken_y2 REAL,
+                lane_width_m REAL,
+                lane_width_px_reference REAL,
+                lane_width_cm_per_px REAL,
+                context_frames TEXT,
+                notes TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+            )
+            """
+        )
+
         # ManualOvertakeEvents columns
         ensure_manual_overtake_event_columns(conn)
 
@@ -524,6 +607,23 @@ def ensure_manual_annotation_schema(conn=None):
                 manual_event_id INTEGER,
                 is_deleted INTEGER DEFAULT 0,
                 FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+            )
+            """
+        )
+
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ManualOvertakeContext (
+                context_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                manual_event_id INTEGER,
+                run_id INTEGER,
+                frame_num INTEGER,
+                offset_frames INTEGER,
+                overtaker_group_id INTEGER,
+                overtaken_group_id INTEGER,
+                payload_json TEXT,
+                created_at TEXT,
+                FOREIGN KEY(manual_event_id) REFERENCES ManualOvertakeEvents(manual_event_id) ON DELETE CASCADE
             )
             """
         )
@@ -2242,33 +2342,131 @@ def apply_manual_overtake_flags(run_id, frame_num, overtaker_gid, overtaken_gid)
             print(f"Error applying manual flags: {e}")
             return False
 
+def _chunked(values, size=900):
+    for index in range(0, len(values), size):
+        yield values[index:index + size]
+
+
+def ensure_manual_run_progress_columns(conn=None):
+    should_close = False
+    if conn is None:
+        conn = sqlite3.connect(MAIN_DB_PATH)
+        should_close = True
+    try:
+        c = conn.cursor()
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ManualRunProgress (
+                run_id INTEGER PRIMARY KEY,
+                last_visit_at TEXT,
+                last_review_at TEXT,
+                last_annotation_at TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                manual_status TEXT,
+                FOREIGN KEY(run_id) REFERENCES ProcessLog(run_id)
+            )
+            """
+        )
+        columns = _get_table_columns(conn, "ManualRunProgress")
+        required = {
+            "last_visit_at": "TEXT",
+            "last_review_at": "TEXT",
+            "last_annotation_at": "TEXT",
+            "created_at": "TEXT",
+            "updated_at": "TEXT",
+            "manual_status": "TEXT",
+        }
+        for col, dtype in required.items():
+            if col not in columns:
+                c.execute(f"ALTER TABLE ManualRunProgress ADD COLUMN {col} {dtype}")
+        conn.commit()
+    finally:
+        if should_close:
+            conn.close()
+
+
+def clear_manual_run_progress(run_ids):
+    normalized = []
+    for run_id in run_ids or []:
+        try:
+            normalized.append(int(run_id))
+        except (TypeError, ValueError):
+            continue
+    if not normalized:
+        return 0
+    deleted = 0
+    with get_db_connection() as conn:
+        ensure_manual_run_progress_columns(conn)
+        c = conn.cursor()
+        for chunk in _chunked(normalized):
+            placeholders = ','.join(['?'] * len(chunk))
+            c.execute(f"DELETE FROM ManualRunProgress WHERE run_id IN ({placeholders})", chunk)
+            deleted += max(c.rowcount, 0)
+        conn.commit()
+    return deleted
+
+
 def reset_manual_overtake_for_runs(run_ids):
-    if not run_ids: return
-    placeholders = ','.join(['?'] * len(run_ids))
+    normalized = []
+    for run_id in run_ids or []:
+        try:
+            normalized.append(int(run_id))
+        except (TypeError, ValueError):
+            continue
+    if not normalized:
+        return 0, 0
+    total_events_deleted = 0
+    total_detections_reset = 0
     try:
         with get_db_connection() as conn:
+            ensure_manual_annotation_schema(conn)
             c = conn.cursor()
-            if _table_exists(conn, "ManualOvertakeContext"):
-                c.execute(
-                    f"DELETE FROM ManualOvertakeContext WHERE manual_event_id IN (SELECT manual_event_id FROM ManualOvertakeEvents WHERE run_id IN ({placeholders}))",
-                    run_ids,
+            detection_columns = _table_columns(conn, "Detection")
+            reset_columns = [
+                col
+                for col in (
+                    "overtake",
+                    "overtake_after",
+                    "overtake_by",
+                    "overtake_by_second",
+                    "overtake_window_offset",
                 )
-            c.execute(f"DELETE FROM ManualOvertakeEvents WHERE run_id IN ({placeholders})", run_ids)
-            c.execute(f"DELETE FROM ManualOvertakeTimeline WHERE run_id IN ({placeholders})", run_ids)
-            if _table_exists(conn, "ManualOvertakeContextBacklog"):
-                c.execute(
-                    f"DELETE FROM ManualOvertakeContextBacklog WHERE run_id IN ({placeholders})",
-                    run_ids,
-                )
-            if _table_exists(conn, "ManualContextBacklog"):
-                c.execute(
-                    f"DELETE FROM ManualContextBacklog WHERE run_id IN ({placeholders})",
-                    run_ids,
-                )
-            c.execute(f"DELETE FROM ManualRunProgress WHERE run_id IN ({placeholders})", run_ids)
+                if col in detection_columns
+            ]
+            for chunk in _chunked(normalized):
+                placeholders = ','.join(['?'] * len(chunk))
+                if _table_exists(conn, "ManualOvertakeContext"):
+                    c.execute(
+                        f"DELETE FROM ManualOvertakeContext WHERE manual_event_id IN (SELECT manual_event_id FROM ManualOvertakeEvents WHERE run_id IN ({placeholders}))",
+                        chunk,
+                    )
+                c.execute(f"DELETE FROM ManualOvertakeEvents WHERE run_id IN ({placeholders})", chunk)
+                total_events_deleted += max(c.rowcount, 0)
+                c.execute(f"DELETE FROM ManualOvertakeTimeline WHERE run_id IN ({placeholders})", chunk)
+                if _table_exists(conn, "ManualOvertakeContextBacklog"):
+                    c.execute(
+                        f"DELETE FROM ManualOvertakeContextBacklog WHERE run_id IN ({placeholders})",
+                        chunk,
+                    )
+                if _table_exists(conn, "ManualContextBacklog"):
+                    c.execute(
+                        f"DELETE FROM ManualContextBacklog WHERE run_id IN ({placeholders})",
+                        chunk,
+                    )
+                c.execute(f"DELETE FROM ManualRunProgress WHERE run_id IN ({placeholders})", chunk)
+                if reset_columns:
+                    set_clause = ", ".join(f"{col} = 0" for col in reset_columns)
+                    c.execute(
+                        f"UPDATE Detection SET {set_clause} WHERE run_id IN ({placeholders})",
+                        chunk,
+                    )
+                    total_detections_reset += max(c.rowcount, 0)
             conn.commit()
+        return total_events_deleted, total_detections_reset
     except Exception as e:
         print(f"Error resetting manual overtake: {e}")
+        return total_events_deleted, total_detections_reset
 
 def list_manual_context_backlog(run_ids=None, limit=10):
     def _normalize_runs(values):

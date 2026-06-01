@@ -1022,6 +1022,7 @@ def post_process_action():
             with app.app_context():
                 while not task_queue.empty():
                     t_id = None
+                    task = None
                     try:
                         # Fetch next task
                         task = task_queue.get()
@@ -1541,7 +1542,7 @@ def post_process_action():
                         })
                         # Ensure we mark done so queue doesn't stall indefinitely on error?
                         # Actually task_done() is mostly for join(). Flow continues.
-                        if not task_queue.empty():
+                        if task is not None:
                               task_queue.task_done()
                         if t_id and t_id in queue_registry:
                               del queue_registry[t_id]

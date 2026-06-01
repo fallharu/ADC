@@ -24,9 +24,10 @@ class LaneLineSet:
         yield self.center
 
 
-LANE_WIDTH_METERS = 7.0
+LANE_WIDTH_METERS = 8.0
 VERTICAL_TOLERANCE_PX = 5.0
 LANE_CONFIRMATION_HALF_SPAN_PX = 15.0
+MIN_LANE_WIDTH_PX = 20.0
 
 
 def _to_float(value: object) -> Optional[float]:
@@ -631,7 +632,7 @@ def lane_scale_details_at_y(
             return LaneScaleDetails(y_val, None, None, None, lane_width_m)
 
     lane_width_px = abs(right_x - left_x)
-    if lane_width_px <= 0:
+    if lane_width_px < MIN_LANE_WIDTH_PX:
         return LaneScaleDetails(
             y_val,
             (left_x, y_val),
@@ -851,11 +852,12 @@ def compute_clearance(
     )
 
     distance_m: Optional[float] = None
-    fallback_scale = x_scale or y_scale
     if x_scale and y_scale:
         distance_m = math.hypot(dx_px / x_scale, dy_px / y_scale)
-    elif fallback_scale:
-        distance_m = math.hypot(dx_px / fallback_scale, dy_px / fallback_scale)
+    elif x_scale:
+        distance_m = abs(dx_px) / x_scale
+    elif y_scale:
+        distance_m = abs(dy_px) / y_scale
 
     distance_cm = distance_m * 100.0 if distance_m is not None else None
     return ClearanceResult(distance_px, distance_m, distance_cm)
@@ -1146,4 +1148,3 @@ def estimate_clearance_m(
         left_inner_line,
         right_inner_line,
     ).distance_m
-

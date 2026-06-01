@@ -42,7 +42,7 @@ with app.app_context():
         ensure_detection_columns(conn)
         ensure_manual_overtake_event_columns(conn)
         ensure_overtake_event_columns(conn)
-        print("✅ Database migration completed: all schema columns ensured")
+        print("[OK] Database migration completed: all schema columns ensured")
     ensure_manual_annotation_schema()  # 内部でDB接続を管理
     
     # [ABC-B] ルート診断: 全エンドポイントを出力
@@ -53,7 +53,7 @@ with app.app_context():
         methods = ','.join(sorted(rule.methods - {'HEAD', 'OPTIONS'}))
         print(f"  {rule.endpoint:50} {methods:20} {rule.rule}")
         if '/preview' in rule.rule:
-            print(f"    ⭐ PREVIEW API FOUND: {rule.rule}")
+            print(f"    PREVIEW API FOUND: {rule.rule}")
     print("="*80 + "\n")
 
 

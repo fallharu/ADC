@@ -106,9 +106,9 @@ def _compute_distance(
         dy_m = abs(dy_px) / avg_y
         distance_m = float(np.hypot(dx_m, dy_m))
     elif avg_x:
-        # Xスケールのみ (Yスケールがない場合、Xスケールで代用するか、等方とみなすか)
-        # ここではHypot全体に適用
-        distance_m = distance_px / avg_x
+        distance_m = abs(dx_px) / avg_x
+    elif avg_y:
+        distance_m = abs(dy_px) / avg_y
 
     distance_cm: Optional[float] = None
     if distance_m is not None:

@@ -1,9 +1,14 @@
-from flask import send_from_directory, request, flash, redirect, url_for, current_app
+from flask import jsonify, send_from_directory, request, flash, redirect, url_for, current_app
 import os
 from . import main
 from ..modules.db_manager import resolve_output_root
 
 CSV_COLUMN_GUIDE_PATH = os.path.join("docs", "csv_column_guide.csv") # Example path
+
+
+@main.route("/api/health")
+def health_api():
+    return jsonify({"status": "ok"})
 
 @main.route("/downloads/csv_columns")
 def download_csv_column_guide():
