@@ -15,6 +15,7 @@ if "dotenv" not in sys.modules:
 if "cv2" not in sys.modules:
     cv2_stub = types.ModuleType("cv2")
     cv2_stub.IMWRITE_JPEG_QUALITY = 95
+    cv2_stub.IMREAD_COLOR = 1
     cv2_stub.LINE_AA = 16
     cv2_stub.FONT_HERSHEY_SIMPLEX = 0
     cv2_stub.MARKER_CROSS = 0
@@ -26,11 +27,24 @@ if "cv2" not in sys.modules:
         return None
 
     cv2_stub.imencode = _cv2_imencode
+    cv2_stub.imread = lambda *args, **kwargs: None
+    cv2_stub.imshow = _cv2_noop
+    cv2_stub.imwrite = _cv2_noop
     cv2_stub.putText = _cv2_noop
     cv2_stub.line = _cv2_noop
     cv2_stub.circle = _cv2_noop
     cv2_stub.drawMarker = _cv2_noop
     sys.modules["cv2"] = cv2_stub
+
+if "ultralytics" not in sys.modules:
+    ultralytics_stub = types.ModuleType("ultralytics")
+
+    class _YOLOStub:  # pragma: no cover - only used to avoid optional import
+        def __init__(self, *args, **kwargs):
+            pass
+
+    ultralytics_stub.YOLO = _YOLOStub
+    sys.modules["ultralytics"] = ultralytics_stub
 
 from Source_code.modules import db_manager
 from Source_code.modules.manual_metrics import (

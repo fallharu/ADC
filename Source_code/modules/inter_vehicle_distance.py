@@ -1,5 +1,7 @@
 # 役割: 全ての車両ペア間の距離を計算し、前方最近傍情報を保存する
 import sqlite3
+from contextlib import closing
+
 import pandas as pd
 import numpy as np
 from itertools import combinations
@@ -39,12 +41,34 @@ def _float_or_none(value):
     return numeric
 
 
+def _int_or_none(value):
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        if len(raw) in (1, 2, 4, 8):
+            return int.from_bytes(raw, byteorder="little", signed=True)
+        try:
+            return int(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _mean_positive(values):
     valid = [value for value in (_float_or_none(v) for v in values) if value and value > 0]
     return float(np.mean(valid)) if valid else None
 
 def analyze_proximity(run_id: int):
-    with sqlite3.connect(MAIN_DB_PATH) as conn:
+    with closing(sqlite3.connect(MAIN_DB_PATH)) as conn:
         configure_connection(conn, mode="read")
         profile_sql = "SELECT calibration_profile FROM ProcessLog WHERE run_id = ?"
         result = conn.execute(profile_sql, (run_id,)).fetchone()
@@ -126,8 +150,22 @@ def analyze_proximity(run_id: int):
                 direct_distance_m = longitudinal_m
             else:
                 continue
-            proximity_records.append((run_id, frame_num, car_a.group_id, car_b.group_id, car_a.class_name, car_b.class_name,
-                                      direct_distance_m, lateral_m, longitudinal_m))
+            group_a = _int_or_none(car_a.group_id)
+            group_b = _int_or_none(car_b.group_id)
+            frame_key = _int_or_none(frame_num)
+            if group_a is None or group_b is None or frame_key is None:
+                continue
+            proximity_records.append((
+                int(run_id),
+                frame_key,
+                group_a,
+                group_b,
+                car_a.class_name,
+                car_b.class_name,
+                float(direct_distance_m),
+                float(lateral_m) if lateral_m is not None else None,
+                float(longitudinal_m) if longitudinal_m is not None else None,
+            ))
         
         for _, car_a in frame_df.iterrows():
             min_lon_dist_m = float('inf')
@@ -142,13 +180,15 @@ def analyze_proximity(run_id: int):
                 if pixels_per_meter_a and pixels_per_meter_a > 0:
                     lon_distances_m = abs(car_a.bottom_y_px - forward_cars.bottom_y_px) / pixels_per_meter_a
                     min_lon_dist_m = lon_distances_m.min()
-                    front_vehicle_id = forward_cars.loc[lon_distances_m.idxmin()].group_id
+                    front_vehicle_id = _int_or_none(forward_cars.loc[lon_distances_m.idxmin()].group_id)
             
             if front_vehicle_id is not None:
                 # ★修正: auto_id を使用
-                front_vehicle_updates.append((min_lon_dist_m, front_vehicle_id, car_a.auto_id))
+                auto_id = _int_or_none(car_a.auto_id)
+                if auto_id is not None:
+                    front_vehicle_updates.append((float(min_lon_dist_m), front_vehicle_id, auto_id))
 
-    with sqlite3.connect(MAIN_DB_PATH) as conn:
+    with closing(sqlite3.connect(MAIN_DB_PATH)) as conn:
         configure_connection(conn, mode="write")
         c = conn.cursor()
         c.execute("DELETE FROM ProximityData WHERE run_id = ?", (run_id,))
@@ -156,4 +196,5 @@ def analyze_proximity(run_id: int):
         c.execute("UPDATE Detection SET front_distance_m = NULL, front_vehicle_id = NULL WHERE run_id = ?", (run_id,))
         if front_vehicle_updates:
             c.executemany("UPDATE Detection SET front_distance_m = ?, front_vehicle_id = ? WHERE auto_id = ?", front_vehicle_updates)
+        conn.commit()
         print(f"Run ID {run_id}: 近接情報を更新しました。")

@@ -1,6 +1,8 @@
 import math
+import sqlite3
 import unittest
 
+from Source_code.modules.inter_vehicle_distance import _int_or_none
 from Source_code.modules.manual_metrics import (
     compute_clearance,
     lane_scale_details_at_y,
@@ -35,6 +37,11 @@ class DistanceMetricsTest(unittest.TestCase):
 
         self.assertFalse(details.is_available)
         self.assertIsNone(details.pixels_per_meter)
+
+    def test_sqlite_blob_id_is_normalized_to_integer(self):
+        blob_value = sqlite3.Binary((42).to_bytes(8, byteorder="little", signed=True))
+
+        self.assertEqual(_int_or_none(blob_value), 42)
 
 
 if __name__ == "__main__":

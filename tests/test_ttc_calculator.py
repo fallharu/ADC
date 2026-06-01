@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 import gc
+from contextlib import closing
 
 from Source_code.modules import ttc_calculator
 
@@ -14,7 +15,7 @@ class TTCCalculatorTest(unittest.TestCase):
         original_path = ttc_calculator.MAIN_DB_PATH
         ttc_calculator.MAIN_DB_PATH = db_path
         try:
-            with sqlite3.connect(db_path) as conn:
+            with closing(sqlite3.connect(db_path)) as conn:
                 conn.execute(
                     """
                     CREATE TABLE Detection (
@@ -43,10 +44,11 @@ class TTCCalculatorTest(unittest.TestCase):
                         (3, 10, 2, 2, 0.0, None, None),
                     ],
                 )
+                conn.commit()
 
             ttc_calculator.assign_ttc(10)
 
-            with sqlite3.connect(db_path) as conn:
+            with closing(sqlite3.connect(db_path)) as conn:
                 ttc = conn.execute(
                     "SELECT ttc_s FROM Detection WHERE auto_id = 1"
                 ).fetchone()[0]
@@ -56,6 +58,61 @@ class TTCCalculatorTest(unittest.TestCase):
 
             self.assertAlmostEqual(ttc, 2.0)
             self.assertIsNone(front_ttc)
+        finally:
+            ttc_calculator.MAIN_DB_PATH = original_path
+            gc.collect()
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(db_path + suffix)
+                except (FileNotFoundError, PermissionError):
+                    pass
+
+    def test_accepts_legacy_blob_vehicle_ids(self):
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            db_path = tmp.name
+        original_path = ttc_calculator.MAIN_DB_PATH
+        ttc_calculator.MAIN_DB_PATH = db_path
+        group_1 = sqlite3.Binary((1).to_bytes(8, byteorder="little", signed=True))
+        group_2 = sqlite3.Binary((2).to_bytes(8, byteorder="little", signed=True))
+        try:
+            with closing(sqlite3.connect(db_path)) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE Detection (
+                        auto_id INTEGER PRIMARY KEY,
+                        run_id INTEGER,
+                        frame_num INTEGER,
+                        group_id BLOB,
+                        speed_km_h REAL,
+                        front_distance_m REAL,
+                        front_vehicle_id BLOB,
+                        ttc_s REAL
+                    )
+                    """
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO Detection (
+                        auto_id, run_id, frame_num, group_id, speed_km_h,
+                        front_distance_m, front_vehicle_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (1, 10, 1, group_1, 36.0, 10.0, group_2),
+                        (2, 10, 1, group_2, 18.0, None, None),
+                    ],
+                )
+                conn.commit()
+
+            ttc_calculator.assign_ttc(10)
+
+            with closing(sqlite3.connect(db_path)) as conn:
+                ttc = conn.execute(
+                    "SELECT ttc_s FROM Detection WHERE auto_id = 1"
+                ).fetchone()[0]
+
+            self.assertAlmostEqual(ttc, 2.0)
         finally:
             ttc_calculator.MAIN_DB_PATH = original_path
             gc.collect()
