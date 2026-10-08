@@ -1,0 +1,4 @@
+*.pt filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
+models/*.pt filter=lfs diff=lfs merge=lfs -text
+Noto_Sans_JP.zip filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,65 @@
+
+@main.route("/post_process/calibration_preview/<int:run_id>")
+def calibration_preview_api(run_id):
+    """Run単位のキャリブレーションプレビュー画像を返す簡易API"""
+    try:
+        from ..modules.db_manager import get_run_video_info
+        
+        # 1. Get info
+        info = get_run_video_info(run_id)
+        if not info:
+             return jsonify({"status": "error", "message": f"Run ID {run_id}が見つかりません"}), 404
+             
+        video_path = info.get("source_path")
+        profile = info.get("calibration_profile")
+        
+        result = {
+            "status": "ok",
+            "run_id": run_id,
+            "profile": profile,
+            "type": "unknown", # Will update if loaded
+            "frame": 0,
+            "total_frames": info.get("total_frames", 0)
+        }
+
+        if not video_path or not os.path.exists(video_path):
+             return jsonify({"status": "error", "message": "動画ファイルが見つかりません"}), 404
+
+        # 2. Load Frame
+        from ..modules.video_utils import load_video_frame
+        frame = load_video_frame(video_path, 0)
+        if frame is None:
+             return jsonify({"status": "error", "message": "動画フレームの読み込みに失敗しました"}), 500
+             
+        # 3. Draw Lines if profile exists
+        if profile:
+             calib_dir = os.path.join(os.getenv("Opt_files", "output"), "calibrations")
+             profile_path = os.path.join(calib_dir, f"{profile}.json")
+             if os.path.exists(profile_path):
+                 import json
+                 with open(profile_path, 'r', encoding='utf-8') as f:
+                     p_data = json.load(f)
+                 
+                 from .calibration import draw_calibration_lines
+                 draw_calibration_lines(frame, p_data.get("lines", {}))
+                 
+                 result["type"] = p_data.get("calibration_type", "manual")
+        
+        # 4. Encode
+        import cv2
+        import base64
+        _, buffer = cv2.imencode('.jpg', frame)
+        img_base64 = base64.b64encode(buffer).decode('utf-8')
+        
+        # Return data URI or base64 (Frontend expects src to be set directly? 
+        # User JS: `calibPreviewImage.src = imageUrl;` 
+        # If I return base64, I should prefix it or let frontend handle it.
+        # User JS example: `const imageUrl = data.image_url || ...`
+        # Let's return a data URI for simplicity.
+        result["image_url"] = f"data:image/jpeg;base64,{img_base64}"
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        current_app.logger.exception(f"Preview API failed for run {run_id}")
+        return jsonify({"status": "error", "message": str(e)}), 500

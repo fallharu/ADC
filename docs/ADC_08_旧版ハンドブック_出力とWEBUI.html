@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{color-scheme:light dark}
+  body{margin:0;font:14px system-ui,sans-serif}
+  img{max-width:100%}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<title>ADC_08 旧版ハンドブック</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --paper:#EDEFF2;
+    --surface:#FFFFFF;
+    --surface-2:#F5F6F8;
+    --ink:#14181D;
+    --ink-2:#39414B;
+    --muted:#6C7581;
+    --line:#D7DBE1;
+    --line-soft:#E4E7EB;
+    --mark:#B87C0C;
+    --mark-soft:#F6EBD3;
+    --gauge:#2A6874;
+    --gauge-soft:#E0EDEF;
+    --ok:#3B7449;
+    --warn:#9C6612;
+    --crit:#9E3B2B;
+    --shadow:0 1px 2px rgba(20,24,29,.06), 0 8px 24px -16px rgba(20,24,29,.28);
+    --radius:8px;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#101317;
+      --surface:#181C21;
+      --surface-2:#1F242A;
+      --ink:#E7EAEE;
+      --ink-2:#BFC6CE;
+      --muted:#8A939E;
+      --line:#2B323A;
+      --line-soft:#242A31;
+      --mark:#E0A93A;
+      --mark-soft:#33291433;
+      --gauge:#63AEBB;
+      --gauge-soft:#16323833;
+      --ok:#6FB183;
+      --warn:#D3A050;
+      --crit:#D97C68;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+      color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101317;
+    --surface:#181C21;
+    --surface-2:#1F242A;
+    --ink:#E7EAEE;
+    --ink-2:#BFC6CE;
+    --muted:#8A939E;
+    --line:#2B323A;
+    --line-soft:#242A31;
+    --mark:#E0A93A;
+    --mark-soft:#33291433;
+    --gauge:#63AEBB;
+    --gauge-soft:#16323833;
+    --ok:#6FB183;
+    --warn:#D3A050;
+    --crit:#D97C68;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic UI",system-ui,sans-serif;
+    font-size:15px;
+    line-height:1.85;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+  .prose{max-width:68ch}
+  h1,h2,h3,h4{font-family:"Zen Kaku Gothic New","Noto Sans JP",system-ui,sans-serif;text-wrap:balance;margin:0}
+  code,kbd,.mono,pre{font-family:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace}
+
+  /* ---- masthead ---- */
+  .masthead{
+    border-bottom:1px solid var(--line);
+    background:var(--surface);
+    padding:56px 0 40px;
+    margin-bottom:48px;
+  }
+  .lane{
+    height:6px;
+    background:
+      repeating-linear-gradient(90deg,var(--mark) 0 34px,transparent 34px 60px);
+    opacity:.85;
+    margin-bottom:36px;
+  }
+  .eyebrow{
+    font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--muted);font-weight:500;
+  }
+  h1{font-size:clamp(30px,4.4vw,46px);font-weight:900;line-height:1.25;letter-spacing:.01em;margin:10px 0 16px}
+  .lede{font-size:17px;color:var(--ink-2);max-width:60ch;margin:0}
+  .meta-strip{
+    display:flex;flex-wrap:wrap;gap:0;margin-top:32px;
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    background:var(--surface-2);
+  }
+  .meta-strip div{
+    flex:1 1 170px;padding:14px 18px;border-right:1px solid var(--line);
+  }
+  .meta-strip div:last-child{border-right:0}
+  .meta-strip dt{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 4px}
+  .meta-strip dd{margin:0;font-size:14px;font-weight:500;line-height:1.5}
+
+  /* ---- sections ---- */
+  section{margin-bottom:64px;scroll-margin-top:24px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:8px;padding-bottom:12px;border-bottom:2px solid var(--ink)}
+  .sec-num{
+    font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:500;
+    color:var(--mark);letter-spacing:.06em;
+  }
+  h2{font-size:clamp(21px,2.6vw,27px);font-weight:700}
+  h3{font-size:17px;font-weight:700;margin:36px 0 10px;letter-spacing:.01em}
+  h4{font-size:14px;font-weight:700;margin:24px 0 8px;color:var(--ink-2)}
+  p{margin:0 0 14px}
+  .note{font-size:13.5px;color:var(--muted);line-height:1.75}
+
+  /* ---- pipeline ---- */
+  .pipe{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;
+    margin:22px 0 8px;
+  }
+  .pipe .step{
+    background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--gauge);
+    border-radius:4px;padding:12px 12px 14px;
+  }
+  .pipe .step.io{border-top-color:var(--mark)}
+  .pipe .idx{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--muted);display:block}
+  .pipe .nm{font-size:13px;font-weight:700;line-height:1.45;display:block;margin-top:3px}
+  .pipe .sub{font-size:11px;color:var(--muted);line-height:1.5;display:block;margin-top:4px}
+
+  /* ---- tables ---- */
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);margin:16px 0}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:min(100%,560px)}
+  th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--line-soft);vertical-align:top;line-height:1.65}
+  thead th{
+    background:var(--surface-2);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);font-weight:700;white-space:nowrap;border-bottom:1px solid var(--line);
+  }
+  tbody tr:last-child td{border-bottom:0}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:"JetBrains Mono",monospace}
+  td.col{font-family:"JetBrains Mono",monospace;font-size:12.5px;white-space:nowrap;color:var(--gauge);font-weight:500}
+  caption{caption-side:top;text-align:left;padding:12px 14px 0;font-size:12.5px;color:var(--muted)}
+
+  /* ---- code / tree ---- */
+  pre{
+    background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--mark);
+    border-radius:4px;padding:16px 18px;overflow-x:auto;font-size:12.5px;line-height:1.85;
+    margin:16px 0;color:var(--ink-2);
+  }
+  pre b{color:var(--ink);font-weight:500}
+  pre .cm{color:var(--muted)}
+  code:not(pre code){
+    background:var(--surface-2);border:1px solid var(--line-soft);border-radius:3px;
+    padding:1px 5px;font-size:12.5px;color:var(--ink-2);
+  }
+
+  /* ---- screen map ---- */
+  .map{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:20px 0}
+  .map-group{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden}
+  .map-group > header{
+    padding:10px 16px;background:var(--surface-2);border-bottom:1px solid var(--line);
+    font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;
+  }
+  .map-group ul{list-style:none;margin:0;padding:6px 0}
+  .map-group li{padding:7px 16px;display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:13.5px}
+  .map-group li + li{border-top:1px solid var(--line-soft)}
+  .map-group .route{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--muted);white-space:nowrap}
+
+  /* ---- steps list ---- */
+  ol.howto{list-style:none;counter-reset:s;margin:20px 0;padding:0}
+  ol.howto > li{
+    counter-increment:s;position:relative;padding:0 0 22px 46px;
+    border-left:1px solid var(--line);margin-left:13px;
+  }
+  ol.howto > li:last-child{border-left-color:transparent;padding-bottom:0}
+  ol.howto > li::before{
+    content:counter(s);position:absolute;left:-13px;top:1px;
+    width:26px;height:26px;border-radius:50%;
+    background:var(--surface);border:1px solid var(--line);
+    font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:500;
+    display:flex;align-items:center;justify-content:center;color:var(--mark);
+  }
+  ol.howto h4{margin:0 0 4px;font-size:15px;color:var(--ink)}
+  ol.howto p{margin:0 0 6px;font-size:14px;color:var(--ink-2)}
+
+  ul.bullets{margin:10px 0 14px;padding-left:20px}
+  ul.bullets li{margin-bottom:6px}
+
+  /* ---- pills ---- */
+  .pill{
+    display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;
+    padding:2px 8px;border-radius:99px;border:1px solid currentColor;line-height:1.6;white-space:nowrap;
+  }
+  .pill.csv{color:var(--gauge)}
+  .pill.xlsx{color:var(--ok)}
+  .pill.img{color:var(--mark)}
+  .pill.mp4{color:var(--crit)}
+  .pill.json{color:var(--muted)}
+
+  /* ---- callout ---- */
+  .callout{
+    border:1px solid var(--line);border-left:3px solid var(--warn);
+    background:var(--surface);border-radius:4px;padding:14px 18px;margin:16px 0;font-size:13.5px;
+  }
+  .callout strong{color:var(--ink)}
+  .callout ul{margin:8px 0 0;padding-left:20px}
+  .callout li{margin-bottom:5px}
+
+  /* ---- sample record ---- */
+  .record{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--surface);margin:16px 0;
+  }
+  .record div{padding:12px 16px;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
+  .record dt{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--muted);margin:0 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .record dd{margin:0;font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.35}
+  .record dd small{display:block;font-size:11px;font-weight:400;color:var(--muted);letter-spacing:.02em;margin-top:2px}
+  .record .hl dd{color:var(--mark)}
+
+  footer{border-top:1px solid var(--line);padding-top:20px;font-size:12.5px;color:var(--muted)}
+  a{color:var(--gauge)}
+  a:focus-visible,li:focus-visible{outline:2px solid var(--mark);outline-offset:2px}
+  @media (max-width:640px){
+    .wrap{padding:0 16px 64px}
+    .masthead{padding:36px 0 28px;margin-bottom:32px}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="masthead">
+  <div class="wrap">
+    <div class="lane" aria-hidden="true"></div>
+    <div class="eyebrow">ADC_08 / Flask 版 (旧版) — Output &amp; Operation Reference</div>
+    <h1>旧版のアウトプットと<br>WEB UI の使い方</h1>
+    <p class="lede">自転車追い越し映像解析システム ADC_08（<code>Source_code/app.py</code> の Flask アプリ）が「どんなデータを吐くのか」と「画面をどう回すのか」を、実際のDB・出力ファイル・画面定義から起こした資料です。新版 ADC Measurement 1.2 との差分を検討する際の基準線として使えます。</p>
+    <dl class="meta-strip">
+      <div><dt>起動</dt><dd class="mono">run.bat → :5000</dd></div>
+      <div><dt>データ保管</dt><dd class="mono">db/my_app_data.db</dd></div>
+      <div><dt>成果物</dt><dd class="mono">output/&lt;run&gt;/</dd></div>
+      <div><dt>Detection 列数</dt><dd>58 列</dd></div>
+      <div><dt>実測基準</dt><dd>2026-09-04 時点</dd></div>
+    </dl>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- ===================== 1 ===================== -->
+<section id="overview">
+  <div class="sec-head"><span class="sec-num">01</span><h2>全体像 — 動画1本が何に変わるか</h2></div>
+  <div class="prose">
+    <p>旧版は「動画 → YOLO推論 → 後処理8ステップ → SQLite → 各種エクスポート」という一方向のパイプラインです。UI 上の操作はすべてこのパイプラインのどこかを叩いているだけで、計算結果は必ず SQLite の <code>Detection</code> テーブルに書き戻されます。<strong>画面で見えている数字も、CSV も、Excel も、出どころは同じ1テーブル</strong>という構造です。</p>
+  </div>
+
+  <div class="pipe">
+    <div class="step io"><span class="idx">INPUT</span><span class="nm">動画</span><span class="sub">mp4 / uploads 配下</span></div>
+    <div class="step io"><span class="idx">YOLO</span><span class="nm">推論</span><span class="sub">車両モデル＋タイヤモデル</span></div>
+    <div class="step"><span class="idx">P1</span><span class="nm">グループID</span><span class="sub">track → group 集約</span></div>
+    <div class="step"><span class="idx">P2</span><span class="nm">運動学</span><span class="sub">速度・加速度・進行方向</span></div>
+    <div class="step"><span class="idx">P3</span><span class="nm">白線距離</span><span class="sub">左右白線までの水平距離</span></div>
+    <div class="step"><span class="idx">P4</span><span class="nm">追い越し</span><span class="sub">判定＋±30f窓</span></div>
+    <div class="step"><span class="idx">P5</span><span class="nm">区間速度</span><span class="sub">XY区間速度</span></div>
+    <div class="step"><span class="idx">P6</span><span class="nm">接近／離隔</span><span class="sub">approach / clearance</span></div>
+    <div class="step"><span class="idx">P7</span><span class="nm">車両間距離</span><span class="sub">ProximityData</span></div>
+    <div class="step"><span class="idx">P8</span><span class="nm">TTC</span><span class="sub">衝突余裕時間</span></div>
+    <div class="step io"><span class="idx">OUTPUT</span><span class="nm">DB / CSV / 画像</span><span class="sub">Excel・注釈動画</span></div>
+  </div>
+  <p class="note">後処理の実体は <code>Source_code/modules/inference.py</code> の <code>run_postprocess_pipeline_sync()</code>。8ステップを順に実行し、成功したステップ名を「後処理を即時実行 (グループID → 運動学 → …)」の形でログに残します。途中で失敗しても残りは続行し、エラー内容が Run ごとに記録されます。</p>
+</section>
+
+<!-- ===================== 2 ===================== -->
+<section id="db">
+  <div class="sec-head"><span class="sec-num">02</span><h2>出力その1 — データベース</h2></div>
+  <div class="prose">
+    <p>すべての一次出力は単一の SQLite ファイル <code>db/my_app_data.db</code> に入ります。以下は実際の稼働DBの実測行数で、旧版が扱ってきたデータ量の実感値です。</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>稼働DBのテーブル構成と実測行数（2026-09-04 時点）</caption>
+      <thead><tr><th>テーブル</th><th class="num">行数</th><th>粒度</th><th>役割</th></tr></thead>
+      <tbody>
+        <tr><td class="col">Detection</td><td class="num">1,213,553</td><td>1検出／1フレーム</td><td>主テーブル。座標・速度・距離・フラグを58列で保持</td></tr>
+        <tr><td class="col">DetectionRaw</td><td class="num">1,213,553</td><td>同上</td><td>正規化スキーマ移行後の生値（bbox・信頼度）</td></tr>
+        <tr><td class="col">DetectionMetrics</td><td class="num">1,213,553</td><td>同上</td><td>同じく計算値側の分離テーブル</td></tr>
+        <tr><td class="col">ProximityData</td><td class="num">496,152</td><td>1ペア／1フレーム</td><td>車両間の直線・横・縦距離</td></tr>
+        <tr><td class="col">ProcessLog</td><td class="num">251</td><td>1 Run</td><td>実行履歴。completed 245 / error 3 / processing 3</td></tr>
+        <tr><td class="col">Video</td><td class="num">169</td><td>1動画</td><td>FPS・尺・撮影地点・道路種別・収集年</td></tr>
+        <tr><td class="col">TrafficCount</td><td class="num">165</td><td>1ライン／方向</td><td>通過台数カウント</td></tr>
+        <tr><td class="col">Class / ClassMaster</td><td class="num">83 / 7</td><td>クラス</td><td>YOLOクラスIDと名称の対応</td></tr>
+        <tr><td class="col">OvertakeEvents</td><td class="num">47</td><td>1追い越し</td><td>自動判定された追い越しイベント</td></tr>
+        <tr><td class="col">ManualOvertakeEvents</td><td class="num">7</td><td>1追い越し</td><td>手動判定画面で確定させたイベント（79列）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Detection 1行のイメージ</h3>
+  <p class="prose">追い越しが成立したフレーム（<code>overtake = 1</code>）の実データです。1行が「ある1フレームにおける、ある1オブジェクト」を表し、そこに周辺の解析結果がすべて横持ちで貼り付いています。</p>
+  <dl class="record">
+    <div><dt>run_id</dt><dd>100350</dd></div>
+    <div><dt>frame_num</dt><dd>1157</dd></div>
+    <div><dt>class_name</dt><dd>car<small>検出クラス</small></dd></div>
+    <div><dt>group_id</dt><dd>18<small>追い越した側</small></dd></div>
+    <div class="hl"><dt>clearance_distance_cm</dt><dd>195.2<small>離隔距離 cm</small></dd></div>
+    <div class="hl"><dt>line_distance_m</dt><dd>0.79<small>最短白線距離 m</small></dd></div>
+    <div><dt>lane_position_flag</dt><dd>+<small>白線内側</small></dd></div>
+    <div><dt>travel_direction</dt><dd>B<small>進行方向</small></dd></div>
+  </dl>
+
+  <h3>指標カラムの読み方</h3>
+  <div class="tbl-wrap">
+    <table>
+      <caption>Detection の主要列（距離はいずれも px / m / cm の3系統を併記する設計）</caption>
+      <thead><tr><th>分類</th><th>カラム</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td>距離</td><td class="col">approach_distance_m / _px</td><td>自転車と自動車の最短接近距離。相手は <code>approach_partner_group_id</code></td></tr>
+        <tr><td>距離</td><td class="col">clearance_distance_m / _cm / _px</td><td>追い越し判定フレームでの離隔距離。<strong>旧版の主指標</strong></td></tr>
+        <tr><td>距離</td><td class="col">l_line_distance / r_line_distance</td><td>計測点から左右白線までの水平距離。同じ高さで白線x座標を補間して算出</td></tr>
+        <tr><td>距離</td><td class="col">line_distance(_m/_cm)</td><td>左右のうち小さい方＝最近接白線距離</td></tr>
+        <tr><td>距離</td><td class="col">l_line_cross_m / r_line_cross_m</td><td>白線を越えた量（はみ出し量）</td></tr>
+        <tr><td>距離</td><td class="col">front_distance_m / front_vehicle_id</td><td>前方車両までの距離と相手ID</td></tr>
+        <tr><td>速度</td><td class="col">pixel_speed / pixel_speed_frame</td><td>スケール補正前の px/s と px/frame</td></tr>
+        <tr><td>速度</td><td class="col">speed_km_h</td><td>キャリブレーションスケール適用後の速度</td></tr>
+        <tr><td>速度</td><td class="col">acceleration_m_s2 / acceleration_state</td><td>加速度と「加速／減速／等速」の区分</td></tr>
+        <tr><td>速度</td><td class="col">ttc_s</td><td>衝突余裕時間（秒）</td></tr>
+        <tr><td>判定</td><td class="col">overtake / overtake_after</td><td>追い越し成立フレーム／その後のフレーム</td></tr>
+        <tr><td>判定</td><td class="col">overtake_by / overtake_by_second</td><td>追い越した車両の group_id ／ 追い越された自転車の group_id</td></tr>
+        <tr><td>判定</td><td class="col">overtake_window_offset</td><td>成立フレームを0とした前後30フレームの相対位置（−30〜+30）</td></tr>
+        <tr><td>判定</td><td class="col">oncoming_flag</td><td>対向（上り下りが交差）フレーム</td></tr>
+        <tr><td>判定</td><td class="col">lane_position_flag</td><td>タイヤ計測点が白線内側なら <code>+</code>、外側なら <code>-</code></td></tr>
+        <tr><td>判定</td><td class="col">center_line_overtake_status<br>white_line_overtake_status</td><td>「中央線内側／中央線越え」等の文字列区分</td></tr>
+        <tr><td>基準</td><td class="col">scale_pixels_per_meter<br>x_pixels_per_meter</td><td>キャリブレーション由来の縦・横スケール。全換算値の根拠</td></tr>
+        <tr><td>基準</td><td class="col">measure_x / measure_y</td><td>bbox ではなく実測に使う計測点（タイヤ接地点側）の座標</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>検出クラスの実分布</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>クラス</th><th class="num">検出行数</th><th>備考</th></tr></thead>
+      <tbody>
+        <tr><td class="col">Tire</td><td class="num">562,720</td><td>タイヤ検出モデル（best.pt 系）由来</td></tr>
+        <tr><td class="col">car</td><td class="num">451,358</td><td rowspan="4">車両検出モデル（yolov8x / yolo26x 系）由来</td></tr>
+        <tr><td class="col">truck</td><td class="num">74,067</td></tr>
+        <tr><td class="col">bicycle</td><td class="num">48,632</td></tr>
+        <tr><td class="col">bus</td><td class="num">3,427</td></tr>
+        <tr><td class="col">Bicycle_Tires</td><td class="num">73,349</td><td>自転車タイヤ。離隔の計測点に使用</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">1本の動画に対して車両モデルとタイヤモデルの2モデルを走らせ、両方の検出結果を同じ <code>Detection</code> に混在させます。<code>model_name</code> 列で出どころを区別します。</p>
+</section>
+
+<!-- ===================== 3 ===================== -->
+<section id="files">
+  <div class="sec-head"><span class="sec-num">03</span><h2>出力その2 — ファイル</h2></div>
+  <div class="prose">
+    <p>Run ごとに <code>output/&lt;フォルダ別名&gt;/&lt;動画名&gt;_&lt;タイムスタンプ&gt;/</code> が作られ、その中に成果物が並びます。実際のディレクトリはこの形です。</p>
+  </div>
+
+<pre><b>output/</b>
+├── <b>2_250816_V2/</b>                          <span class="cm"># フォルダ一括処理の単位</span>
+│   └── <b>000G6013_bike_clips_20251003_155831/</b>   <span class="cm"># = 1 Run</span>
+│       ├── summary.txt                     <span class="cm"># 処理サマリ</span>
+│       ├── folder_settings.json            <span class="cm"># 適用したプロファイル</span>
+│       ├── all_detections_run_100347_20260117_173854.csv
+│       ├── annotated_run_100347.mp4        <span class="cm"># 注釈付き動画（生成時のみ）</span>
+│       ├── check_img_save1.jpg             <span class="cm"># キャリブレーション確認画像</span>
+│       └── <b>overtake_snapshots/</b>
+│           ├── overtake_002295_car37_bike40_01.png
+│           └── overtake_events_run100511.json
+├── all_detections_20260121_143809.csv      <span class="cm"># 全Run横断のDBそのまま出力</span>
+├── statistics_runs_1_100177_334本_20260112_170748.xlsx
+└── <b>exports/</b>, <b>calibrations/</b>, <b>presentation/</b> …</pre>
+
+  <h4>summary.txt（実物）</h4>
+<pre>Run ID: 117
+Video: 01_2024_nu_0743_bike_clips.mp4
+Total Detections: 7036
+Used Models: yolov8x.pt, best.pt
+Detections by model:
+  - yolov8x: 2911
+  - best: 4125</pre>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>生成されるファイルと命名規則</caption>
+      <thead><tr><th>種別</th><th>ファイル名パターン</th><th>中身</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill csv">CSV</span></td><td class="col">all_detections_run_{run_id}_{ts}.csv</td><td>その Run の Detection 全行（1 Run＝数千〜数万行）</td></tr>
+        <tr><td><span class="pill csv">CSV</span></td><td class="col">{フォルダ}_combined_{ts}.csv</td><td>フォルダ内 Run を結合し、末尾に <code>video_filename</code> 列を追加</td></tr>
+        <tr><td><span class="pill csv">ZIP</span></td><td class="col">{フォルダ}_csv_bundle_{ts}.zip</td><td>一括処理時の CSV をまとめた配布用アーカイブ</td></tr>
+        <tr><td><span class="pill xlsx">XLSX</span></td><td class="col">detections_run{run_id}_{ts}.xlsx</td><td>日本語カラム名の Excel。「追い越しまとめ」シート付き</td></tr>
+        <tr><td><span class="pill xlsx">XLSX</span></td><td class="col">statistics_runs_{範囲}_{本数}本_{ts}.xlsx</td><td>集計レポート。概要／Run別集計／詳細データ／グラフ の4シート</td></tr>
+        <tr><td><span class="pill img">PNG</span></td><td class="col">overtake_{frame:06d}_car{G}_bike{G}_{n:02d}.png</td><td>追い越し瞬間の無加工フレーム。写真ギャラリー画面の実体</td></tr>
+        <tr><td><span class="pill mp4">MP4</span></td><td class="col">annotated_run_{run_id}.mp4</td><td>bbox・速度・距離を焼き込んだ確認用動画（avi/mov/mkv も選択可）</td></tr>
+        <tr><td><span class="pill json">JSON</span></td><td class="col">overtake_events_run{run_id}.json</td><td>スナップショットとイベントの対応表</td></tr>
+        <tr><td><span class="pill json">JSON</span></td><td class="col">folder_settings.json</td><td>適用キャリブレーションプロファイル等</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>エクスポートメニューの6種類</h3>
+  <p class="prose">「出力」画面（<code>/export_page</code>）から取れるファイルは目的別に6種類あります。同じ DB から切り口を変えて出しているだけなので、<strong>用途に合う1つを選べば足ります</strong>。</p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>メニュー</th><th>形式</th><th>1行の単位</th><th>使いどころ</th></tr></thead>
+      <tbody>
+        <tr><td><strong>DBそのまま</strong></td><td><span class="pill csv">CSV</span></td><td>1検出／1フレーム</td><td>全列を落として自前で再集計する</td></tr>
+        <tr><td><strong>追い越しペア</strong></td><td><span class="pill csv">CSV</span></td><td>1フレーム（追越側と被追越側を1行に横結合）</td><td>両者の速度・白線距離を突き合わせる</td></tr>
+        <tr><td><strong>追い越し詳細</strong></td><td><span class="pill csv">CSV</span></td><td>1フレーム（イベント前後の時系列）</td><td>1件の追い越しを波形として見る</td></tr>
+        <tr><td><strong>追い越し有まとめ</strong></td><td><span class="pill csv">CSV</span></td><td>1追い越しイベント</td><td>件数・離隔分布の全体集計</td></tr>
+        <tr><td><strong>トラックデータ</strong></td><td><span class="pill csv">CSV</span></td><td>関与車両の全フレーム</td><td>軌跡の再現・可視化</td></tr>
+        <tr><td><strong>金岡出力</strong></td><td><span class="pill csv">CSV</span> <span class="pill xlsx">XLSX</span></td><td>1追い越しイベント（日本語34列）</td><td>受け渡し用の確定フォーマット</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>金岡出力の列構成（34列・日本語ヘッダ）</h4>
+<pre>ID / Run / 測定年度 / 道路種別 / 動画名 / フレーム / 動画時間(s)
+<b>追い越し側</b> … Group / クラス / 時速(km/h) / ピクセル速度(px/s)
+        中央線距離(m) / 中央線越え(m) / 中央線測定点X(px)
+        白線距離(m) / 白線越え(m) / 白線測定点X(px) / 測定点Y(px)
+<b>追い越され側</b> … 同一の9項目
+接近距離(m) / 離隔距離(cm) / 離隔距離(m) / 登録日時 / メモ</pre>
+
+  <h4>Excel の日本語カラム（DBそのままExcel・30列）</h4>
+  <p class="note">検出ID・Run ID・動画ファイル名・クラス名・フレーム番号・グループID・接近相手グループID・接近距離(m)(px)・離隔距離(cm)(m)(px)・ピクセル速度・ピクセル移動量(px/f)・速度(km/h)・加速度(m/s²)・加減速区分・進行方向・白線内外区分・左白線距離(m)・右白線距離(m)・最短白線距離(m)・追い越しフラグ・追い越し後フラグ・追い越し±30f・追い越した車両Group・追い越された自転車Group・対向車フラグ・前方距離(m)・TTC(s)。<br>フラグ類は <code>1/0</code> ではなく「あり／-」の表示に変換され、2枚目に「追い越しまとめ」シートが付きます。</p>
+</section>
+
+<!-- ===================== 4 ===================== -->
+<section id="ui">
+  <div class="sec-head"><span class="sec-num">04</span><h2>WEB UI — 画面構成</h2></div>
+  <div class="prose">
+    <p>起動は <code>run.bat</code>（中身は <code>python -m Source_code.app</code>）。Flask 開発サーバが立ち上がるので、ブラウザで <code>http://127.0.0.1:5000/</code> を開きます。起動時にDBスキーマの自動マイグレーションが走り、コンソールに登録ルート一覧が出力されます。</p>
+    <p>画面は左サイドバーの3グループに整理されています。上から順に使えばワークフローが完結する構成です。</p>
+  </div>
+
+  <div class="map">
+    <div class="map-group">
+      <header>Workflow — 処理を進める</header>
+      <ul>
+        <li><span>ダッシュボード</span><span class="route">/</span></li>
+        <li><span>1. 動画登録</span><span class="route">/upload</span></li>
+        <li><span>2. YOLO推論</span><span class="route">/detect</span></li>
+        <li><span>3. 後処理</span><span class="route">/post_process</span></li>
+        <li><span>4. 検出結果</span><span class="route">/detections</span></li>
+      </ul>
+    </div>
+    <div class="map-group">
+      <header>Review — 目視で確かめる</header>
+      <ul>
+        <li><span>手動判定</span><span class="route">/manual_overtake</span></li>
+        <li><span>イベント観覧</span><span class="route">/manual_overtake/view</span></li>
+        <li><span>追い越し写真</span><span class="route">/overtake_gallery</span></li>
+        <li><span>検証</span><span class="route">/verify</span></li>
+      </ul>
+    </div>
+    <div class="map-group">
+      <header>Reports — 出す</header>
+      <ul>
+        <li><span>集計</span><span class="route">/statistics</span></li>
+        <li><span>比較分析</span><span class="route">/comparative_report</span></li>
+        <li><span>出力</span><span class="route">/export_page</span></li>
+        <li><span>リザルト</span><span class="route">/result_view</span></li>
+        <li><span>チェックシート</span><span class="route">/check_sheet</span></li>
+        <li><span>Global Stats</span><span class="route">/global_summary</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 5 ===================== -->
+<section id="howto">
+  <div class="sec-head"><span class="sec-num">05</span><h2>標準の操作手順</h2></div>
+
+  <ol class="howto">
+    <li>
+      <h4>動画を登録する — 1. 動画登録</h4>
+      <p>動画ファイルを直接アップロードするか、既存フォルダをリンク登録します。<code>uploads/</code> 配下に配置され、<code>Video</code> テーブルに FPS・尺・元パスが記録されます。フォルダ単位で一括処理する場合はここでフォルダを登録しておきます。</p>
+    </li>
+    <li>
+      <h4>推論を回す — 2. YOLO推論</h4>
+      <p>単一動画モードとフォルダ一括モードがあります。指定する項目は次のとおりです。</p>
+      <ul class="bullets">
+        <li><strong>年度／場所／道路種別</strong> — 道路種別は「拡幅／未拡幅」から選択。後の比較分析の軸になるので、ここで正しく入れておくのが重要です。</li>
+        <li><strong>車両検出モデル / タイヤ検出モデル</strong> — それぞれ自動（Auto）か明示指定。2モデルを併用します。</li>
+        <li><strong>キャリブレーションプロファイル</strong> — 未指定ならサブフォルダ設定が使われます。</li>
+        <li><strong>処理完了後に後処理を自動実行する</strong> — ONにすると推論直後に8ステップが走ります。</li>
+        <li><strong>処理完了後にCSVを出力する</strong> — Run ごとの CSV とフォルダ結合 CSV を自動生成。</li>
+        <li><strong>既存の実行結果を上書きする</strong> — 過去データを削除して再実行。取り消せません。</li>
+      </ul>
+      <p class="note">進捗は同じ画面のプログレス表示（<code>/progress</code>, <code>/api/batch_status</code>）で追えます。バックグラウンドスレッド実行なので、画面を離れても処理は続きます。</p>
+    </li>
+    <li>
+      <h4>キャリブレーションを当てて再計算する — 3. 後処理</h4>
+      <p>推論結果は座標のままなので、スケールを与えて初めて m / km/h になります。この画面で対象を <strong>Run単位 / フォルダ単位 / 条件指定 / 全データ</strong> の4通りから選び、プロファイルを適用して後処理を回します。</p>
+      <p>アクションボタンは実行系と出力系が並んでいます。</p>
+      <ul class="bullets">
+        <li><strong>選択分実行</strong>／<strong>全データ処理実行</strong> — 後処理8ステップの再計算</li>
+        <li><strong>動画生成</strong> — 注釈付き動画。フォント・出力形式（avi/mov/mkv）などを指定可能</li>
+        <li><strong>DBそのままCSV / DBそのままExcel</strong> — Run 単位のフルダンプ</li>
+        <li><strong>追い越しペアCSV</strong>／<strong>自転車・対象車 CSV / Excel</strong> — 絞り込み出力</li>
+      </ul>
+      <p class="note">条件指定モードでは「未拡幅道路 / 拡幅道路 / 未定義」で対象を絞れます。画面下部に解析実行ログが出るので、失敗した Run はここで特定します。</p>
+    </li>
+    <li>
+      <h4>結果を確認する — 4. 検出結果</h4>
+      <p>フォルダ別のサマリ（Run数・車・自転車・追い越し件数）と、Run 一覧（Run ID・動画ファイル・検出数・収集年・道路タイプ・処理日時）が並びます。ここから年度や道路種別のメタデータを一括更新でき、行を選んで CSV / Excel を落とせます。検出行のプレビュー画像も参照できます。</p>
+    </li>
+    <li>
+      <h4>目視で確かめる — Review グループ</h4>
+      <ul class="bullets">
+        <li><strong>追い越し写真</strong> — <code>overtake_snapshots/</code> の PNG を一覧表示。誤検出はここで削除、あるいは中央線・白線越えのステータスを手で修正します。写真の再生成もこの画面から実行できます。</li>
+        <li><strong>手動判定</strong> — フレームを送りながら追い越し側／追い越され側を指定して <code>ManualOvertakeEvents</code> に登録。前後30フレームの速度（−30f / +30f）まで含めて保存されるので、自動判定が取りこぼした事例を補完できます。</li>
+        <li><strong>イベント観覧</strong> — 登録済みイベントを表形式で確認し、CSV に出します。</li>
+        <li><strong>検証</strong> — キャリブレーションの妥当性を距離テストで確認します。</li>
+      </ul>
+    </li>
+    <li>
+      <h4>集計する — 集計</h4>
+      <p>対象 Run を複数選び、4つの集計モードから選択します。</p>
+      <ul class="bullets">
+        <li><strong>白線区分モード</strong>（A/B比較）／<strong>白線距離モード</strong>（自転車ID別）</li>
+        <li><strong>離隔距離×速度モード</strong>／<strong>トラックID別 速度・白線距離モード</strong></li>
+        <li>「下向き移動のみ抽出」で進行方向を絞り込み</li>
+      </ul>
+      <p>画面上に集計値とグラフが出て、そのまま Excel（概要／Run別集計／詳細データ／グラフ の4シート）に落とせます。</p>
+    </li>
+    <li>
+      <h4>比較する — 比較分析</h4>
+      <p>年度・道路種別などで群を分け、統計的に比較します。正規性検定を経て検定手法を選び、効果量（Cohen's d / η²）まで算出します。「外れ値を除去する (IQR法)」のチェックで四分位範囲による除外を切り替えられます。</p>
+      <p>結果は画面のグラフ（指標を切り替え可能）と Excel レポートで確認できます。Excel は <strong>分析用データ／基本統計量／検定結果／DB_ProcessLog／DB_OvertakeEvents／DB_Video</strong> の6シート構成で、元データまで同梱されます。</p>
+      <p class="note">「AI分析レポート (Gemini)」ボタンで、集計結果の解説文を生成できます。外部APIキーが必要な機能です。</p>
+    </li>
+    <li>
+      <h4>配布用に出す — 出力</h4>
+      <p>§03 の6メニューから目的のファイルをダウンロードします。受け渡しが決まっている場合は「金岡出力」、自前で再分析する場合は「DBそのまま」が基本です。</p>
+    </li>
+  </ol>
+</section>
+
+<!-- ===================== 6 ===================== -->
+<section id="caveats">
+  <div class="sec-head"><span class="sec-num">06</span><h2>旧版の癖・引き継ぎ時の注意</h2></div>
+
+  <div class="callout">
+    <strong>データを読む前に確認すること</strong>
+    <ul>
+      <li><strong>キャリブレーション未適用の Run では m / km/h が意味を持ちません。</strong> px 系の列だけが有効です。プロファイル適用後に後処理を回し直す必要があります。</li>
+      <li><strong><code>speed_km_h</code> が 0 の行が実データに存在します。</strong> スケール未設定や平滑化区間の端で発生します。速度を条件に使う集計では 0 行の扱いを明示してください。</li>
+      <li><strong><code>OvertakeEvents</code> の距離列が NULL の行があります。</strong> イベント自体は検出されていても、離隔・接近の再計算が回っていないケースです。件数集計と距離集計で母数が変わります。</li>
+      <li><strong>離隔距離は m / cm / px が別列で重複保持されています。</strong> どれか1系統だけを使い、混在させないでください。</li>
+      <li><strong>路肩拡幅の有無は Detection の列としては持ちません。</strong> <code>Video.road_type</code>（拡幅／未拡幅）または Run のフォルダ別名で管理します。推論時の入力ミスがそのまま比較分析の誤りになります。</li>
+      <li><strong>「上書きする」オプションは過去データを削除します。</strong> 実行前に <code>db/</code> のバックアップを取ってください。</li>
+      <li><strong>Flask 開発サーバ（debug=True）で動作します。</strong> localhost 前提の構成で、外部公開向けではありません。</li>
+    </ul>
+  </div>
+
+  <div class="prose">
+    <p>設計思想としては、旧版は「1つの巨大な横持ちテーブルに全指標を書き込み、あとから好きな切り口で切り出す」方式です。列を足すだけで新指標を追加できる反面、どの列がどのキャリブレーションで計算されたかが行から追えません。新版 ADC Measurement 1.2 が計算を版付きで管理し、測定区間内の正式値と区間外の参考値を区別しているのは、まさにこの点への対応にあたります。</p>
+  </div>
+</section>
+
+<footer>
+  出典：<span class="mono">Source_code/routes/</span>・<span class="mono">Source_code/modules/</span>・<span class="mono">templates/</span> の実装、および稼働DB <span class="mono">db/my_app_data.db</span> の実測値（2026-09-04 時点）。行数・分布は運用の進行に伴い変動します。
+</footer>
+
+</div>
+
+</body>
+</html>

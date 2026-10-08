@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <div class="card mb-4">
+            <div class="card-header">Database Management</div>
+            <div class="card-body">
+                <h5 class="card-title">Main Database</h5>
+                <p>Path: <code>{{ db_path }}</code></p>
+
+                <h6 class="mt-4">Diagnostics</h6>
+                {% if diagnosis.ok %}
+                <div class="alert alert-success">Database integrity check passed.</div>
+                {% else %}
+                <div class="alert alert-danger">
+                    Integrity check failed: {{ diagnosis.error }}
+                </div>
+                {% endif %}
+
+                <h6 class="mt-4">Sidecar Files</h6>
+                {% if sidecars %}
+                <ul class="list-group">
+                    {% for s in sidecars %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        {{ s.name }}
+                        <span class="badge bg-secondary rounded-pill">{{ s.size_kb }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted">No sidecar files found.</p>
+                {% endif %}
+
+                <hr>
+
+                <div class="d-flex gap-3">
+                    <form method="post" action="{{ url_for('main.optimize_database') }}">
+                        <button type="submit" class="btn btn-primary"
+                            onclick="return confirm('This will compact the database (VACUUM). Continue?')">
+                            <i class="bi bi-tools"></i> Optimize Database (Vacuum)
+                        </button>
+                    </form>
+
+                    <form method="post" action="{{ url_for('main.reset_database_route') }}">
+                        <button type="submit" class="btn btn-danger"
+                            onclick="return confirm('WARNING: This will delete the current database and create a new one. All data will be lost!\nType OK to confirm.')">
+                            <i class="bi bi-trash"></i> Reset Database
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

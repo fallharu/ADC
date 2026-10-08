@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}動画アップロード{% endblock %}
+{% block content %}
+<h2>1. 動画アップロード</h2>
+<p>動画ファイルを直接アップロードするか、サーバー上の既存フォルダを登録してYOLO処理で利用できます。</p>
+<div class="card">
+  <div class="card-body">
+    <form method="POST" enctype="multipart/form-data" id="uploadForm">
+      <div class="mb-3">
+        <label class="form-label">登録方法</label>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="mode" id="modeUpload" value="upload" checked>
+          <label class="form-check-label" for="modeUpload">動画ファイルをアップロード</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="mode" id="modeLink" value="link">
+          <label class="form-check-label" for="modeLink">既存フォルダのパスを登録</label>
+        </div>
+      </div>
+
+      <div id="uploadModeFields" class="border rounded p-3 mb-3 bg-light">
+        <div class="mb-3">
+          <label for="fileInput" class="form-label">動画ファイル</label>
+          <input class="form-control" type="file" name="file" id="fileInput" accept=".mp4,.avi,.mov">
+          <div class="form-text">対応形式: .mp4, .avi, .mov</div>
+        </div>
+      </div>
+
+      <div id="linkModeFields" class="border rounded p-3 mb-3 bg-light d-none">
+        <div class="mb-3">
+          <label for="folderAlias" class="form-label">登録名</label>
+          <input type="text" class="form-control" name="folder_alias" id="folderAlias" placeholder="例: 2024_03_batch">
+          <div class="form-text">未入力の場合はフォルダ名が登録名として使用されます。</div>
+        </div>
+        <div class="mb-3">
+          <label for="folderPath" class="form-label">フォルダパス</label>
+          <div class="input-group">
+            <input type="text" class="form-control" name="folder_path" id="folderPath"
+              placeholder="例: D:\\data\\runs\\batch01">
+            <button type="button" class="btn btn-outline-secondary" id="folderBrowseButton">参照...</button>
+          </div>
+          <input type="file" class="d-none" id="folderPicker" webkitdirectory directory multiple>
+          <div class="form-text" id="folderPickerHelp">サーバーからアクセスできるディレクトリを指定してください。参照ボタンからローカルフォルダを選択できます。</div>
+        </div>
+      </div>
+
+      <!-- メタデータ入力欄 -->
+      <div class="border rounded p-3 mb-3 bg-light">
+        <h6 class="mb-3">メタデータ（任意）</h6>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label for="roadType" class="form-label">道路タイプ</label>
+            <select class="form-select" id="roadType" name="road_type">
+              <option value="">未設定</option>
+              <option value="widened">拡幅区間</option>
+              <option value="non_widened">未拡幅区間</option>
+            </select>
+            <div class="form-text">道路の拡幅状況を選択してください。</div>
+          </div>
+          <div class="col-md-6 mb-3">
+            <label for="collectionYear" class="form-label">データ収集年度</label>
+            <input type="number" class="form-control" id="collectionYear" name="collection_year" placeholder="例: 2024"
+              min="1900" max="2100">
+            <div class="form-text">データを収集した年度を入力してください。</div>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary">登録</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const modeRadios = document.querySelectorAll('input[name="mode"]');
+    const uploadFields = document.getElementById('uploadModeFields');
+    const linkFields = document.getElementById('linkModeFields');
+    const fileInput = document.getElementById('fileInput');
+    const folderPath = document.getElementById('folderPath');
+    const folderBrowseButton = document.getElementById('folderBrowseButton');
+    const folderPicker = document.getElementById('folderPicker');
+    const folderPickerHelp = document.getElementById('folderPickerHelp');
+
+    function syncMode() {
+      const checked = document.querySelector('input[name="mode"]:checked');
+      const mode = checked ? checked.value : 'upload';
+      const isUpload = mode === 'upload';
+      if (uploadFields) uploadFields.classList.toggle('d-none', !isUpload);
+      if (linkFields) linkFields.classList.toggle('d-none', isUpload);
+      if (fileInput) fileInput.required = isUpload;
+      if (folderPath) folderPath.required = !isUpload;
+    }
+
+    modeRadios.forEach(radio => radio.addEventListener('change', syncMode));
+    syncMode();
+
+    function resolveDirectoryPathFromFile(file) {
+      if (!file) return '';
+      if (file.path && typeof file.path === 'string') {
+        return file.path.replace(/[\\/][^\\/]*$/, '');
+      }
+      if (file.webkitRelativePath) {
+        const parts = file.webkitRelativePath.split('/');
+        if (parts.length > 1) {
+          return parts.slice(0, -1).join('/');
+        }
+      }
+      return '';
+    }
+
+    function handleFolderSelection() {
+      if (!folderPicker || !folderPicker.files || folderPicker.files.length === 0) {
+        return;
+      }
+      const candidate = resolveDirectoryPathFromFile(folderPicker.files[0]);
+      let resolved = candidate;
+      if (!resolved && folderPicker.value && !/fakepath/i.test(folderPicker.value)) {
+        resolved = folderPicker.value.replace(/[\\/][^\\/]*$/, '');
+      }
+      if (resolved && folderPath) {
+        folderPath.value = resolved;
+        folderPath.dispatchEvent(new Event('input', { bubbles: true }));
+        if (folderPickerHelp) {
+          folderPickerHelp.textContent = 'フォルダパスを自動入力しました。必要に応じて修正してください。';
+          folderPickerHelp.classList.remove('text-warning');
+        }
+      } else if (folderPickerHelp) {
+        folderPickerHelp.textContent = 'ブラウザの制約により絶対パスを取得できませんでした。手動で入力してください。';
+        folderPickerHelp.classList.add('text-warning');
+      }
+    }
+
+    if (folderBrowseButton && folderPicker) {
+      folderBrowseButton.addEventListener('click', () => {
+        folderPicker.click();
+      });
+      folderPicker.addEventListener('change', handleFolderSelection);
+    }
+  });
+</script>
+{% endblock %}

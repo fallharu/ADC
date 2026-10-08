@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 text-center">
+        <h2><i class="bi bi-bar-chart-fill text-primary"></i> Global Statistics Summary</h2>
+        <p class="text-muted">Overview of all processed data in the system.</p>
+    </div>
+</div>
+
+<div class="row justify-content-center" id="loadingStats">
+    <div class="col-auto">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center d-none" id="statsContainer">
+    <!-- Overtakes -->
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-danger shadow-sm">
+            <div class="card-body text-center">
+                <i class="bi bi-exclamation-triangle display-4 text-danger mb-2"></i>
+                <h5 class="card-title">Total Overtakes</h5>
+                <p class="display-6 fw-bold" id="statOvertakes">-</p>
+                <p class="card-text text-muted small">Confirmed overtake events</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bicycles -->
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-success shadow-sm">
+            <div class="card-body text-center">
+                <i class="bi bi-bicycle display-4 text-success mb-2"></i>
+                <h5 class="card-title">Bicycles Detected</h5>
+                <p class="display-6 fw-bold" id="statBicycles">-</p>
+                <p class="card-text text-muted small">Approximate total detections</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cars -->
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-info shadow-sm">
+            <div class="card-body text-center">
+                <i class="bi bi-car-front display-4 text-info mb-2"></i>
+                <h5 class="card-title">Cars Detected</h5>
+                <p class="display-6 fw-bold" id="statCars">-</p>
+                <p class="card-text text-muted small">Car, Truck, Bus categories</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center d-none mb-3" id="statsContainer2">
+    <!-- Avg Speed -->
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-secondary shadow-sm">
+            <div class="card-body text-center">
+                <i class="bi bi-speedometer display-4 text-secondary mb-2"></i>
+                <h5 class="card-title">Avg Speed</h5>
+                <p class="display-6 fw-bold"><span id="statAvgSpeed">-</span> <span class="fs-5 text-muted">km/h</span>
+                </p>
+                <p class="card-text text-muted small">All detections > 0 km/h</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Avg Overtake Speed -->
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-warning shadow-sm">
+            <div class="card-body text-center">
+                <i class="bi bi-lightning-charge display-4 text-warning mb-2"></i>
+                <h5 class="card-title">Overtake Speed</h5>
+                <p class="display-6 fw-bold"><span id="statOvertakeSpeed">-</span> <span
+                        class="fs-5 text-muted">km/h</span></p>
+                <p class="card-text text-muted small">Avg speed of overtaking vehicle</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inner/Outer Ratio -->
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-primary shadow-sm">
+            <div class="card-body text-center">
+                <i class="bi bi-pie-chart display-4 text-primary mb-2"></i>
+                <h5 class="card-title">Inner / Outer</h5>
+                <p class="display-6 fw-bold">
+                    <span id="statInner" class="text-danger">-</span>% / <span id="statOuter"
+                        class="text-success">-</span>%
+                </p>
+                <p class="card-text text-muted small">Overtaken position ratio</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Avg Overtakes / File -->
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-dark shadow-sm">
+            <div class="card-body text-center">
+                <i class="bi bi-files display-4 text-dark mb-2"></i>
+                <h5 class="card-title">Avg Overtakes/File</h5>
+                <p class="display-6 fw-bold" id="statAvgPerFile">-</p>
+                <p class="card-text text-muted small">Events per processed file</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center d-none mt-4" id="galleryContainer">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-images text-primary"></i> Overtake Gallery</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3" id="galleryGrid">
+                    <!-- Images will be injected here -->
+                </div>
+                <div id="galleryEmpty" class="text-center text-muted py-5 d-none">
+                    No overtake snapshots found.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4 justify-content-center">
+    <div class="col-auto">
+        <button class="btn btn-outline-secondary" onclick="window.close()">
+            <i class="bi bi-x-lg"></i> Close Tab
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        fetch('/api/global_stats')
+            .then(response => response.json())
+            .then(data => {
+                if (!data.error) {
+                    document.getElementById('statOvertakes').textContent = data.overtakes.toLocaleString();
+                    document.getElementById('statBicycles').textContent = data.bicycles.toLocaleString();
+                    document.getElementById('statCars').textContent = data.cars.toLocaleString();
+
+                    document.getElementById('loadingStats').classList.add('d-none');
+                    document.getElementById('statsContainer').classList.remove('d-none');
+                    document.getElementById('statsContainer2').classList.remove('d-none');
+
+                    // Extended Stats
+                    document.getElementById('statAvgSpeed').textContent = (data.avg_speed_kmh || 0).toFixed(1);
+                    document.getElementById('statOvertakeSpeed').textContent = (data.avg_overtake_speed_kmh || 0).toFixed(1);
+                    document.getElementById('statInner').textContent = (data.inner_ratio || 0).toFixed(1);
+                    document.getElementById('statOuter').textContent = (data.outer_ratio || 0).toFixed(1);
+                    document.getElementById('statAvgPerFile').textContent = (data.avg_overtakes_per_file || 0).toFixed(2);
+
+                    // Gallery
+                    const galleryContainer = document.getElementById('galleryContainer');
+                    const galleryGrid = document.getElementById('galleryGrid');
+                    const galleryEmpty = document.getElementById('galleryEmpty');
+
+                    if (data.images && data.images.length > 0) {
+                        galleryContainer.classList.remove('d-none');
+                        galleryGrid.innerHTML = '';
+
+                        // Limit to recent 100 images for performance if needed, or show all with lazy loading
+                        // For now showing first 100 to avoid overwhelming the browser
+                        const displayImages = data.images.slice(0, 100);
+
+                        displayImages.forEach(imgRelPath => {
+                            const col = document.createElement('div');
+                            col.className = 'col-6 col-md-4 col-lg-3 col-xl-2';
+
+                            const imgContainer = document.createElement('div');
+                            imgContainer.className = 'position-relative border rounded overflow-hidden ratio ratio-16x9';
+
+                            const img = document.createElement('img');
+                            img.src = '/results/' + imgRelPath;
+                            img.className = 'w-100 h-100 object-fit-cover';
+                            img.style.cursor = 'zoom-in';
+                            img.loading = 'lazy';
+                            img.onclick = () => window.open(img.src, '_blank');
+
+                            // Extract Run ID from path if possible (e.g. output/Run_123/...)
+                            // Assuming path structure like: .../Run_(\d+)/...
+                            const match = imgRelPath.match(/Run_(\d+)/i);
+                            if (match) {
+                                const badge = document.createElement('span');
+                                badge.className = 'position-absolute top-0 start-0 badge bg-dark bg-opacity-75 m-1';
+                                badge.textContent = 'Run #' + match[1];
+                                imgContainer.appendChild(badge);
+                            }
+
+                            imgContainer.appendChild(img);
+                            col.appendChild(imgContainer);
+                            galleryGrid.appendChild(col);
+                        });
+
+                        if (data.images.length > 100) {
+                            const moreCol = document.createElement('div');
+                            moreCol.className = 'col-12 text-center mt-3';
+                            moreCol.innerHTML = `<span class="text-muted">and ${data.images.length - 100} more images...</span>`;
+                            galleryGrid.appendChild(moreCol);
+                        }
+
+                    } else {
+                        // show empty state if we want the container to be visible, or just keep it hidden
+                        // keeping it hidden if no images
+                    }
+                } else {
+                    alert('Failed to load stats: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(err => {
+                console.error('Error fetching global stats:', err);
+                alert('Communication error while fetching stats.');
+            });
+    });
+</script>
+{% endblock %}

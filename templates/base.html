@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ title if title else "ADC System" }}{% endblock %}</title>
+  <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/noto-sans-jp.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+
+<body class="app-shell app-endpoint-{{ request.endpoint|default('unknown')|replace('.', '-') }}">
+  {% set endpoint = request.endpoint or '' %}
+  {% set workflow_endpoints = ['main.upload_video', 'main.detect', 'main.post_process', 'main.detections'] %}
+  {% set review_endpoints = ['main.manual_overtake', 'main.manual_overtake_view', 'main.overtake_gallery', 'verify.page'] %}
+  {% set report_endpoints = ['main.statistics_view', 'main.comparative_report_view', 'main.export_page', 'results.result_view', 'check_sheet.import_check_sheet'] %}
+
+  <aside class="app-sidebar" id="appSidebar" aria-label="メインナビゲーション">
+    <a class="app-brand" href="{{ url_for('main.index') }}">
+      <span class="app-brand-icon"><i class="bi bi-speedometer2"></i></span>
+      <span>
+        <span class="app-brand-name">ADC System</span>
+        <span class="app-brand-subtitle">Video Analytics Console</span>
+      </span>
+    </a>
+
+    <nav class="app-nav">
+      <div class="app-nav-label">Workflow</div>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.index' }}" href="{{ url_for('main.index') }}">
+        <i class="bi bi-house-door"></i><span>ダッシュボード</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.upload_video' }}" href="{{ url_for('main.upload_video') }}">
+        <i class="bi bi-upload"></i><span>1. 動画登録</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.detect' }}" href="{{ url_for('main.detect') }}">
+        <i class="bi bi-cpu"></i><span>2. YOLO推論</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.post_process' }}" href="{{ url_for('main.post_process') }}">
+        <i class="bi bi-calculator"></i><span>3. 後処理</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.detections' }}" href="{{ url_for('main.detections') }}">
+        <i class="bi bi-table"></i><span>4. 検出結果</span>
+      </a>
+
+      <div class="app-nav-label">Review</div>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.manual_overtake' }}" href="{{ url_for('main.manual_overtake') }}">
+        <i class="bi bi-pencil-square"></i><span>手動判定</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.manual_overtake_view' }}" href="{{ url_for('main.manual_overtake_view') }}">
+        <i class="bi bi-eye"></i><span>イベント観覧</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.overtake_gallery' }}" href="{{ url_for('main.overtake_gallery') }}">
+        <i class="bi bi-images"></i><span>追い越し写真</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'verify.page' }}" href="{{ url_for('verify.page') }}">
+        <i class="bi bi-rulers"></i><span>検証</span>
+      </a>
+
+      <div class="app-nav-label">Reports</div>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.statistics_view' }}" href="{{ url_for('main.statistics_view') }}">
+        <i class="bi bi-bar-chart-line"></i><span>集計</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.comparative_report_view' }}" href="{{ url_for('main.comparative_report_view') }}">
+        <i class="bi bi-graph-up-arrow"></i><span>比較分析</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'main.export_page' }}" href="{{ url_for('main.export_page') }}">
+        <i class="bi bi-download"></i><span>出力</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'results.result_view' }}" href="{{ url_for('results.result_view') }}">
+        <i class="bi bi-trophy"></i><span>リザルト</span>
+      </a>
+      <a class="app-nav-link {{ 'active' if endpoint == 'check_sheet.import_check_sheet' }}" href="{{ url_for('check_sheet.import_check_sheet') }}">
+        <i class="bi bi-list-check"></i><span>チェックシート</span>
+      </a>
+      <a class="app-nav-link" href="/global_summary" target="_blank" rel="noopener">
+        <i class="bi bi-bar-chart-fill"></i><span>Global Stats</span>
+      </a>
+    </nav>
+  </aside>
+
+  <div class="app-main">
+    <header class="app-topbar">
+      <div class="d-flex align-items-center gap-2 min-w-0">
+        <button class="btn btn-sm btn-outline-secondary app-sidebar-toggle" type="button" data-app-sidebar-toggle
+          aria-label="ナビゲーションを開閉">
+          <i class="bi bi-list"></i>
+        </button>
+        <div class="min-w-0">
+          <div class="app-topbar-kicker">Workspace</div>
+          <div class="app-topbar-title text-truncate">{% block page_title %}{{ title if title else "ADC System" }}{% endblock %}</div>
+        </div>
+      </div>
+      <div class="app-topbar-actions">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.upload_video') }}">
+          <i class="bi bi-plus-circle"></i><span>動画登録</span>
+        </a>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('main.detect') }}">
+          <i class="bi bi-play-fill"></i><span>推論</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="app-content">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="app-flash-stack">
+        {% for category, msg in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <div class="toast-container position-fixed bottom-0 end-0 p-3" id="appToastContainer"></div>
+
+  <div class="modal fade" id="appConfirmModal" tabindex="-1" aria-labelledby="appConfirmTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5" id="appConfirmTitle">確認</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
+        </div>
+        <div class="modal-body" id="appConfirmMessage"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="button" class="btn btn-danger" id="appConfirmOk">実行</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app-ui.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+
+</html>

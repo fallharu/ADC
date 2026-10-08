@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>9. チェックシート (手動追い越し一括登録)</h2>
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> TSV形式 (動画名, フレーム, クラス) を貼り付けてください。
+        <br>動画名とフレームが一致する行をペアとして処理します。
+        <br>前後60フレーム以内に既存の追い越しイベントがある場合はスキップされます。
+    </div>
+
+    <form method="POST" action="{{ url_for('check_sheet.import_check_sheet') }}">
+        <div class="mb-3">
+            <label for="tsvData" class="form-label">データ貼り付けエリア</label>
+            <textarea class="form-control font-monospace" id="tsvData" name="tsv_data" rows="15" placeholder="例:
+1_20250802_000G2713_bike_clips.mp4	684	car
+1_20250802_000G2713_bike_clips.mp4	684	bicycle"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-cloud-upload"></i> インポート実行
+        </button>
+    </form>
+
+    {% if video_summary %}
+    <hr class="my-4">
+    <h3>動画別サマリー</h3>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm">
+            <thead class="table-light">
+                <tr>
+                    <th>動画名</th>
+                    <th class="text-center" style="width: 100px;">状態</th>
+                    <th class="text-center" style="width: 100px;">内訳</th>
+                    <th>詳細</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for video in video_summary %}
+                <tr>
+                    <td class="font-monospace small">{{ video.name }}</td>
+                    <td class="text-center">
+                        {% if video.status_icon == 'circle' %}
+                        <span class="text-success fs-4 fw-bold">○</span>
+                        {% elif video.status_icon == 'triangle' %}
+                        <span class="text-warning fs-4 fw-bold">△</span>
+                        {% elif video.status_icon == 'star' %}
+                        <span class="text-warning fs-4 fw-bold"><i class="bi bi-star-fill"
+                                style="color: gold;"></i></span>
+                        {% else %}
+                        <span class="text-danger fs-4 fw-bold">×</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center small">
+                        {% if video.stat_counts.registered > 0 %}
+                        <span class="badge bg-success">{{ video.stat_counts.registered }}</span>
+                        {% endif %}
+                        {% if video.stat_counts.skipped > 0 %}
+                        <span class="badge bg-secondary">{{ video.stat_counts.skipped }}</span>
+                        {% endif %}
+                        {% if video.stat_counts.video_not_found > 0 %}
+                        <span class="badge bg-danger">無</span>
+                        {% endif %}
+                        {% if video.stat_counts.no_detection > 0 %}
+                        <span class="badge bg-warning text-dark">未検</span>
+                        {% endif %}
+                        {% if video.stat_counts.overtake_applied > 0 %}
+                        <span class="badge bg-info text-dark" title="追い越し判定付与済み">付与:{{
+                            video.stat_counts.overtake_applied }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="small">{{ video.summary }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if results %}
+    <hr class="my-4">
+    <h3>詳細結果</h3>
+    <div class="table-responsive">
+        <table class="table table-striped table-hover table-sm">
+
+            <thead>
+                <tr>
+                    <th class="text-center" style="width: 40px;">
+                        <input type="checkbox" id="selectAllRuns" class="form-check-input">
+                    </th>
+                    <th>動画名</th>
+                    <th>フレーム</th>
+                    <th>ペア (車 vs 自転車)</th>
+                    <th>ステータス</th>
+                    <th>詳細</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for res in results %}
+                <tr
+                    class="{{ 'table-success' if res.status == 'Registered' else 'table-secondary' if res.status == 'Skipped' else 'table-warning' if res.status == 'NoDetection' else 'table-danger' }}">
+                    <td class="text-center">
+                        {% if res.run_id %}
+                        <input type="checkbox" class="form-check-input run-selector" value="{{ res.run_id }}">
+                        {% endif %}
+                    </td>
+                    <td>{{ res.video }}</td>
+                    <td>{{ res.frame }}</td>
+                    <td>{{ res.pair }}</td>
+                    <td>
+                        {% if res.status == 'Registered' %}
+                        <span class="badge bg-success">登録完了</span>
+                        {% elif res.status == 'Skipped' %}
+                        <span class="badge bg-secondary">スキップ (重複)</span>
+                        {% elif res.status == 'VideoNotFound' %}
+                        <span class="badge bg-danger">動画なし</span>
+                        {% elif res.status == 'NoDetection' %}
+                        <span class="badge bg-warning text-dark">検出なし</span>
+                        {% if res.run_id %}
+                        <a href="{{ url_for('main.manual_overtake', run_id=res.run_id, frame=res.frame) }}"
+                            target="_blank" class="btn btn-sm btn-outline-dark ms-1 py-0 px-1"
+                            style="font-size: 0.75rem;">
+                            <i class="bi bi-pencil-square"></i> 手動付与
+                        </a>
+                        {% endif %}
+                        {% else %}
+                        <span class="badge bg-danger">エラー</span>
+                        {% endif %}
+
+
+                        {% if res.run_id %}
+                        <button type="button" class="btn btn-sm btn-outline-secondary ms-1 py-0 px-1"
+                            data-bs-toggle="modal" data-bs-target="#rerunYoloModal" data-run-id="{{ res.run_id }}"
+                            style="font-size: 0.75rem;">
+                            <i class="bi bi-gear"></i> 個別設定
+                        </button>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if res.overtake_applied %}
+                        <span class="badge bg-info text-dark"><i class="bi bi-check-circle"></i> 判定付与済</span>
+                        {% endif %}
+                        {{ res.details }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex justify-content-end mt-3">
+        <button type="button" class="btn btn-primary" id="btnBatchRun" disabled>
+            <i class="bi bi-collection-play"></i> 選択した動画をまとめて再実行
+        </button>
+    </div>
+    {% endif %}
+</div>
+</div>
+
+<!-- Rerun YOLO Modal -->
+<div class="modal fade" id="rerunYoloModal" tabindex="-1" aria-labelledby="rerunYoloModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="rerunYoloModalLabel">YOLO再実行設定</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('check_sheet.rerun_yolo_for_run') }}" method="POST">
+                <div class="modal-body">
+                    <!-- comma separated IDs -->
+                    <input type="hidden" name="run_ids" id="rerunRunIds">
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">モデル選択</label>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label for="vehicleModelSelect" class="form-label small">車両モデル
+                                    (Car/Bus/Truck/Bike)</label>
+                                <select class="form-select form-select-sm" id="vehicleModelSelect" name="vehicle_model">
+                                    <option value="">(自動/デフォルト)</option>
+                                    {% for model in available_models %}
+                                    <option value="{{ model }}">{{ model }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="tireModelSelect" class="form-label small">タイヤモデル (Best/Tire)</label>
+                                <select class="form-select form-select-sm" id="tireModelSelect" name="tire_model">
+                                    <option value="">(自動/デフォルト)</option>
+                                    {% for model in available_models %}
+                                    <option value="{{ model }}">{{ model }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="mb-3">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="enhanceVideoCheck" name="enhance_video"
+                                value="true">
+                            <label class="form-check-label fw-bold" for="enhanceVideoCheck">動画補正を有効にする</label>
+                        </div>
+
+                        <div id="enhanceControls"
+                            style="display: none; padding-left: 1rem; border-left: 3px solid #dee2e6;">
+                            <div class="mb-2">
+                                <label for="gammaRange" class="form-label small">明るさ (ガンマ補正) <span
+                                        id="gammaVal">1.5</span></label>
+                                <input type="range" class="form-range" min="0.5" max="3.0" step="0.1" value="1.5"
+                                    id="gammaRange" name="gamma_value">
+                            </div>
+                            <div class="mb-2">
+                                <label for="contrastRange" class="form-label small">コントラスト強調 <span
+                                        id="contrastVal">1.0</span></label>
+                                <input type="range" class="form-range" min="1.0" max="3.0" step="0.1" value="1.0"
+                                    id="contrastRange" name="contrast_value">
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="grayscaleCheck" name="grayscale"
+                                    value="true">
+                                <label class="form-check-label small" for="grayscaleCheck">
+                                    白黒強調モード (グレースケール変換後にコントラスト適用)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-light border small">
+                        <i class="bi bi-exclamation-circle"></i>
+                        選択された動画すべてに対して、以下の処理を一括実行します：<br>
+                        1. 動画補正 (一時ファイル作成)<br>
+                        2. YOLO推論 (Vehicle + Tire)<br>
+                        3. キャリブレーション・手動イベント復元<br>
+                        4. <strong>自動後処理 (ID割付・運動学・追い越し判定)</strong>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="submit" class="btn btn-primary">
+                        <span id="submitBtnText">再実行開始</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Modal Logic ---
+    var rerunModal = document.getElementById('rerunYoloModal');
+    var enhanceCheck = document.getElementById('enhanceVideoCheck');
+    var enhanceControls = document.getElementById('enhanceControls');
+
+    // Sliders
+    var gammaRange = document.getElementById('gammaRange');
+    var gammaVal = document.getElementById('gammaVal');
+    var contrastRange = document.getElementById('contrastRange');
+    var contrastVal = document.getElementById('contrastVal');
+
+    rerunModal.addEventListener('show.bs.modal', function (event) {
+        var button = event.relatedTarget; // Button that triggered the modal
+        var inputRunIds = rerunModal.querySelector('#rerunRunIds');
+        var submitBtnText = rerunModal.querySelector('#submitBtnText');
+
+        // If triggered by "Batch Run" button (which we'll handle internally), button is null or special
+        // Actually, we can trigger modal via JS for batch
+
+        if (button && button.hasAttribute('data-run-id')) {
+            // Single run
+            var runId = button.getAttribute('data-run-id');
+            inputRunIds.value = runId;
+            submitBtnText.textContent = "この動画を再実行";
+        } else if (button && button.id === 'btnBatchRun') {
+            // Batch run (triggered by the button we added)
+            // Logic handled by click event below, basically we just open modal
+            // But here let's assume valid IDs are already set if opened via JS
+            submitBtnText.textContent = "一括再実行開始";
+        }
+    });
+
+    // Toggle Enhance Controls
+    enhanceCheck.addEventListener('change', function () {
+        enhanceControls.style.display = this.checked ? 'block' : 'none';
+    });
+
+    gammaRange.addEventListener('input', function () {
+        gammaVal.textContent = this.value;
+    });
+    contrastRange.addEventListener('input', function () {
+        contrastVal.textContent = this.value;
+    });
+
+
+    // --- Batch Selection Logic ---
+    var selectAll = document.getElementById('selectAllRuns');
+    var runSelectors = document.querySelectorAll('.run-selector');
+    var btnBatchRun = document.getElementById('btnBatchRun');
+
+    function updateBatchButton() {
+        var checkedCount = document.querySelectorAll('.run-selector:checked').length;
+        if (checkedCount > 0) {
+            btnBatchRun.disabled = false;
+            btnBatchRun.innerHTML = `<i class="bi bi-collection-play"></i> 選択した ${checkedCount} 件をまとめて再実行`;
+        } else {
+            btnBatchRun.disabled = true;
+            btnBatchRun.innerHTML = `<i class="bi bi-collection-play"></i> 選択した動画をまとめて再実行`;
+        }
+    }
+
+    if (selectAll) {
+        selectAll.addEventListener('change', function () {
+            var checked = this.checked;
+            runSelectors.forEach(function (el) {
+                el.checked = checked;
+            });
+            updateBatchButton();
+        });
+    }
+
+    runSelectors.forEach(function (el) {
+        el.addEventListener('change', updateBatchButton);
+    });
+
+    if (btnBatchRun) {
+        btnBatchRun.addEventListener('click', function () {
+            var selectedIds = [];
+            document.querySelectorAll('.run-selector:checked').forEach(function (el) {
+                selectedIds.push(el.value);
+            });
+
+            if (selectedIds.length === 0) return;
+
+            // Set IDs to Modal Input
+            document.getElementById('rerunRunIds').value = selectedIds.join(',');
+
+            // Open Modal
+            var modal = new bootstrap.Modal(rerunModal);
+            modal.show();
+
+            // Since explicit .show() doesn't set relatedTarget, we handle text manually
+            document.getElementById('submitBtnText').textContent = `選択した ${selectedIds.length} 件を一括再実行`;
+        });
+    }
+
+</script>
+{% endblock %}

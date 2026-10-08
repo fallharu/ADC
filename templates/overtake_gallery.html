@@ -1,0 +1,1771 @@
+{% extends "base.html" %}
+
+{% block title %}追い越し写真ギャラリー{% endblock %}
+{% block page_title %}追い越し写真{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="page-heading">
+        <h2><i class="bi bi-images me-2"></i>追い越し写真ギャラリー</h2>
+        <div class="d-flex align-items-center flex-wrap gap-2">
+            <form id="regenerateForm" action="{{ url_for('main.regenerate_overtake_photos') }}" method="POST"
+                class="d-inline-flex align-items-center gap-2" onsubmit="return handleRegenerate(event);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is defined else '' }}">
+                <select name="source" class="form-select form-select-sm" style="width: auto;">
+                    <option value="both">すべて</option>
+                    <option value="auto">自動検出のみ</option>
+                    <option value="manual">手動追加のみ</option>
+                </select>
+                <button type="submit" class="btn btn-primary btn-sm" id="regenerateBtn">
+                    <span class="spinner-border spinner-border-sm d-none" role="status" id="regenerateSpinner"></span>
+                    <i class="bi bi-arrow-clockwise me-1" id="regenerateIcon"></i>写真を再生成
+                </button>
+            </form>
+            <!-- Reset Button Trigger -->
+            <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal"
+                data-bs-target="#resetPhotosModal">
+                <i class="bi bi-trash me-1"></i>写真をリセット
+            </button>
+
+            <button type="button" class="btn btn-outline-success btn-sm" id="btnExportGroupIds"
+                onclick="exportAllGroupIds()">
+                <i class="bi bi-download me-1"></i>グループID一覧出力
+            </button>
+        </div>
+    </div>
+
+    <!-- 追い越し数サマリー -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card bg-primary text-white">
+                <div class="card-body text-center py-3">
+                    <h3 class="mb-0">{{ overtake_event_count }}</h3>
+                    <small>自動検出 追い越し数</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-success text-white">
+                <div class="card-body text-center py-3">
+                    <h3 class="mb-0">{{ manual_event_count }}</h3>
+                    <small>手動追加 追い越し数</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-info text-white">
+                <div class="card-body text-center py-3">
+                    <h3 class="mb-0">{{ total_count }}</h3>
+                    <small>写真枚数</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 追い越し統計（拡幅/未拡幅） -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-light fw-semibold">拡幅</div>
+                <div class="card-body py-2">
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr>
+                                <th style="width: 45%;">検知数</th>
+                                <td>{{ overtake_stats.widened.count }}</td>
+                            </tr>
+                            <tr>
+                                <th>中央線越え割合</th>
+                                <td>
+                                    {{ '%.1f%%'|format(overtake_stats.widened.center_ratio) if
+                                    overtake_stats.widened.center_ratio is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線越え割合</th>
+                                <td>
+                                    {{ '%.1f%%'|format(overtake_stats.widened.white_ratio) if
+                                    overtake_stats.widened.white_ratio is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 最小</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.clearance.min) if
+                                    overtake_stats.widened.clearance.min is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 中央値</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.clearance.median) if
+                                    overtake_stats.widened.clearance.median is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 最大</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.clearance['max']) if
+                                    overtake_stats.widened.clearance['max'] is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 最小</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.line.min) if
+                                    overtake_stats.widened.line.min is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 中央値</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.line.median) if
+                                    overtake_stats.widened.line.median is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 最大</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.widened.line['max']) if
+                                    overtake_stats.widened.line['max'] is not none else '-' }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-light fw-semibold">未拡幅</div>
+                <div class="card-body py-2">
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr>
+                                <th style="width: 45%;">検知数</th>
+                                <td>{{ overtake_stats.unwidened.count }}</td>
+                            </tr>
+                            <tr>
+                                <th>中央線越え割合</th>
+                                <td>
+                                    {{ '%.1f%%'|format(overtake_stats.unwidened.center_ratio) if
+                                    overtake_stats.unwidened.center_ratio is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線越え割合</th>
+                                <td>
+                                    {{ '%.1f%%'|format(overtake_stats.unwidened.white_ratio) if
+                                    overtake_stats.unwidened.white_ratio is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 最小</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.clearance.min) if
+                                    overtake_stats.unwidened.clearance.min is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 中央値</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.clearance.median) if
+                                    overtake_stats.unwidened.clearance.median is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>離隔距離 最大</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.clearance['max']) if
+                                    overtake_stats.unwidened.clearance['max'] is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 最小</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.line.min) if
+                                    overtake_stats.unwidened.line.min is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 中央値</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.line.median) if
+                                    overtake_stats.unwidened.line.median is not none else '-' }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>白線距離 最大</th>
+                                <td>
+                                    {{ '%.2f m'|format(overtake_stats.unwidened.line['max']) if
+                                    overtake_stats.unwidened.line['max'] is not none else '-' }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ソートコントロール -->
+    <div class="app-toolbar justify-content-end">
+        <label class="text-muted small mb-0">並び替え:</label>
+        <div class="btn-group btn-group-sm" role="group">
+            <a href="{{ url_for('main.overtake_gallery', sort='name', order='asc') }}"
+                class="btn btn-outline-secondary {{ 'active' if current_sort == 'name' and current_order == 'asc' else '' }}">
+                <i class="bi bi-sort-alpha-down"></i> 名前↑
+            </a>
+            <a href="{{ url_for('main.overtake_gallery', sort='name', order='desc') }}"
+                class="btn btn-outline-secondary {{ 'active' if current_sort == 'name' and current_order == 'desc' else '' }}">
+                <i class="bi bi-sort-alpha-up"></i> 名前↓
+            </a>
+            <a href="{{ url_for('main.overtake_gallery', sort='time', order='desc') }}"
+                class="btn btn-outline-secondary {{ 'active' if current_sort == 'time' and current_order == 'desc' else '' }}">
+                <i class="bi bi-clock"></i> 新しい順
+            </a>
+            <a href="{{ url_for('main.overtake_gallery', sort='time', order='asc') }}"
+                class="btn btn-outline-secondary {{ 'active' if current_sort == 'time' and current_order == 'asc' else '' }}">
+                <i class="bi bi-clock-history"></i> 古い順
+            </a>
+        </div>
+    </div>
+
+    {% if images %}
+    <div class="app-gallery-grid">
+        {% for img in images %}
+        <div class="overtake-gallery-item">
+            <div class="card h-100 shadow-sm overtake-card" data-img-path="{{ img }}" data-bs-toggle="tooltip"
+                title="クリックで詳細表示" style="cursor: pointer; position: relative;">
+                <!-- 左上: コピー回数・データ完全性マーク -->
+                <div class="card-overlay-left"
+                    style="position: absolute; top: 4px; left: 4px; z-index: 10; display: flex; gap: 2px;">
+                    <span class="badge bg-secondary copy-count-badge" data-img="{{ img }}" title="コピー回数"
+                        style="font-size: 0.65rem; display: none;">0</span>
+                    <span class="badge data-status-badge" data-img="{{ img }}" title="データ状態"
+                        style="font-size: 0.65rem; display: none;">?</span>
+                    <span class="badge line-status-badge" data-img="{{ img }}" data-line="center" title="中央線判定"
+                        style="font-size: 0.65rem; display: none;">中:-</span>
+                    <span class="badge line-status-badge" data-img="{{ img }}" data-line="white" title="白線判定"
+                        style="font-size: 0.65rem; display: none;">白:-</span>
+                </div>
+                <!-- 右上: RUN_ID -->
+                <div class="card-overlay-right" style="position: absolute; top: 4px; right: 4px; z-index: 10;">
+                    <span class="badge bg-primary run-id-badge" data-img="{{ img }}" title="Run ID"
+                        style="font-size: 0.65rem; display: none;">-</span>
+                </div>
+                <img src="{{ url_for('main.results_file_serve', filename=img) }}" class="card-img-top"
+                    alt="Overtake {{ loop.index }}" style="object-fit: contain; height: 200px; background: #f8f9fa;"
+                    loading="lazy">
+                <div class="card-footer py-1 px-2 text-muted small text-truncate" title="{{ img }}">
+                    {{ img.split('/')[-1] }}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-info text-center py-5">
+        <i class="bi bi-info-circle fs-1 d-block mb-3"></i>
+        <p class="mb-0">追い越し写真がまだありません。後処理を実行すると、ここに写真が表示されます。</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 追い越し写真詳細モーダル -->
+<div class="modal fade" id="overtakeDetailModal" tabindex="-1" aria-labelledby="overtakeDetailModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="overtakeDetailModalLabel">
+                    <i class="bi bi-image me-2"></i>追い越しイベント詳細
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <!-- 左側: 拡大写真 -->
+                    <div class="col-lg-6 mb-3">
+                        <div class="position-relative" style="max-height: 500px;">
+                            <img id="modalImage" src="" class="img-fluid rounded shadow" alt="Overtake Photo"
+                                style="max-height: 500px; width: 100%; object-fit: contain; background: #f0f0f0;">
+                            <canvas id="modalOverlay"
+                                style="position: absolute; inset: 0; pointer-events: none;"></canvas>
+                        </div>
+                        <div class="mt-2 small border rounded p-2 bg-light">
+                            <div class="fw-semibold mb-1">表示設定</div>
+                            <div class="row g-1">
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayVehicleBox">
+                                        <label class="form-check-label" for="overlayVehicleBox">車両BBOX表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayTireBox">
+                                        <label class="form-check-label" for="overlayTireBox">タイヤBBOX表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayLeftLine" checked>
+                                        <label class="form-check-label" for="overlayLeftLine">白線表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayCenterLine" checked>
+                                        <label class="form-check-label" for="overlayCenterLine">中央線表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayLeftLineDistance" checked>
+                                        <label class="form-check-label" for="overlayLeftLineDistance">白線距離表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayCenterLineDistance" checked>
+                                        <label class="form-check-label" for="overlayCenterLineDistance">中央線距離表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayClearanceDistance" checked>
+                                        <label class="form-check-label" for="overlayClearanceDistance">離隔距離表示</label>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input overlay-toggle" type="checkbox"
+                                            id="overlayLabels">
+                                        <label class="form-check-label" for="overlayLabels">ラベル表示</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 関連ID情報パネル -->
+                    <div class="mt-3 small border rounded p-2 bg-light">
+                        <div class="fw-semibold mb-1">関連ID情報</div>
+                        <div class="row g-1" id="trackInfoPanel">
+                            <div class="col-12 text-muted">データなし</div>
+                        </div>
+                    </div>
+
+                    <div class="text-center mt-2 d-flex justify-content-center gap-2">
+                        <a id="modalImageLink" href="" target="_blank" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>オリジナル
+                        </a>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="downloadPhotoWithOverlay()">
+                            <i class="bi bi-download me-1"></i>画像保存 (描画付き)
+                        </button>
+                    </div>
+                </div>
+                <!-- 右側: データ表示 -->
+                <div class="col-lg-6">
+                    <!-- ローディング -->
+                    <div id="detailLoading" class="text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">データを取得中...</p>
+                    </div>
+                    <!-- エラー -->
+                    <div id="detailError" class="alert alert-danger d-none"></div>
+                    <!-- データ表示領域 -->
+                    <div id="detailContent" class="d-none">
+                        <!-- 基本情報 -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-secondary text-white py-2">
+                                <i class="bi bi-info-circle me-1"></i>基本情報
+                            </div>
+                            <div class="card-body py-2">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th style="width: 40%;">フレーム番号</th>
+                                            <td id="infoFrameNum">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>Run ID</th>
+                                            <td id="infoRunId">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>動画ファイル</th>
+                                            <td id="infoVideoFilename">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>自動出力</th>
+                                            <td id="infoAutoOutput">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>再実行出力</th>
+                                            <td id="infoRerunOutput">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>手動出力</th>
+                                            <td id="infoManualOutput">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 検出選択 (Override) -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-dark text-white py-2">
+                                <i class="bi bi-hand-index-thumb me-1"></i>検出対象の選択 (BBOX変更)
+                            </div>
+                            <div class="card-body py-2">
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">追い越し車 (CAR)</label>
+                                        <select id="selectCarDetection" class="form-select form-select-sm"></select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">被追い越し車 (BIKE)</label>
+                                        <select id="selectBikeDetection" class="form-select form-select-sm"></select>
+                                    </div>
+                                </div>
+                                <div class="mt-2 text-end">
+                                    <button class="btn btn-outline-secondary btn-sm"
+                                        onclick="resetDetectionSelection()">
+                                        <i class="bi bi-arrow-counterclockwise"></i> リセット
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 追い越しイベント情報 -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-danger text-white py-2">
+                                <i class="bi bi-exclamation-triangle me-1"></i>追い越しイベント
+                            </div>
+                            <div class="card-body py-2">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th style="width: 40%;">離隔距離</th>
+                                            <td id="eventClearance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>接近距離</th>
+                                            <td id="eventApproach">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線距離</th>
+                                            <td id="eventLineDistance">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <!-- 追い越し車 (車) -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-warning py-2">
+                                <i class="bi bi-car-front me-1"></i>追い越し車 (CAR)
+                                <button class="btn btn-sm btn-outline-dark float-end" id="btnShowCarGroup">
+                                    <i class="bi bi-list-ul me-1"></i>グループ詳細
+                                </button>
+                            </div>
+                            <div class="card-body py-2">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th style="width: 40%;">グループID</th>
+                                            <td id="carGroupId">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>計測点ソース</th>
+                                            <td id="carSource">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>クラス</th>
+                                            <td id="carClassName">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>速度</th>
+                                            <td id="carSpeed">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>進行方向</th>
+                                            <td id="carDirection">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>離隔距離</th>
+                                            <td id="carClearance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線距離</th>
+                                            <td id="carLineDistance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>中央線判定</th>
+                                            <td id="carCenterLineStatus">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線判定</th>
+                                            <td id="carWhiteLineStatus">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <div class="mt-2">
+                                    <label class="form-label mb-1 small">中央線判定(編集)</label>
+                                    <select id="carCenterStatusSelect" class="form-select form-select-sm">
+                                        <option value="">-</option>
+                                        <option value="中央線越え">中央線越え</option>
+                                        <option value="中央線内側">中央線内側</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 被追い越し車 (自転車) -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-info text-white py-2">
+                                <i class="bi bi-bicycle me-1"></i>追い越され自転車 (BIKE)
+                                <button class="btn btn-sm btn-outline-light float-end" id="btnShowBikeGroup">
+                                    <i class="bi bi-list-ul me-1"></i>グループ詳細
+                                </button>
+                            </div>
+                            <div class="card-body py-2">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th style="width: 40%;">グループID</th>
+                                            <td id="bikeGroupId">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>計測点ソース</th>
+                                            <td id="bikeSource">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>クラス</th>
+                                            <td id="bikeClassName">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>速度</th>
+                                            <td id="bikeSpeed">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>進行方向</th>
+                                            <td id="bikeDirection">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>離隔距離</th>
+                                            <td id="bikeClearance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線距離</th>
+                                            <td id="bikeLineDistance">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>中央線判定</th>
+                                            <td id="bikeCenterLineStatus">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>白線判定</th>
+                                            <td id="bikeWhiteLineStatus">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <div class="mt-2">
+                                    <label class="form-label mb-1 small">白線判定(編集)</label>
+                                    <select id="bikeWhiteStatusSelect" class="form-select form-select-sm">
+                                        <option value="">-</option>
+                                        <option value="白線越え">白線越え</option>
+                                        <option value="白線内側">白線内側</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-center mb-3">
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="btnSaveLineStatus">
+                                <i class="bi bi-save me-1"></i>判定を保存
+                            </button>
+                            <div id="saveStatusMsg" class="text-success mt-2 d-none">
+                                <i class="bi bi-check-circle me-1"></i>保存しました
+                            </div>
+                        </div>
+                        <!-- コピーボタン -->
+                        <div class="text-center mt-3">
+                            <button type="button" class="btn btn-success" id="btnCopyData">
+                                <i class="bi bi-clipboard me-1"></i>データをコピー (Excel形式)
+                            </button>
+                            <button type="button" class="btn btn-outline-danger ms-2" id="btnDeleteOvertake">
+                                <i class="bi bi-trash me-1"></i>この追い越しを削除
+                            </button>
+                            <div id="copySuccess" class="text-success mt-2 d-none">
+                                <i class="bi bi-check-circle me-1"></i>コピーしました！
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+<!-- グループデータモーダル -->
+<div class="modal fade" id="groupDataModal" tabindex="-1" aria-labelledby="groupDataModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="groupDataModalLabel">
+                    <i class="bi bi-list-ul me-2"></i>グループID <span id="groupDataGroupId"></span> の全データ
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="groupDataLoading" class="text-center py-5">
+                    <div class="spinner-border text-success" role="status"></div>
+                    <p class="mt-2 text-muted">データを取得中...</p>
+                </div>
+                <div id="groupDataError" class="alert alert-danger d-none"></div>
+                <div id="groupDataContent" class="d-none">
+                    <p class="text-muted mb-2">
+                        <strong id="groupDataCount">0</strong> 件のDetectionデータ
+                    </p>
+                    <div class="table-responsive" style="max-height: 500px;">
+                        <table class="table table-sm table-striped table-hover">
+                            <thead class="table-dark sticky-top">
+                                <tr>
+                                    <th>フレーム</th>
+                                    <th>クラス</th>
+                                    <th>速度</th>
+                                    <th>加速度</th>
+                                    <th>白線距離</th>
+                                    <th>進行方向</th>
+                                    <th>追い越し</th>
+                                </tr>
+                            </thead>
+                            <tbody id="groupDataTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- リセット確認モーダル -->
+<div class="modal fade" id="resetPhotosModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1"
+    aria-labelledby="resetPhotosModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="resetPhotosModalLabel">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>警告
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="fw-bold">本当にすべての追い越し写真を削除しますか？</p>
+                <div class="alert alert-danger small mb-3">
+                    対象: 写真 {{ total_count }} 件。削除後は再生成を実行するまで写真一覧に戻りません。
+                </div>
+                <p class="text-muted small">
+                    この操作は取り消せません。<br>
+                    再度写真を確認するには「再生成」を実行する必要があります。
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                <form action="{{ url_for('main.reset_overtake_photos') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is defined else '' }}">
+                    <button type="submit" class="btn btn-danger">削除を実行</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+
+{% block scripts %}
+<script>
+    // 現在のデータを保持
+    let currentRunId = null;
+    let currentCarGroupId = null;
+    let currentBikeGroupId = null;
+    let currentEventData = null;  // Store full API response for copy
+    let currentImgPath = null;    // 現在表示中の画像パス
+
+    // コピー回数をlocalStorageで管理
+    const COPY_COUNT_KEY = 'overtake_copy_counts';
+
+    function getCopyCounts() {
+        try {
+            return JSON.parse(localStorage.getItem(COPY_COUNT_KEY) || '{}');
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function incrementCopyCount(imgPath) {
+        const counts = getCopyCounts();
+        counts[imgPath] = (counts[imgPath] || 0) + 1;
+        localStorage.setItem(COPY_COUNT_KEY, JSON.stringify(counts));
+        updateCopyCountBadge(imgPath, counts[imgPath]);
+        return counts[imgPath];
+    }
+
+    function updateCopyCountBadge(imgPath, count) {
+        const badge = document.querySelector(`.copy-count-badge[data-img="${imgPath}"]`);
+        if (badge) {
+            badge.textContent = count;
+            badge.style.display = count > 0 ? 'inline-block' : 'none';
+            badge.title = `コピー回数: ${count}`;
+        }
+    }
+
+    function updateLineStatusBadge(imgPath, lineType, status) {
+        const badge = document.querySelector(`.line-status-badge[data-img="${imgPath}"][data-line="${lineType}"]`);
+        if (!badge) {
+            return;
+        }
+        if (!status) {
+            badge.style.display = 'none';
+            return;
+        }
+        const isCross = status.includes('越え');
+        const lineLabel = lineType === 'center' ? '中' : '白';
+        const statusLabel = isCross ? '越' : '中';
+        badge.textContent = `${lineLabel}:${statusLabel}`;
+        badge.title = status;
+        badge.classList.remove('bg-danger', 'bg-info', 'text-dark');
+        if (isCross) {
+            badge.classList.add('bg-danger');
+        } else {
+            badge.classList.add('bg-info', 'text-dark');
+        }
+        badge.style.display = 'inline-block';
+    }
+
+    // Enable tooltips
+    document.addEventListener('DOMContentLoaded', () => {
+        const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+        tooltipTriggerList.forEach(el => new bootstrap.Tooltip(el));
+
+        // 全カードのバッジを初期化
+        initializeCardBadges();
+
+        // カードクリックイベント
+        document.querySelectorAll('.overtake-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                e.preventDefault();
+                const imgPath = card.dataset.imgPath;
+                showOvertakeDetail(imgPath);
+            });
+        });
+
+        // グループ詳細ボタン
+        document.getElementById('btnShowCarGroup').addEventListener('click', () => {
+            if (currentRunId && currentCarGroupId) {
+                showGroupData(currentRunId, currentCarGroupId);
+            }
+        });
+
+        document.getElementById('btnShowBikeGroup').addEventListener('click', () => {
+            if (currentRunId && currentBikeGroupId) {
+                showGroupData(currentRunId, currentBikeGroupId);
+            }
+        });
+
+        // コピーボタン
+        document.getElementById('btnCopyData').addEventListener('click', copyOvertakeData);
+
+        // 削除ボタン
+        document.getElementById('btnDeleteOvertake').addEventListener('click', deleteOvertakeSnapshot);
+
+        // 判定保存ボタン
+        document.getElementById('btnSaveLineStatus').addEventListener('click', saveLineStatus);
+
+        // モード切り替え
+        document.querySelectorAll('.overlay-toggle').forEach(el => {
+            el.addEventListener('change', () => {
+                if (currentEventData) {
+                    drawCalibrationOverlay(currentEventData);
+                }
+            });
+        });
+
+        // 画像ロード後にオーバーレイ再描画
+        document.getElementById('modalImage').addEventListener('load', () => {
+            if (currentEventData) {
+                drawCalibrationOverlay(currentEventData);
+            }
+        });
+
+        // 検出選択変更
+        document.getElementById('selectCarDetection').addEventListener('change', (e) => updateStartDetection('car', e.target.value));
+        document.getElementById('selectBikeDetection').addEventListener('change', (e) => updateStartDetection('bike', e.target.value));
+    });
+
+    // 全カードのバッジを初期化（コピー回数表示 + API呼び出しでRUN_ID・データ状態取得）
+    async function initializeCardBadges() {
+        const cards = document.querySelectorAll('.overtake-card');
+        const copyCounts = getCopyCounts();
+
+        // コピー回数バッジを即座に表示
+        for (const card of cards) {
+            const imgPath = card.dataset.imgPath;
+            const count = copyCounts[imgPath] || 0;
+            if (count > 0) {
+                updateCopyCountBadge(imgPath, count);
+            }
+        }
+
+        // バッチでAPIからデータを取得（非同期で順次処理）
+        for (const card of cards) {
+            const imgPath = card.dataset.imgPath;
+            fetchCardMetadata(imgPath);
+        }
+    }
+
+    // 判定ステータスを決定（DB値優先、なければ距離から判定）
+    function determineLineStatus(det, type) {
+        if (!det) return '-';
+
+        // 1. DBのステータス文字列があればそれを使う
+        const dbStatus = det[`${type}_line_overtake_status`];
+        if (dbStatus && dbStatus.trim() !== '') {
+            return dbStatus;
+        }
+
+        // 2. なければ距離から判定 (F: Left=White/Right=Center, B: Left=Center/Right=White)
+        const direction = (det.travel_direction || 'B').trim().toUpperCase();
+        const l_cross = det.l_line_cross_m;
+        const r_cross = det.r_line_cross_m;
+
+        let crossVal = null;
+        if (type === 'center') {
+            // Center check
+            if (direction === 'F') crossVal = r_cross; // F: Right is Center
+            else crossVal = l_cross;                   // B: Left is Center
+
+            if (crossVal != null && crossVal > 0) return '中央線越え(判定)';
+            if (crossVal != null && crossVal <= 0) return '中央線内側(判定)';
+        } else {
+            // White check
+            if (direction === 'F') crossVal = l_cross; // F: Left is White
+            else crossVal = r_cross;                   // B: Right is White
+
+            if (crossVal != null && crossVal > 0) return '白線越え(判定)';
+            if (crossVal != null && crossVal <= 0) return '白線内側(判定)';
+        }
+
+        return '-';
+    }
+
+    // 個別カードのメタデータをAPIから取得
+    async function fetchCardMetadata(imgPath) {
+        try {
+            const response = await fetch(`/api/overtake_photo/detail?filename=${encodeURIComponent(imgPath)}`);
+            const data = await response.json();
+
+            if (data.ok) {
+                // RUN_IDバッジ
+                const runIdBadge = document.querySelector(`.run-id-badge[data-img="${imgPath}"]`);
+                if (runIdBadge && data.run_id) {
+                    runIdBadge.textContent = `R${data.run_id}`;
+                    runIdBadge.style.display = 'inline-block';
+                }
+
+                // データ完全性チェック
+                const statusBadge = document.querySelector(`.data-status-badge[data-img="${imgPath}"]`);
+                if (statusBadge) {
+                    const isComplete = checkDataCompleteness(data);
+                    if (isComplete) {
+                        statusBadge.textContent = '✓';
+                        statusBadge.classList.add('bg-success');
+                        statusBadge.classList.remove('bg-warning', 'bg-danger');
+                        statusBadge.title = 'データ完全';
+                    } else {
+                        statusBadge.textContent = '!';
+                        statusBadge.classList.add('bg-warning');
+                        statusBadge.classList.remove('bg-success', 'bg-danger');
+                        statusBadge.title = 'データ不完全';
+                    }
+                    statusBadge.style.display = 'inline-block';
+                }
+
+                const car = data.car_detection || {};
+                const bike = data.bike_detection || {};
+
+                const centerStatus = determineLineStatus(car, 'center');
+                const whiteStatus = determineLineStatus(bike, 'white');
+
+                updateLineStatusBadge(imgPath, 'center', centerStatus);
+                updateLineStatusBadge(imgPath, 'white', whiteStatus);
+            }
+        } catch (err) {
+            console.warn(`Failed to fetch metadata for ${imgPath}:`, err);
+        }
+    }
+
+    // データ完全性チェック
+    function checkDataCompleteness(data) {
+        // 必須データが揃っているかチェック
+        const event = data.event || {};
+        const car = data.car_detection || {};
+        const bike = data.bike_detection || {};
+
+        // 離隔距離、白線距離、速度、lane_position_flagが揃っているか
+        const hasClearance = event.clearance_distance_cm != null || event.clearance_distance_m != null;
+        const hasBikeLineDistance = bike.line_distance_m != null;
+        const hasCarLineDistance = car.line_distance_m != null;
+        const hasBikeSpeed = bike.speed_km_h != null;
+        const hasCarSpeed = car.speed_km_h != null;
+        const carDirection = car.travel_direction || '';
+        const bikeDirection = bike.travel_direction || '';
+        const hasCarCenterStatus = carDirection !== 'B' || (car.center_line_overtake_status != null && car.center_line_overtake_status !== '');
+        const hasBikeCenterStatus = bikeDirection !== 'B' || (bike.center_line_overtake_status != null && bike.center_line_overtake_status !== '');
+        const hasBikeWhiteStatus = bikeDirection !== 'B' || (bike.white_line_overtake_status != null && bike.white_line_overtake_status !== '');
+
+        return hasClearance && hasBikeLineDistance && hasCarLineDistance &&
+            hasBikeSpeed && hasCarSpeed && hasCarCenterStatus && hasBikeCenterStatus && hasBikeWhiteStatus;
+    }
+
+    // 追い越し写真詳細を表示
+    async function showOvertakeDetail(imgPath) {
+        const modal = new bootstrap.Modal(document.getElementById('overtakeDetailModal'));
+        const loadingEl = document.getElementById('detailLoading');
+        const errorEl = document.getElementById('detailError');
+        const contentEl = document.getElementById('detailContent');
+
+        // 画像を設定
+        const imgUrl = `/results/${imgPath}`;
+        document.getElementById('modalImage').src = imgUrl;
+        document.getElementById('modalImageLink').href = imgUrl;
+
+        // リセット
+        loadingEl.classList.remove('d-none');
+        errorEl.classList.add('d-none');
+        contentEl.classList.add('d-none');
+
+        modal.show();
+
+        try {
+            const response = await fetch(`/api/overtake_photo/detail?filename=${encodeURIComponent(imgPath)}`);
+            const data = await response.json();
+
+            loadingEl.classList.add('d-none');
+
+            if (!data.ok) {
+                errorEl.textContent = data.error || 'データの取得に失敗しました';
+                errorEl.classList.remove('d-none');
+                return;
+            }
+
+            // グローバル変数に保持
+            currentRunId = data.run_id;
+            currentCarGroupId = data.car_group_id;
+            currentBikeGroupId = data.bike_group_id;
+            currentImgPath = imgPath;  // コピー用にパスを保持
+
+            // 基本情報
+            document.getElementById('infoFrameNum').textContent = data.frame_num ?? '-';
+            document.getElementById('infoRunId').textContent = data.run_id ?? '-';
+            document.getElementById('infoVideoFilename').textContent = data.video_filename ?? '-';
+            const outputs = data.outputs || {};
+            document.getElementById('infoAutoOutput').textContent = outputs.auto ? 'あり' : '-';
+            document.getElementById('infoRerunOutput').textContent = outputs.rerun ? 'あり' : '-';
+            document.getElementById('infoManualOutput').textContent = outputs.manual ? 'あり' : '-';
+
+            // イベント情報
+            const event = data.event || {};
+            const clearanceCm = event.clearance_distance_cm;
+            const eventClearanceM = event.clearance_distance_m;
+            document.getElementById('eventClearance').textContent =
+                clearanceCm != null ? `${clearanceCm.toFixed(0)} cm` :
+                    (eventClearanceM != null ? `${eventClearanceM.toFixed(2)} m` : '-');
+            document.getElementById('eventApproach').textContent =
+                event.approach_distance_m != null ? `${event.approach_distance_m.toFixed(2)} m` : '-';
+            document.getElementById('eventLineDistance').textContent =
+                event.line_distance_m != null ? `${event.line_distance_m.toFixed(2)} m` : '-';
+
+            // 追い越し車（車）
+            document.getElementById('carGroupId').textContent = data.car_group_id ?? '-';
+            const car = data.car_detection || {};
+            document.getElementById('carClassName').textContent = car.class_name || '-';
+            document.getElementById('carSpeed').textContent = car.speed_km_h != null ? `${car.speed_km_h.toFixed(1)} km/h` : '-';
+            document.getElementById('carDirection').textContent = car.travel_direction || '-';
+            document.getElementById('carCenterLineStatus').textContent = determineLineStatus(car, 'center');
+            document.getElementById('carWhiteLineStatus').textContent = determineLineStatus(car, 'white');
+
+            // 計測点ソース (Car)
+            const carSourceEl = document.getElementById('carSource');
+            if (carSourceEl) {
+                // overlayから取得、またはAPIレスポンスの構造次第。
+                // analysis.pyでは overlay_data に入っている。
+                const src = data.overlay?.car_source === 'detection' ? 'タイヤ検出' : 'BBOX推定';
+                carSourceEl.textContent = src;
+            }
+
+            const bike = data.bike_detection || {};
+            const clearanceM = event.clearance_distance_m ?? car.clearance_distance_m ?? bike.clearance_distance_m;
+            document.getElementById('carClearance').textContent =
+                clearanceM != null ? `${clearanceM.toFixed(2)} m` : '-';
+            document.getElementById('carLineDistance').textContent =
+                car.line_distance_m != null ? `${car.line_distance_m.toFixed(2)} m` :
+                    (event.line_distance_m != null ? `${event.line_distance_m.toFixed(2)} m` : '-');
+
+            // 被追い越し車（自転車）
+            document.getElementById('bikeGroupId').textContent = data.bike_group_id ?? '-';
+            document.getElementById('bikeClassName').textContent = bike.class_name || '-';
+            document.getElementById('bikeSpeed').textContent = bike.speed_km_h != null ? `${bike.speed_km_h.toFixed(1)} km/h` : '-';
+            document.getElementById('bikeDirection').textContent = bike.travel_direction || '-';
+            document.getElementById('bikeCenterLineStatus').textContent = determineLineStatus(bike, 'center');
+            document.getElementById('bikeWhiteLineStatus').textContent = determineLineStatus(bike, 'white');
+
+            // 計測点ソース (Bike)
+            const bikeSourceEl = document.getElementById('bikeSource');
+            if (bikeSourceEl) {
+                const src = data.overlay?.bike_source === 'detection' ? 'タイヤ検出' : 'BBOX推定';
+                bikeSourceEl.textContent = src;
+            }
+
+            document.getElementById('bikeClearance').textContent =
+                clearanceM != null ? `${clearanceM.toFixed(2)} m` : '-';
+            document.getElementById('bikeLineDistance').textContent =
+                bike.line_distance_m != null ? `${bike.line_distance_m.toFixed(2)} m` :
+                    (event.line_distance_m != null ? `${event.line_distance_m.toFixed(2)} m` : '-');
+
+            // Store full data for copy function
+            currentEventData = data;
+
+            // 検出選択肢の更新
+            populateDetectionSelectors(data);
+
+            // Track情報パネル更新
+            updateTrackInfoPanel(data);
+
+            // 編集用セレクト初期化
+            setLineStatusSelectors(data);
+
+            // オーバーレイ描画
+            drawCalibrationOverlay(data);
+
+            contentEl.classList.remove('d-none');
+
+        } catch (err) {
+            loadingEl.classList.add('d-none');
+            errorEl.textContent = `通信エラー: ${err.message}`;
+            errorEl.classList.remove('d-none');
+        }
+    }
+
+    // グループデータを表示
+    async function showGroupData(runId, groupId) {
+        const modal = new bootstrap.Modal(document.getElementById('groupDataModal'));
+        const loadingEl = document.getElementById('groupDataLoading');
+        const errorEl = document.getElementById('groupDataError');
+        const contentEl = document.getElementById('groupDataContent');
+
+        // リセット
+        document.getElementById('groupDataGroupId').textContent = groupId;
+        loadingEl.classList.remove('d-none');
+        errorEl.classList.add('d-none');
+        contentEl.classList.add('d-none');
+
+        modal.show();
+
+        try {
+            const response = await fetch(`/api/overtake_photo/group_data?run_id=${runId}&group_id=${groupId}`);
+            const data = await response.json();
+
+            loadingEl.classList.add('d-none');
+
+            if (!data.ok) {
+                errorEl.textContent = data.error || 'データの取得に失敗しました';
+                errorEl.classList.remove('d-none');
+                return;
+            }
+
+            document.getElementById('groupDataCount').textContent = data.count;
+
+            // テーブル構築
+            const tbody = document.getElementById('groupDataTableBody');
+            tbody.innerHTML = '';
+
+            data.detections.forEach(d => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${d.frame_num || '-'}</td>
+                    <td>${d.class_name || '-'}</td>
+                    <td>${d.speed_km_h != null ? d.speed_km_h.toFixed(1) + ' km/h' : '-'}</td>
+                    <td>${d.acceleration_m_s2 != null ? d.acceleration_m_s2.toFixed(2) + ' m/s²' : '-'}</td>
+                    <td>${d.line_distance_m != null ? d.line_distance_m.toFixed(2) + ' m' : '-'}</td>
+                    <td>${d.travel_direction || '-'}</td>
+                    <td>${d.overtake ? '<span class="badge bg-danger">追い越し</span>' : (d.overtake_after ? '<span class="badge bg-warning text-dark">追い越し後</span>' : '-')}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            contentEl.classList.remove('d-none');
+
+        } catch (err) {
+            loadingEl.classList.add('d-none');
+            errorEl.textContent = `通信エラー: ${err.message}`;
+            errorEl.classList.remove('d-none');
+        }
+    }
+
+    // Handle regenerate button click
+    function handleRegenerate(event) {
+        const btn = document.getElementById('regenerateBtn');
+        const spinner = document.getElementById('regenerateSpinner');
+        const icon = document.getElementById('regenerateIcon');
+
+        // Show spinner and disable button
+        btn.disabled = true;
+        spinner.classList.remove('d-none');
+        icon.classList.add('d-none');
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> 再生成中...';
+
+        // Allow form submission
+        return true;
+    }
+
+    // データをExcel形式でコピー
+    function copyOvertakeData() {
+        if (!currentEventData) {
+            alert('コピーするデータがありません');
+            return;
+        }
+
+        const data = currentEventData;
+        const event = data.event || {};
+        const car = data.car_detection || {};
+        const bike = data.bike_detection || {};
+
+        // 離隔距離の計算 (自転車と車で共通)
+        const clearanceCm = event.clearance_distance_cm;
+        const clearanceM = event.clearance_distance_m;
+        const clearanceValue = clearanceCm != null ? clearanceCm : (clearanceM != null ? clearanceM * 100 : '');
+
+        // 離隔距離（白線から計算）: 自転車と車の白線距離（+-を加味）を足した数字
+        // bike.line_distance_m と car.line_distance_m を足す（符号を加味）
+        let clearanceFromLine = '';
+        if (bike.line_distance_m != null && car.line_distance_m != null) {
+            // 両方の白線距離を足す（符号を考慮した合計）
+            const bikeLineCm = bike.line_distance_m * 100;
+            const carLineCm = car.line_distance_m * 100;
+            // 絶対値の合計（白線からの離れ具合を合算）
+            clearanceFromLine = (Math.abs(bikeLineCm) + Math.abs(carLineCm)).toFixed(0);
+        }
+
+        // 外側線判定: lane_position_flag を「外側」「内側」に変換
+        // '+' → 内側, '-' → 外側
+        const bikeLaneFlag = bike.lane_position_flag;
+        const carLaneFlag = car.lane_position_flag;
+        const bikeLanePosition = bikeLaneFlag === '+' ? '内側' : (bikeLaneFlag === '-' ? '外側' : (bikeLaneFlag || ''));
+        const carLanePosition = carLaneFlag === '+' ? '内側' : (carLaneFlag === '-' ? '外側' : (carLaneFlag || ''));
+
+        // 自転車行
+        const bikeRow = [
+            bike.auto_id || '',                    // ID
+            data.bike_group_id || '',              // グループID
+            data.video_filename || '',             // 動画名
+            data.frame_num || '',                  // 動画フレーム
+            bike.class_name || 'bicycle',          // 車種
+            clearanceValue,                        // 離隔距離
+            clearanceFromLine,                     // 離隔距離(白線から計算): 自転車+車の白線距離合計
+            '',                                    // 誤判定フラグ
+            bike.line_distance_m != null ? (bike.line_distance_m * 100).toFixed(0) : '',  // 白線距離 (自転車の値)
+            bikeLanePosition,                      // 外側線判定 (外側/内側)
+            '',                                    // 速度変化率(前)
+            '',                                    // 速度変化率(後)
+            '',                                    // 速度変化量
+            bike.speed_km_h != null ? bike.speed_km_h.toFixed(1) : ''  // speed_kmh
+        ].join('\t');
+
+        // 車行
+        const carRow = [
+            car.auto_id || '',                     // ID
+            data.car_group_id || '',               // グループID
+            data.video_filename || '',             // 動画名
+            data.frame_num || '',                  // 動画フレーム
+            car.class_name || 'car',               // 車種
+            clearanceValue,                        // 離隔距離
+            clearanceFromLine,                     // 離隔距離(白線から計算): 自転車+車の白線距離合計
+            '',                                    // 誤判定フラグ
+            car.line_distance_m != null ? (car.line_distance_m * 100).toFixed(0) : '',  // 白線距離 (車の値)
+            carLanePosition,                       // 外側線判定 (外側/内側)
+            '',                                    // 速度変化率(前)
+            '',                                    // 速度変化率(後)
+            '',                                    // 速度変化量
+            car.speed_km_h != null ? car.speed_km_h.toFixed(1) : ''  // speed_kmh
+        ].join('\t');
+
+        // 全体のテキスト (自転車 + 車のみ、ヘッダーなし)
+        const copyText = [bikeRow, carRow].join('\n');
+
+        // クリップボードにコピー
+        navigator.clipboard.writeText(copyText).then(() => {
+            // コピー回数をインクリメント
+            if (currentImgPath) {
+                incrementCopyCount(currentImgPath);
+            }
+            // 成功表示
+            const successEl = document.getElementById('copySuccess');
+            successEl.classList.remove('d-none');
+            setTimeout(() => {
+                successEl.classList.add('d-none');
+            }, 2000);
+        }).catch(err => {
+            alert('コピーに失敗しました: ' + err.message);
+        });
+    }
+
+    // 追い越しイベント/写真を削除
+    async function deleteOvertakeSnapshot() {
+        if (!currentImgPath) {
+            alert('削除するデータがありません');
+            return;
+        }
+
+        const ok = await AppUI.confirm({
+            title: '追い越し写真を削除',
+            message: 'この追い越しイベントと写真を削除します。関連する写真ファイルも削除され、この操作は元に戻せません。',
+            okLabel: '削除',
+            okClass: 'btn-danger'
+        });
+        if (!ok) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/overtake_photo/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: currentImgPath })
+            });
+            const data = await response.json();
+
+            if (!data.ok) {
+                alert('削除に失敗しました: ' + (data.error || '不明なエラー'));
+                return;
+            }
+
+            const card = document.querySelector(`.overtake-card[data-img-path="${currentImgPath}"]`);
+            if (card) {
+                const cardCol = card.closest('.overtake-gallery-item') || card.closest('.col');
+                if (cardCol) {
+                    cardCol.remove();
+                } else {
+                    card.remove();
+                }
+            }
+
+            const modalEl = document.getElementById('overtakeDetailModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) {
+                modal.hide();
+            }
+
+            const detailMessage = data.deleted_event
+                ? '追い越しイベントと写真を削除しました。'
+                : '写真のみ削除しました（イベントが見つかりませんでした）。';
+            alert(detailMessage);
+        } catch (err) {
+            alert('通信エラー: ' + err.message);
+        }
+    }
+
+    function setLineStatusSelectors(data) {
+        const car = data.car_detection || {};
+        const bike = data.bike_detection || {};
+        const carSelect = document.getElementById('carCenterStatusSelect');
+        const bikeSelect = document.getElementById('bikeWhiteStatusSelect');
+        carSelect.value = car.center_line_overtake_status || '';
+        bikeSelect.value = bike.white_line_overtake_status || '';
+        document.getElementById('saveStatusMsg').classList.add('d-none');
+    }
+
+    function drawCalibrationOverlay(data) {
+        const calib = data.calibration;
+        const img = document.getElementById('modalImage');
+        const canvas = document.getElementById('modalOverlay');
+        if (!calib || !img.naturalWidth || !img.naturalHeight) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+
+        const rect = img.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        const scaleX = rect.width / img.naturalWidth;
+        const scaleY = rect.height / img.naturalHeight;
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Use shared drawing logic
+        performDraw(ctx, data, scaleX, scaleY);
+    }
+
+    function getOverlayMode() {
+        return {
+            vehicleBox: document.getElementById('overlayVehicleBox')?.checked,
+            tireBox: document.getElementById('overlayTireBox')?.checked,
+            leftLine: document.getElementById('overlayLeftLine')?.checked,
+            centerLine: document.getElementById('overlayCenterLine')?.checked,
+            leftLineDistance: document.getElementById('overlayLeftLineDistance')?.checked,
+            centerLineDistance: document.getElementById('overlayCenterLineDistance')?.checked,
+            clearanceDistance: document.getElementById('overlayClearanceDistance')?.checked,
+            labels: document.getElementById('overlayLabels')?.checked
+        };
+    }
+
+    function performDraw(ctx, data, scaleX, scaleY) {
+        const calib = data.calibration;
+        const overlay = data.overlay || {};
+        const mode = getOverlayMode();
+
+        if (!calib) {
+            console.warn("No calibration data for overlay");
+            return;
+        }
+
+        // 1. Calibration Lines (White & Center)
+        if (mode.leftLine) {
+            drawPolyline(ctx, calib.left_line, scaleX, scaleY, '#ffffff');
+            drawPolyline(ctx, calib.right_line, scaleX, scaleY, '#ffffff');
+        }
+        if (mode.centerLine) {
+            drawPolyline(ctx, calib.center_line, scaleX, scaleY, '#ff4d4d');
+        }
+
+        // 2. Vehicle BBOXs
+        if (mode.vehicleBox) {
+            const car = data.car_detection;
+            const bike = data.bike_detection;
+            if (car) drawRect(ctx, car, scaleX, scaleY, '#ffc107', `Car ID:${car.auto_id}`, mode.labels); // Yellow/Orange
+            if (bike) drawRect(ctx, bike, scaleX, scaleY, '#0d6efd', `Bike ID:${bike.auto_id}`, mode.labels); // Blue
+        }
+
+        // 3. Tire BBOXs
+        if (mode.tireBox && data.all_detections) {
+            data.all_detections.forEach(det => {
+                const cls = (det.class_name || "").toLowerCase();
+                const isTire = cls.includes("tire") || cls.includes("wheel") || cls.includes("disk");
+                const isPlate = cls.includes("plate") || cls.includes("number");
+
+                if (isTire && !isPlate) {
+                    drawRect(ctx, det, scaleX, scaleY, '#fd7e14', `Tire ID:${det.auto_id}`, mode.labels); // Orange
+                }
+            });
+        }
+
+        // 4. Measurement Info (Lines & Points)
+        const carMeasure = overlay.car_measure_point || overlay.car_point;
+        const bikeMeasure = overlay.bike_measure_point || overlay.bike_point;
+
+        if (mode.clearanceDistance && carMeasure && bikeMeasure) {
+            drawLine(ctx, carMeasure, bikeMeasure, scaleX, scaleY, '#00d084');
+            drawPoint(ctx, carMeasure, scaleX, scaleY, '#00d084');
+            drawPoint(ctx, bikeMeasure, scaleX, scaleY, '#00d084');
+
+            let text = '';
+            if (data.event?.clearance_distance_cm != null) {
+                text = `離隔: ${data.event.clearance_distance_cm.toFixed(0)}cm`;
+            } else if (data.event?.clearance_distance_m != null) {
+                text = `離隔: ${data.event.clearance_distance_m.toFixed(2)}m`;
+            }
+            if (text) {
+                const mx = (carMeasure.x + bikeMeasure.x) / 2 * scaleX;
+                const my = (carMeasure.y + bikeMeasure.y) / 2 * scaleY;
+                drawText(ctx, text, mx, my - 10, '#00d084');
+            }
+        }
+
+        // Center Line Distance
+        if (mode.centerLineDistance && overlay.car_center_line_point && overlay.car_point) {
+            drawLine(ctx, overlay.car_point, overlay.car_center_line_point, scaleX, scaleY, '#ff4d4d');
+            drawPoint(ctx, overlay.car_point, scaleX, scaleY, '#ff4d4d');
+            drawPoint(ctx, overlay.car_center_line_point, scaleX, scaleY, '#ff4d4d');
+        }
+
+        // White Line Distance
+        if (mode.leftLineDistance && overlay.bike_white_line_point && overlay.bike_point) {
+            drawLine(ctx, overlay.bike_point, overlay.bike_white_line_point, scaleX, scaleY, '#ffffff');
+            drawPoint(ctx, overlay.bike_point, scaleX, scaleY, '#ffffff');
+            drawPoint(ctx, overlay.bike_white_line_point, scaleX, scaleY, '#ffffff');
+
+            if (data.bike_detection?.line_distance_m != null) {
+                const distText = `白線: ${(data.bike_detection.line_distance_m * 100).toFixed(0)}cm`;
+                drawText(ctx, distText, overlay.bike_point.x * scaleX, (overlay.bike_point.y * scaleY) + 20, '#ffffff');
+            }
+        }
+    }
+
+    function drawPolyline(ctx, points, scaleX, scaleY, color) {
+        if (!Array.isArray(points) || points.length < 2) return;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        points.forEach((pt, idx) => {
+            const x = pt[0] * scaleX;
+            const y = pt[1] * scaleY;
+            if (idx === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        });
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawPoint(ctx, point, scaleX, scaleY, color) {
+        if (!point || point.x == null || point.y == null) return;
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(point.x * scaleX, point.y * scaleY, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawLine(ctx, fromPoint, toPoint, scaleX, scaleY, color) {
+        if (!fromPoint || !toPoint) return;
+        if (fromPoint.x == null || fromPoint.y == null || toPoint.x == null || toPoint.y == null) return;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(fromPoint.x * scaleX, fromPoint.y * scaleY);
+        ctx.lineTo(toPoint.x * scaleX, toPoint.y * scaleY);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawRect(ctx, det, scaleX, scaleY, color, label, showLabel) {
+        if (!det || det.x1 == null || det.y1 == null || det.x2 == null || det.y2 == null) return;
+        const x = det.x1 * scaleX;
+        const y = det.y1 * scaleY;
+        const w = (det.x2 - det.x1) * scaleX;
+        const h = (det.y2 - det.y1) * scaleY;
+
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+
+        if (showLabel && label) {
+            ctx.font = "11px sans-serif";
+            ctx.fillStyle = color;
+            ctx.fillText(label, x, y - 4);
+        }
+        ctx.restore();
+    }
+
+    async function saveLineStatus() {
+        if (!currentEventData) return;
+        const event = currentEventData.event || {};
+        const payload = {
+            car_auto_id: event.overtaker_auto_id,
+            bike_auto_id: event.overtaken_auto_id,
+            car_center_status: document.getElementById('carCenterStatusSelect').value,
+            bike_white_status: document.getElementById('bikeWhiteStatusSelect').value
+        };
+
+        try {
+            const res = await fetch('/api/overtake_photo/update_line_status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!data.ok) {
+                alert(data.error || '判定の保存に失敗しました');
+                return;
+            }
+
+            const carStatus = payload.car_center_status || '-';
+            const bikeStatus = payload.bike_white_status || '-';
+            document.getElementById('carCenterLineStatus').textContent = carStatus;
+            document.getElementById('bikeWhiteLineStatus').textContent = bikeStatus;
+            document.getElementById('saveStatusMsg').classList.remove('d-none');
+        } catch (err) {
+            alert(`通信エラー: ${err.message}`);
+        }
+    }
+
+    // 全追い越しイベントのグループIDを一括出力
+    async function exportAllGroupIds() {
+        const btn = document.getElementById('btnExportGroupIds');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> 取得中...';
+
+        try {
+            const response = await fetch('/api/overtake_events/all_group_ids');
+            const data = await response.json();
+
+            if (!data.ok) {
+                alert('データ取得に失敗しました: ' + (data.error || '不明なエラー'));
+                return;
+            }
+
+            if (data.events.length === 0) {
+                alert('追い越しイベントがありません');
+                return;
+            }
+
+            // TSV形式でデータ作成
+            const header = ['run_id', 'frame_num', 'overtaker_group_id (車)', 'overtaken_group_id (自転車)', 'video_filename'].join('\t');
+            const rows = data.events.map(e => [
+                e.run_id || '',
+                e.event_frame_num || '',
+                e.overtaker_group_id || '',
+                e.overtaken_group_id || '',
+                e.video_filename || ''
+            ].join('\t'));
+
+            const copyText = [header, ...rows].join('\n');
+
+            // クリップボードにコピー
+            await navigator.clipboard.writeText(copyText);
+            alert(`${data.events.length} 件のグループIDをクリップボードにコピーしました`);
+
+        } catch (err) {
+            alert('エラーが発生しました: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
+
+    // -------------------------------------------------------------
+    // Additional Functions for Photo Output & Selection
+    // -------------------------------------------------------------
+
+    function populateDetectionSelectors(data) {
+        const carSelect = document.getElementById('selectCarDetection');
+        const bikeSelect = document.getElementById('selectBikeDetection');
+        carSelect.innerHTML = '';
+        bikeSelect.innerHTML = '';
+
+        const allDets = data.all_detections || [];
+        // Sort by ID
+        allDets.sort((a, b) => a.auto_id - b.auto_id);
+
+        allDets.forEach(det => {
+            const confidence = det.confidence != null ? det.confidence.toFixed(2) : '-';
+            const label = `ID:${det.auto_id} [${det.class_name || 'unknown'}] conf:${confidence}`;
+
+            // Car Option
+            const carOpt = document.createElement('option');
+            carOpt.value = det.auto_id;
+            carOpt.textContent = label;
+            carSelect.appendChild(carOpt);
+
+            // Bike Option
+            const bikeOpt = document.createElement('option');
+            bikeOpt.value = det.auto_id;
+            bikeOpt.textContent = label;
+            bikeSelect.appendChild(bikeOpt);
+        });
+
+        // Set current selection
+        if (data.car_detection) carSelect.value = data.car_detection.auto_id;
+        if (data.bike_detection) bikeSelect.value = data.bike_detection.auto_id;
+    }
+
+    function updateStartDetection(role, autoId) {
+        if (!currentEventData || !currentEventData.all_detections) return;
+
+        const newDet = currentEventData.all_detections.find(d => d.auto_id == autoId);
+        if (!newDet) return;
+
+        if (role === 'car') {
+            currentEventData.car_detection = newDet;
+            // Update displayed data
+            document.getElementById('carClassName').textContent = newDet.class_name;
+            document.getElementById('carSpeed').textContent = newDet.speed_km_h != null ? `${newDet.speed_km_h.toFixed(1)} km/h` : '-';
+        } else {
+            currentEventData.bike_detection = newDet;
+            // Update displayed data
+            document.getElementById('bikeClassName').textContent = newDet.class_name;
+            document.getElementById('bikeSpeed').textContent = newDet.speed_km_h != null ? `${newDet.speed_km_h.toFixed(1)} km/h` : '-';
+            if (newDet.line_distance_m != null) {
+                document.getElementById('bikeLineDistance').textContent = `${newDet.line_distance_m.toFixed(2)} m`;
+            }
+        }
+
+        // Re-calculate basic overlay points locally (simple version)
+        // Note: For full accuracy (re-calculating line distances etc), we might need backend logic,
+        // but for now we update the points used for drawing.
+        refreshOverlayPoints(currentEventData);
+
+        // Re-draw
+        drawCalibrationOverlay(currentEventData);
+    }
+
+
+
+    function updateTrackInfoPanel(data) {
+        const panel = document.getElementById('trackInfoPanel');
+        if (!data || !data.event) {
+            panel.innerHTML = '<div class="col-12 text-muted">データなし</div>';
+            return;
+        }
+
+        const carGroupId = data.car_group_id;
+        const bikeGroupId = data.bike_group_id;
+        const allDets = data.all_detections || [];
+
+        // ---------------------------------------------------------
+        // Car Info
+        // ---------------------------------------------------------
+        const carDets = allDets.filter(d => d.group_id == carGroupId);
+        const carMain = carDets.find(d => !isTireClass(d.class_name));
+        const carTires = carDets.filter(d => isTireClass(d.class_name));
+
+        const carTrackId = carMain ? carMain.track_id : '-';
+        const carTireIds = carTires.map(d => d.track_id).filter(id => id != null).join(', ') || '-';
+
+        // ---------------------------------------------------------
+        // Bike Info
+        // ---------------------------------------------------------
+        const bikeDets = allDets.filter(d => d.group_id == bikeGroupId);
+        const bikeMain = bikeDets.find(d => !isTireClass(d.class_name));
+        const bikeTires = bikeDets.filter(d => isTireClass(d.class_name));
+
+        const bikeTrackId = bikeMain ? bikeMain.track_id : '-';
+        const bikeTireIds = bikeTires.map(d => d.track_id).filter(id => id != null).join(', ') || '-';
+
+        // Build HTML
+        let html = '';
+
+        // Car Section
+        html += `<div class="col-12 mt-1 fw-bold text-warning"><i class="bi bi-car-front me-1"></i>Car (Group ${carGroupId})</div>`;
+        html += `<div class="col-12 ps-3">本体TrackID: ${carTrackId}</div>`;
+        html += `<div class="col-12 ps-3">タイヤTrackIDs: ${carTireIds}</div>`;
+
+        // Bike Section
+        html += `<div class="col-12 mt-2 fw-bold text-primary"><i class="bi bi-bicycle me-1"></i>Bike (Group ${bikeGroupId})</div>`;
+        html += `<div class="col-12 ps-3">本体TrackID: ${bikeTrackId}</div>`;
+        html += `<div class="col-12 ps-3">タイヤTrackIDs: ${bikeTireIds}</div>`;
+
+        panel.innerHTML = html;
+    }
+
+    function isTireClass(className) {
+        if (!className) return false;
+        const cls = className.toLowerCase();
+        const isTire = cls.includes("tire") || cls.includes("wheel") || cls.includes("disk");
+        const isPlate = cls.includes("plate") || cls.includes("number");
+        return isTire && !isPlate;
+    }
+
+    function refreshOverlayPoints(data) {
+        // Update overlay points based on new detections and current calibration
+        const calib = data.calibration;
+        if (!calib) return;
+
+        const car = data.car_detection;
+        const bike = data.bike_detection;
+        const overlay = data.overlay || {};
+        data.overlay = overlay;
+
+        if (car) {
+            overlay.car_point = { x: car.x1, y: car.y2 }; // Or whatever logic used in backend
+            overlay.car_measure_point = {
+                x: car.measure_x ?? car.x1,
+                y: car.measure_y ?? car.y2
+            };
+            // Simple center line projection if possible, else keep old or clear
+            // Since we can't easily run Python `get_line_x_at_y` here without logic duplication,
+            // we will try to preserve or clear if Y changed significantly.
+            // Ideally we should call an API to recalculate, but for visualization:
+            // Let's assume the user just wants to switch ID.
+
+            // If we want to be correct, we should probably fetch details again for the new pair?
+            // But that might change the "Event" context.
+            // For "Photo Output" visualization, we just use the new detection's measure points.
+        }
+        if (bike) {
+            overlay.bike_point = {
+                x: bike.measure_x ?? bike.x1,
+                y: bike.measure_y ?? bike.y2
+            };
+            overlay.bike_measure_point = {
+                x: bike.measure_x ?? bike.x1,
+                y: bike.measure_y ?? bike.y2
+            };
+        }
+    }
+
+    function resetDetectionSelection() {
+        if (currentImgPath) showOvertakeDetail(currentImgPath);
+    }
+
+    function drawText(ctx, text, x, y, color, bg = true) {
+        ctx.save();
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const metrics = ctx.measureText(text);
+        const padding = 4;
+
+        if (bg) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(x - metrics.width / 2 - padding, y - 10 - padding, metrics.width + padding * 2, 20 + padding * 2);
+        }
+
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+        ctx.restore();
+    }
+
+    function downloadPhotoWithOverlay() {
+        const img = document.getElementById('modalImage');
+        if (!img || !currentEventData) return;
+
+        // Create a new canvas to combine them
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+
+        // Draw image
+        ctx.drawImage(img, 0, 0);
+
+        performDraw(ctx, currentEventData, 1, 1);
+
+        // Trigger download
+        const link = document.createElement('a');
+        link.download = `overtake_output_${currentEventData.frame_num}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    }
+
+</script>
+{% endblock %}

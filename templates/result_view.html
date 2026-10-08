@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}リザルト - ADC System{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2><i class="bi bi-trophy"></i> 11. 最終リザルト (最新Run集計)</h2>
+            <p class="text-muted">各動画の最新の完了済みRunIDに基づく集計結果です。</p>
+        </div>
+    </div>
+
+    <!-- Road Type Summary -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0"><i class="bi bi-pie-chart"></i> 道路タイプ別サマリー</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>道路タイプ (Road Type)</th>
+                            <th class="text-end">動画数</th>
+                            <th class="text-end">自動検出数</th>
+                            <th class="text-end">手動登録数</th>
+                            <th class="text-end">合計追い越し数</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if summary %}
+                        {% for road_type, stats in summary.items() %}
+                        <tr>
+                            <td class="fw-bold">{{ road_type }}</td>
+                            <td class="text-end">{{ stats.video_count }}</td>
+                            <td class="text-end">{{ stats.auto_sum }}</td>
+                            <td class="text-end">{{ stats.manual_sum }}</td>
+                            <td class="text-end fw-bold">{{ stats.total_sum }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">データがありません</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Detail List -->
+    <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-list-ul"></i> 動画別詳細一覧</h5>
+            <span class="badge bg-light text-dark">{{ results|length }} 件</span>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover table-sm align-middle" id="resultTable">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th>動画名 (Video Name)</th>
+                            <th style="width: 150px;">道路タイプ</th>
+                            <th class="text-end" style="width: 100px;">Run ID</th>
+                            <th class="text-end" style="width: 100px;">自動 (Auto)</th>
+                            <th class="text-end" style="width: 100px;">手動 (Manual)</th>
+                            <th class="text-end" style="width: 100px;">合計 (Total)</th>
+                            <th class="text-center" style="width: 150px;">アクション</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in results %}
+                        <tr>
+                            <td class="font-monospace text-truncate" style="max-width: 300px;"
+                                title="{{ row.filename }}">
+                                {{ row.filename }}
+                            </td>
+                            <td>
+                                {% if row.road_type %}
+                                <span class="badge bg-secondary">{{ row.road_type }}</span>
+                                {% else %}
+                                <span class="text-muted small">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end font-monospace">{{ row.run_id }}</td>
+                            <td class="text-end">{{ row.auto_count }}</td>
+                            <td class="text-end">
+                                {% if row.manual_count > 0 %}
+                                <span class="text-primary fw-bold">{{ row.manual_count }}</span>
+                                {% else %}
+                                0
+                                {% endif %}
+                            </td>
+                            <td class="text-end fw-bold">{{ row.total }}</td>
+                            <td class="text-center">
+                                <a href="{{ url_for('main.overtake_gallery') }}?run_id={{ row.run_id }}"
+                                    class="btn btn-sm btn-outline-info" target="_blank" title="ギャラリーを見る">
+                                    <i class="bi bi-images"></i>
+                                </a>
+                                <a href="{{ url_for('main.manual_overtake', run_id=row.run_id) }}"
+                                    class="btn btn-sm btn-outline-dark" target="_blank" title="手動編集">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

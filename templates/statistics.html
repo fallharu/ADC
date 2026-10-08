@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% set page_title = "集計" %}
+{% block content %}
+<h1 class="mb-4">集計レポート</h1>
+<p class="text-muted">Runを選択して自転車関連データの集計を表示し、グラフやExcel出力を行えます。</p>
+
+<div class="card mb-4">
+  <div class="card-header">集計条件</div>
+  <div class="card-body">
+    {% if runs %}
+    <form method="post" class="row gy-3">
+      <div class="col-12 col-xl-5">
+        <label class="form-label" for="stats_run_ids">対象Run（複数選択可）</label>
+        <select id="stats_run_ids" name="stats_run_ids" class="form-select" multiple size="10">
+          {% for run in runs %}
+            {% set value = run.run_id if run.run_id is defined else run['run_id'] %}
+            {% set label = "Run #{} / {}件 / {}".format(value, run.detections if run.detections is defined else run['detections'], run.filename if run.filename is defined else run['filename']) %}
+            <option value="{{ value }}" {% if value|string in selected_run_ids %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Windowsの場合はCtrl+クリック、macOSの場合はCommand+クリックで複数選択できます。</div>
+      </div>
+      <div class="col-12 col-md-6 col-xl-3">
+        <label class="form-label" for="stats_mode">集計モード</label>
+        <select id="stats_mode" name="stats_mode" class="form-select">
+          <option value="lane" {% if selected_mode == 'lane' %}selected{% endif %}>白線区分モード (A/B比較)</option>
+          <option value="lane_id" {% if selected_mode == 'lane_id' %}selected{% endif %}>白線距離モード (自転車ID別)</option>
+          <option value="clearance" {% if selected_mode == 'clearance' %}selected{% endif %}>離隔距離×速度モード</option>
+          <option value="track" {% if selected_mode == 'track' %}selected{% endif %}>トラックID別 速度・白線距離モード</option>
+        </select>
+        <div class="form-text">モードに応じて集計指標とグラフの内容が切り替わります。</div>
+      </div>
+      <div class="col-12 col-md-6 col-xl-2">
+        <label class="form-label">オプション</label>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" value="1" id="stats_downward_only" name="stats_downward_only" {% if downward_only %}checked{% endif %}>
+          <label class="form-check-label" for="stats_downward_only">下向き移動のみ抽出</label>
+        </div>
+      </div>
+      <div class="col-12 col-xl-2 d-flex align-items-end gap-2">
+        <button type="submit" class="btn btn-primary">集計を表示</button>
+        <button type="submit" class="btn btn-outline-secondary" formaction="{{ url_for('main.export_statistics') }}" formmethod="post">Excel出力</button>
+      </div>
+    </form>
+    {% else %}
+      <p class="mb-0">集計対象となるRunがまだ登録されていません。推論と後処理を完了させてから再度お試しください。</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if preview %}
+<div class="card mb-4">
+  <div class="card-header">集計概要</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-12 col-md-6">
+        <ul class="list-group list-group-flush">
+          {% for row in preview.summary_metadata %}
+          <li class="list-group-item d-flex justify-content-between"><span>{{ row[0] }}</span><span>{{ row[1] }}</span></li>
+          {% endfor %}
+          <li class="list-group-item d-flex justify-content-between"><span>対象データ数</span><span>{{ preview.record_count }}</span></li>
+        </ul>
+      </div>
+      <div class="col-12 col-md-6">
+        <div class="border rounded p-3 bg-light h-100">
+          <p class="mb-2"><strong>抽出条件</strong></p>
+          <p class="mb-0">{{ preview.condition_text }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">{{ preview.mode_label }}の集計値</div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-striped table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            {% for header in preview.summary_headers %}
+            <th scope="col">{{ header }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview.summary_rows %}
+          <tr>
+            {% for header in preview.summary_headers %}
+            {% set value = row.get(header) %}
+            <td>{{ value if value is not none else '-' }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">{{ preview.mode_label }}のグラフ</div>
+  <div class="card-body">
+    {% if preview.chart.available %}
+    <div class="row g-4">
+      {% for canvas in preview.chart.canvases %}
+      <div class="{{ canvas.class }}">
+        <canvas id="{{ canvas.id }}" height="{{ canvas.height }}"></canvas>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="mb-0">{{ preview.chart.empty_message }}</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">Run・ID別の詳細集計</div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            {% for header in preview.per_run_headers %}
+            <th scope="col">{{ header }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% if preview.per_run_rows %}
+            {% for row in preview.per_run_rows %}
+            <tr>
+              {% for header in preview.per_run_headers %}
+              {% set value = row.get(header) %}
+              <td>{{ value if value is not none else '-' }}</td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="{{ preview.per_run_headers|length }}" class="text-center">該当データがありません。</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-5">
+  <div class="card-header">詳細データ プレビュー (最大 {{ preview.detail_limit }} 件)</div>
+  <div class="card-body">
+    {% if preview.detail_rows %}
+    <div class="table-responsive">
+      <table class="table table-bordered table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            {% for header in preview.detail_headers %}
+            <th scope="col">{{ header }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview.detail_rows %}
+          <tr>
+            {% for header in preview.detail_headers %}
+            {% set value = row.get(header) %}
+            <td>{{ value if value is not none else '-' }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if preview.total_detail_rows > preview.detail_limit %}
+      <p class="text-muted mt-2 mb-0">表示件数を超えるデータはExcel出力で確認できます。</p>
+    {% endif %}
+    {% else %}
+      <p class="mb-0">詳細データが存在しません。</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  {% if chart_json %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script>
+    const chartData = {{ chart_json|safe }};
+    if (chartData && Array.isArray(chartData.charts)) {
+      chartData.charts.forEach(entry => {
+        const canvas = document.getElementById(entry.id);
+        if (!canvas) {
+          return;
+        }
+        new Chart(canvas, entry.config);
+      });
+    }
+  </script>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-10">
+    <div class="alert alert-danger" role="alert">
+      <h2 class="h4 mb-3">データベース初期化エラーが発生しました</h2>
+      <p class="mb-2">アプリケーションがデータベースを初期化する際に問題が発生したため、通常の画面を表示できません。</p>
+      <p class="mb-0">詳細は以下の情報をご確認ください。</p>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">エラー概要</div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-3">エラー種別</dt>
+          <dd class="col-sm-9">{{ error_type }}</dd>
+          <dt class="col-sm-3">発生箇所</dt>
+          <dd class="col-sm-9"><code>{{ db_path }}</code></dd>
+          <dt class="col-sm-3">元のエラーメッセージ</dt>
+          <dd class="col-sm-9"><code>{{ original_error_message }}</code></dd>
+          {% if recovery_attempted %}
+          <dt class="col-sm-3">再初期化の試行</dt>
+          <dd class="col-sm-9">
+            実施済み（{% if quarantine_successful %}破損ファイルを退避{% else %}退避・削除に失敗{% endif %}）
+            {% if backup_path %}<br><span class="text-muted">バックアップ: <code>{{ backup_path }}</code></span>{% endif %}
+          </dd>
+          {% else %}
+          <dt class="col-sm-3">再初期化の試行</dt>
+          <dd class="col-sm-9">未実施</dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">利用可能なDBファイル候補</div>
+      <div class="card-body">
+        <p class="small text-muted mb-3">{{ db_selection_note }}</p>
+        {% if candidate_databases %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead>
+              <tr>
+                <th scope="col">ファイル名</th>
+                <th scope="col">サイズ</th>
+                <th scope="col">更新日時</th>
+                <th scope="col">フルパス</th>
+                {% if selection_enabled %}
+                <th scope="col" class="text-center">操作</th>
+                {% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in candidate_databases %}
+              <tr {% if item.full_path == db_path %}class="table-warning"{% endif %}>
+                <td>{{ item.name }}</td>
+                <td>{{ item.size_label }}</td>
+                <td>{{ item.modified_label }}</td>
+                <td><code>{{ item.full_path }}</code></td>
+                {% if selection_enabled %}
+                <td class="text-center">
+                  <form method="post" action="{{ selection_action }}">
+                    <input type="hidden" name="database_path" value="{{ item.full_path }}">
+                    <button type="submit" class="btn btn-sm btn-primary" {% if item.full_path == db_path %}disabled{% endif %}>
+                      このDBを使用する
+                    </button>
+                  </form>
+                </td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="mb-0">DBディレクトリ（<code>{{ db_directory }}</code>）に *.db ファイルは見つかりませんでした。</p>
+        {% endif %}
+        {% if creation_enabled %}
+        <div class="alert alert-warning mt-4" role="alert">
+          <p class="mb-3">
+            {% for line in creation_note %}
+            {{ line }}{% if not loop.last %}<br>{% endif %}
+            {% endfor %}
+          </p>
+          <form method="post" action="{{ creation_action }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('本当に新しい空のDBを作成しますか？\n既存のDBはバックアップされた後に削除されます。');">
+              新しいDBを作成する
+            </button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">検出された副次ファイル</div>
+      <div class="card-body">
+        {% if sidecar_files %}
+        <ul class="mb-0">
+          {% for path in sidecar_files %}
+          <li><code>{{ path }}</code></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="mb-0">関連するWAL/SHM/ジャーナルファイルは検出されませんでした。</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">追加診断情報</div>
+      <div class="card-body">
+        {% if diagnostics.open_error %}
+        <p class="mb-0 text-danger">診断用の読み取りに失敗しました: <code>{{ diagnostics.open_error }}</code></p>
+        {% else %}
+        {% if diagnosis_summary %}
+        <p>{{ diagnosis_summary }}</p>
+        {% endif %}
+
+        <h6 class="h6">PRAGMA quick_check の結果</h6>
+        {% if diagnostics.quick_check.error %}
+        <p class="text-danger"><code>{{ diagnostics.quick_check.error }}</code></p>
+        {% elif diagnostics.quick_check.messages %}
+        {% if diagnostics.quick_check.status == 'ok' %}
+        <p class="mb-2">結果: OK</p>
+        {% else %}
+        <ul>
+          {% for message in diagnostics.quick_check.messages %}
+          <li><code>{{ message }}</code></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% else %}
+        <p class="text-muted">quick_check の結果は取得できませんでした。</p>
+        {% endif %}
+
+        <h6 class="h6 mt-4">テーブル定義</h6>
+        {% if diagnostics.schema.error %}
+        <p class="text-danger mb-0"><code>{{ diagnostics.schema.error }}</code></p>
+        {% elif diagnostics.schema.tables %}
+        {% if diagnostics.schema.truncated_count %}
+        <p class="text-muted small">※ 表示件数を {{ diagnostics.schema.tables|length }} 件に制限しています（残り {{ diagnostics.schema.truncated_count }} 件）。</p>
+        {% endif %}
+        {% for table in diagnostics.schema.tables %}
+        <div class="mb-4">
+          <h6 class="h6 mb-2">{{ table.name }}{% if table.type == 'view' %} <span class="badge bg-secondary">VIEW</span>{% endif %}</h6>
+          {% if table.definition %}
+          <pre class="small bg-light p-2 border"><code>{{ table.definition }}</code></pre>
+          {% endif %}
+          {% if table.error %}
+          <p class="text-danger small mb-0"><code>{{ table.error }}</code></p>
+          {% elif table.columns %}
+          <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">カラム名</th>
+                  <th scope="col">型</th>
+                  <th scope="col">NOT NULL</th>
+                  <th scope="col">デフォルト値</th>
+                  <th scope="col">PK</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for col in table.columns %}
+                <tr>
+                  <td>{{ col.cid }}</td>
+                  <td>{{ col.name }}</td>
+                  <td><code>{{ col.type }}</code></td>
+                  <td>{% if col.notnull %}はい{% else %}いいえ{% endif %}</td>
+                  <td>
+                    {% if col.default is not none %}
+                    <code>{{ col.default }}</code>
+                    {% else %}
+                    <span class="text-muted">なし</span>
+                    {% endif %}
+                  </td>
+                  <td>{% if col.primary_key %}はい{% else %}いいえ{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="text-muted small mb-0">カラム情報は取得できませんでした。</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="text-muted mb-0">テーブル情報は検出されませんでした。</p>
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">対処のヒント</div>
+      <div class="card-body">
+        <ul class="mb-0">
+          <li>退避されたバックアップファイルが存在する場合は安全な場所へ保管し、必要に応じて検証してください。</li>
+          <li>正常なバックアップDBを取得済みであれば、上記のディレクトリに復元しアプリケーションを再起動してください。</li>
+          <li>DBを新規作成する場合は破損したファイルを削除した上でブラウザをリロードしてください。</li>
+          {% if creation_enabled %}
+          <li>画面下部の「新しいDBを作成する」ボタンから空のDBを作成し直すこともできます。</li>
+          {% endif %}
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">詳細ログ</div>
+      <div class="card-body">
+        <pre class="mb-0"><code>{{ traceback_text }}</code></pre>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
