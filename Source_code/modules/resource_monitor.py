@@ -6,7 +6,7 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 
 # Optional dependencies -----------------------------------------------------
@@ -21,6 +21,7 @@ def _load_optional_module(name: str):
 _psutil = _load_optional_module("psutil")
 _pynvml = _load_optional_module("pynvml")
 _torch = _load_optional_module("torch")
+_inference_device_cache: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -132,6 +133,70 @@ def capture_system_metrics(device_index: int = 0) -> SystemMetrics:
     return metrics
 
 
+def describe_inference_device(device_index: int = 0) -> dict[str, Any]:
+    """Return the device the next inference is expected to use.
+
+    A small, cached CUDA preflight mirrors the worker's safety check, so a
+    CUDA-visible but incompatible GPU is presented as CPU instead.
+    """
+
+    global _inference_device_cache
+
+    if os.getenv("YOLO_FORCE_CPU", "0") == "1":
+        return {
+            "kind": "cpu",
+            "label": "CPU",
+            "detail": "YOLO_FORCE_CPU により CPU 推論を強制",
+            "fallback_possible": False,
+        }
+
+    if _inference_device_cache is not None:
+        return dict(_inference_device_cache)
+
+    if _torch is None:
+        _inference_device_cache = {
+            "kind": "cpu",
+            "label": "CPU",
+            "detail": "CUDA を利用できないため CPU 推論",
+            "fallback_possible": False,
+        }
+        return dict(_inference_device_cache)
+
+    try:
+        if _torch.cuda.is_available():
+            name = _torch.cuda.get_device_name(device_index).strip()
+            # Match the worker's preflight check so a CUDA-visible but
+            # incompatible GPU is not incorrectly presented as usable.
+            dummy = _torch.randn(1, 1, 3, 3, device=f"cuda:{device_index}")
+            _torch.nn.functional.conv2d(
+                dummy,
+                _torch.randn(1, 1, 1, 1, device=f"cuda:{device_index}"),
+            )
+            _inference_device_cache = {
+                "kind": "gpu",
+                "label": "GPU (CUDA)",
+                "detail": name or "CUDA 対応 GPU",
+                "fallback_possible": True,
+            }
+            return dict(_inference_device_cache)
+    except Exception:
+        _inference_device_cache = {
+            "kind": "cpu",
+            "label": "CPU",
+            "detail": "CUDA の動作確認に失敗したため CPU 推論",
+            "fallback_possible": False,
+        }
+        return dict(_inference_device_cache)
+
+    _inference_device_cache = {
+        "kind": "cpu",
+        "label": "CPU",
+        "detail": "CUDA を利用できないため CPU 推論",
+        "fallback_possible": False,
+    }
+    return dict(_inference_device_cache)
+
+
 def configure_cuda_memory_budget(target_fraction: float = 0.8) -> None:
     """Clamp the CUDA memory budget so the process uses a fixed fraction."""
 
@@ -191,6 +256,7 @@ def recommend_parallelism(
 __all__ = [
     "SystemMetrics",
     "capture_system_metrics",
+    "describe_inference_device",
     "configure_cuda_memory_budget",
     "recommend_parallelism",
 ]

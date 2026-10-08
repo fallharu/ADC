@@ -414,6 +414,18 @@ def _prepare_scale_payload(
         "known_distance_m": known_distance,
         "num_intervals": num_intervals,
     }
+    speed_window_seconds = _to_float(scale_raw.get("speed_window_seconds"), 0.2)
+    speed_smoothing_frames = _to_int(scale_raw.get("speed_smoothing_frames"), 5)
+    measurement_smoothing_frames = _to_int(
+        scale_raw.get("measurement_smoothing_frames"),
+        11,
+    )
+    payload["speed_window_seconds"] = max(speed_window_seconds, 1e-3)
+    payload["speed_smoothing_frames"] = max(speed_smoothing_frames, 1)
+    payload["measurement_smoothing_frames"] = max(
+        measurement_smoothing_frames,
+        3,
+    )
     if scale_mode in {"vertical", HYBRID_VERTICAL_MODE}:
         if known_distance <= 0:
             return None, "縦方向スケールでは既知距離を0より大きい値で指定してください。"
@@ -449,6 +461,35 @@ def _prepare_scale_payload(
         }
         if interval_m > 0:
             payload["homography"]["interval_m"] = interval_m
+
+        speed_distance_mode = str(
+            homography_payload.get("speed_distance_mode") or "longitudinal"
+        ).strip().lower()
+        if speed_distance_mode not in {"longitudinal", "euclidean", "xy", "total"}:
+            speed_distance_mode = "longitudinal"
+        payload["homography"]["speed_distance_mode"] = speed_distance_mode
+
+        correction_raw = homography_payload.get("longitudinal_correction") or {}
+        if isinstance(correction_raw, Mapping):
+            estimated = correction_raw.get("estimated_positions_m") or correction_raw.get("raw_positions_m")
+            corrected = correction_raw.get("corrected_positions_m")
+            if isinstance(estimated, (list, tuple)) and isinstance(corrected, (list, tuple)):
+                pairs = []
+                for raw_value, corrected_value in zip(estimated, corrected):
+                    raw_float = _to_float(raw_value, float("nan"))
+                    corrected_float = _to_float(corrected_value, float("nan"))
+                    if math.isfinite(raw_float) and math.isfinite(corrected_float):
+                        pairs.append((raw_float, corrected_float))
+                pairs.sort(key=lambda pair: pair[0])
+                if (
+                    len(pairs) >= 2
+                    and all(pairs[idx][0] < pairs[idx + 1][0] for idx in range(len(pairs) - 1))
+                    and all(pairs[idx][1] < pairs[idx + 1][1] for idx in range(len(pairs) - 1))
+                ):
+                    payload["homography"]["longitudinal_correction"] = {
+                        "estimated_positions_m": [pair[0] for pair in pairs],
+                        "corrected_positions_m": [pair[1] for pair in pairs],
+                    }
 
     return payload, None
 
@@ -515,6 +556,34 @@ def prepare_save_payload(
         },
         "scale": scale_payload,
     }
+    camera_raw = raw_payload.get("camera") or {}
+    if isinstance(camera_raw, Mapping):
+        raw_matrix = camera_raw.get("camera_matrix") or camera_raw.get("matrix")
+        raw_distortion = camera_raw.get("dist_coeffs") or camera_raw.get("distortion_coefficients")
+        try:
+            matrix = [[float(value) for value in row] for row in raw_matrix]
+            distortion = [float(value) for value in raw_distortion]
+        except (TypeError, ValueError):
+            matrix = []
+            distortion = []
+        if (
+            len(matrix) == 3
+            and all(len(row) == 3 for row in matrix)
+            and len(distortion) >= 4
+            and all(math.isfinite(value) for row in matrix for value in row)
+            and all(math.isfinite(value) for value in distortion)
+        ):
+            payload["camera"] = {
+                "model": str(camera_raw.get("model") or "standard").strip().lower(),
+                "camera_matrix": matrix,
+                "dist_coeffs": distortion,
+            }
+            image_size = camera_raw.get("image_size")
+            if isinstance(image_size, (list, tuple)) and len(image_size) == 2:
+                width = _to_int(image_size[0], 0)
+                height = _to_int(image_size[1], 0)
+                if width > 0 and height > 0:
+                    payload["camera"]["image_size"] = [width, height]
     if left_mid_line:
         payload["lines"]["left_mid_line"] = left_mid_line
     if right_mid_line:
@@ -532,6 +601,39 @@ def save_calibration_payload(
     calib_dir = calib_dir or ensure_calibration_dir()
     main_path = os.path.join(calib_dir, f"{profile_name}.json")
     run_specific_path = os.path.join(calib_dir, f"calibration_{run_id}.json")
+
+    # The current web form does not expose intrinsic-camera or measured
+    # longitudinal correction controls. Preserve those calibrated values when
+    # the user edits unrelated fields. A longitudinal correction is retained
+    # only while the homography geometry itself is unchanged.
+    if os.path.isfile(main_path):
+        try:
+            with open(main_path, "r", encoding="utf-8") as handle:
+                existing_payload = json.load(handle)
+        except (OSError, ValueError, TypeError):
+            existing_payload = {}
+        if isinstance(existing_payload, Mapping):
+            if "camera" not in payload and isinstance(existing_payload.get("camera"), Mapping):
+                payload["camera"] = dict(existing_payload["camera"])
+
+            old_scale = existing_payload.get("scale") or {}
+            new_scale = payload.get("scale") or {}
+            old_homography = old_scale.get("homography") or {}
+            new_homography = new_scale.get("homography") or {}
+            geometry_keys = ("image_points", "width_m", "length_m")
+            geometry_unchanged = all(
+                old_homography.get(key) == new_homography.get(key)
+                for key in geometry_keys
+            )
+            if geometry_unchanged and isinstance(new_homography, dict):
+                for key in (
+                    "longitudinal_correction",
+                    "world_points",
+                    "ransac_reproj_threshold_px",
+                ):
+                    if key not in new_homography and key in old_homography:
+                        new_homography[key] = old_homography[key]
+
     _atomic_write_json(main_path, payload)
     _atomic_write_json(run_specific_path, payload)
     return os.path.abspath(main_path)

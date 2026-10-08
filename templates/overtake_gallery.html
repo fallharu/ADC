@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 
 {% block title %}追い越し写真ギャラリー{% endblock %}
+{% block page_title %}追い越し写真{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+<div class="container-fluid">
+    <div class="page-heading">
         <h2><i class="bi bi-images me-2"></i>追い越し写真ギャラリー</h2>
-        <div class="d-flex align-items-center gap-2">
+        <div class="d-flex align-items-center flex-wrap gap-2">
             <form id="regenerateForm" action="{{ url_for('main.regenerate_overtake_photos') }}" method="POST"
                 class="d-inline-flex align-items-center gap-2" onsubmit="return handleRegenerate(event);">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is defined else '' }}">
@@ -208,7 +209,7 @@
     </div>
 
     <!-- ソートコントロール -->
-    <div class="d-flex justify-content-end align-items-center gap-2 mb-3">
+    <div class="app-toolbar justify-content-end">
         <label class="text-muted small mb-0">並び替え:</label>
         <div class="btn-group btn-group-sm" role="group">
             <a href="{{ url_for('main.overtake_gallery', sort='name', order='asc') }}"
@@ -231,9 +232,9 @@
     </div>
 
     {% if images %}
-    <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-5 g-3">
+    <div class="app-gallery-grid">
         {% for img in images %}
-        <div class="col">
+        <div class="overtake-gallery-item">
             <div class="card h-100 shadow-sm overtake-card" data-img-path="{{ img }}" data-bs-toggle="tooltip"
                 title="クリックで詳細表示" style="cursor: pointer; position: relative;">
                 <!-- 左上: コピー回数・データ完全性マーク -->
@@ -678,6 +679,9 @@
             </div>
             <div class="modal-body">
                 <p class="fw-bold">本当にすべての追い越し写真を削除しますか？</p>
+                <div class="alert alert-danger small mb-3">
+                    対象: 写真 {{ total_count }} 件。削除後は再生成を実行するまで写真一覧に戻りません。
+                </div>
                 <p class="text-muted small">
                     この操作は取り消せません。<br>
                     再度写真を確認するには「再生成」を実行する必要があります。
@@ -1241,7 +1245,13 @@
             return;
         }
 
-        if (!confirm('この追い越しイベントと写真を削除しますか？')) {
+        const ok = await AppUI.confirm({
+            title: '追い越し写真を削除',
+            message: 'この追い越しイベントと写真を削除します。関連する写真ファイルも削除され、この操作は元に戻せません。',
+            okLabel: '削除',
+            okClass: 'btn-danger'
+        });
+        if (!ok) {
             return;
         }
 
@@ -1260,7 +1270,7 @@
 
             const card = document.querySelector(`.overtake-card[data-img-path="${currentImgPath}"]`);
             if (card) {
-                const cardCol = card.closest('.col');
+                const cardCol = card.closest('.overtake-gallery-item') || card.closest('.col');
                 if (cardCol) {
                     cardCol.remove();
                 } else {

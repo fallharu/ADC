@@ -15,6 +15,7 @@ from typing import Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+from scipy.signal import savgol_filter
 
 
 Point = Tuple[float, float]
@@ -578,7 +579,10 @@ def attach_measure_points(
     remaining_nan = merged["measure_x"].isna()
     if remaining_nan.any():
         # Get direction (safe access)
-        dirs = merged.loc[remaining_nan, "travel_direction"].astype(str).str.strip()
+        if "travel_direction" in merged.columns:
+            dirs = merged.loc[remaining_nan, "travel_direction"].astype(str).str.strip()
+        else:
+            dirs = pd.Series("", index=merged.index[remaining_nan], dtype=str)
         
         # Prepare default series (default to x2)
         final_x = merged.loc[remaining_nan, "x2"].copy()
@@ -592,8 +596,11 @@ def attach_measure_points(
             f_indices = mask_f[mask_f].index
             final_x.loc[f_indices] = merged.loc[f_indices, "x1"]
             
-        merged.loc[remaining_nan, "measure_x"] = merged.loc[remaining_nan, "measure_x"].combine_first(final_x)
-        merged.loc[remaining_nan, "measure_y"] = merged.loc[remaining_nan, "measure_y"].combine_first(final_y)
+        fallback_indices = merged.index[remaining_nan]
+        merged.loc[fallback_indices, "measure_x"] = final_x.astype(float)
+        missing_y = merged.loc[fallback_indices, "measure_y"].isna()
+        missing_y_indices = missing_y.index[missing_y]
+        merged.loc[missing_y_indices, "measure_y"] = final_y.loc[missing_y_indices].astype(float)
 
     # SAFETY CHECK: For fallback rows (missing_tire_mask), ensure point is on correct half
     # if tire was NOT detected.
@@ -606,7 +613,10 @@ def attach_measure_points(
     if check_mask.any():
         check_subset = merged.loc[check_mask].copy()
         
-        c_dirs = check_subset["travel_direction"].astype(str).str.strip()
+        if "travel_direction" in check_subset.columns:
+            c_dirs = check_subset["travel_direction"].astype(str).str.strip()
+        else:
+            c_dirs = pd.Series("", index=check_subset.index, dtype=str)
         c_x1 = check_subset["x1"]
         c_x2 = check_subset["x2"]
         c_mx = check_subset["measure_x"]
@@ -651,3 +661,137 @@ def attach_measure_points(
             merged.loc[bike_mask, "measure_y"] = merged.loc[bike_mask, "y2"]
 
     return merged
+
+
+def _curve_preserving_smooth(values: pd.Series, window: int, robust: bool = False) -> np.ndarray:
+    """Smooth a short track segment while retaining linear and curved motion."""
+
+    numeric = pd.to_numeric(values, errors="coerce").astype(float)
+    numeric = numeric.interpolate(limit_direction="both")
+    if numeric.isna().all():
+        return numeric.to_numpy(dtype=float)
+
+    if robust:
+        numeric = numeric.rolling(3, center=True, min_periods=1).median()
+
+    count = len(numeric)
+    local_window = min(max(int(window), 3), count)
+    if local_window % 2 == 0:
+        local_window -= 1
+    if local_window < 3:
+        return numeric.to_numpy(dtype=float)
+
+    return savgol_filter(
+        numeric.to_numpy(dtype=float),
+        window_length=local_window,
+        polyorder=min(2, local_window - 1),
+        mode="interp",
+    )
+
+
+def stabilize_measure_points(
+    df: pd.DataFrame,
+    window: int = 11,
+    max_frame_gap: int = 3,
+) -> pd.DataFrame:
+    """Stabilize measurement points without flattening a vehicle's curved path.
+
+    A BBOX corner is mathematically ``center +/- size / 2``.  Smoothing that
+    corner directly mixes real center motion with detector width/height jitter.
+    This function separates the measurement into BBOX center, BBOX size and a
+    normalized in-box anchor, smooths those components, then reconstructs the
+    point.  A quadratic Savitzky-Golay filter retains local curvature.  Gaps
+    longer than ``max_frame_gap`` are processed as separate track segments.
+    """
+
+    required = {
+        "track_id",
+        "frame_num",
+        "x1",
+        "x2",
+        "y1",
+        "y2",
+        "measure_x",
+        "measure_y",
+    }
+    missing = required - set(df.columns)
+    if missing:
+        raise KeyError(f"Measurement smoothing requires columns: {sorted(missing)}")
+
+    result = df.copy()
+    result["bbox_center_x"] = (result["x1"] + result["x2"]) / 2.0
+    result["bbox_center_y"] = (result["y1"] + result["y2"]) / 2.0
+    result["bbox_width_px"] = (result["x2"] - result["x1"]).clip(lower=1e-3)
+    result["bbox_height_px"] = (result["y2"] - result["y1"]).clip(lower=1e-3)
+    result["measure_anchor_u"] = (
+        (result["measure_x"] - result["bbox_center_x"]) / result["bbox_width_px"]
+    )
+    result["measure_anchor_v"] = (
+        (result["measure_y"] - result["bbox_center_y"]) / result["bbox_height_px"]
+    )
+
+    output_columns = [
+        "smooth_bbox_center_x",
+        "smooth_bbox_center_y",
+        "smooth_bbox_width_px",
+        "smooth_bbox_height_px",
+        "smooth_measure_anchor_u",
+        "smooth_measure_anchor_v",
+        "smooth_measure_x",
+        "smooth_measure_y",
+    ]
+    for column in output_columns:
+        result[column] = np.nan
+
+    smoothing_window = max(int(window), 3)
+    if smoothing_window % 2 == 0:
+        smoothing_window += 1
+
+    for _track_id, track in result.groupby("track_id", sort=False):
+        track = track.sort_values("frame_num")
+        frames = pd.to_numeric(track["frame_num"], errors="coerce").to_numpy(dtype=float)
+        gap = np.diff(frames, prepend=frames[0])
+        segment_id = np.cumsum((gap <= 0) | (gap > max(int(max_frame_gap), 1)))
+
+        for current_segment in np.unique(segment_id):
+            segment = track.iloc[np.flatnonzero(segment_id == current_segment)]
+            if segment.empty:
+                continue
+
+            smooth_center_x = _curve_preserving_smooth(
+                segment["bbox_center_x"], smoothing_window
+            )
+            smooth_center_y = _curve_preserving_smooth(
+                segment["bbox_center_y"], smoothing_window
+            )
+            smooth_log_width = _curve_preserving_smooth(
+                np.log(segment["bbox_width_px"]), smoothing_window, robust=True
+            )
+            smooth_log_height = _curve_preserving_smooth(
+                np.log(segment["bbox_height_px"]), smoothing_window, robust=True
+            )
+            smooth_width = np.exp(smooth_log_width)
+            smooth_height = np.exp(smooth_log_height)
+            smooth_anchor_u = _curve_preserving_smooth(
+                segment["measure_anchor_u"], smoothing_window, robust=True
+            )
+            smooth_anchor_v = _curve_preserving_smooth(
+                segment["measure_anchor_v"], smoothing_window, robust=True
+            )
+
+            result.loc[segment.index, "smooth_bbox_center_x"] = smooth_center_x
+            result.loc[segment.index, "smooth_bbox_center_y"] = smooth_center_y
+            result.loc[segment.index, "smooth_bbox_width_px"] = smooth_width
+            result.loc[segment.index, "smooth_bbox_height_px"] = smooth_height
+            result.loc[segment.index, "smooth_measure_anchor_u"] = smooth_anchor_u
+            result.loc[segment.index, "smooth_measure_anchor_v"] = smooth_anchor_v
+            result.loc[segment.index, "smooth_measure_x"] = (
+                smooth_center_x + smooth_anchor_u * smooth_width
+            )
+            result.loc[segment.index, "smooth_measure_y"] = (
+                smooth_center_y + smooth_anchor_v * smooth_height
+            )
+
+    result["smooth_measure_x"] = result["smooth_measure_x"].fillna(result["measure_x"])
+    result["smooth_measure_y"] = result["smooth_measure_y"].fillna(result["measure_y"])
+    return result

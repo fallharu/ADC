@@ -7,7 +7,7 @@ except ModuleNotFoundError:  # pragma: no cover - dependency missing in CI
     pd = None  # type: ignore[assignment]
 
 try:
-    from Source_code.modules.measure_points import attach_measure_points
+    from Source_code.modules.measure_points import attach_measure_points, stabilize_measure_points
     import numpy as np  # noqa: F401
     HAS_NUMPY = True
 except ModuleNotFoundError:
@@ -75,3 +75,54 @@ def test_attach_measure_points_falls_back_to_bbox_when_no_lines():
 
     assert math.isclose(result.loc[0, "measure_x"], 30.0)
     assert math.isclose(result.loc[0, "measure_y"], 50.0)
+
+
+@unittest.skipUnless(HAS_NUMPY and pd is not None, "requires numpy and pandas")
+def test_stabilize_measure_points_removes_bbox_size_jitter_and_keeps_curve():
+    frame = np.arange(61, dtype=float)
+    true_center_x = 200.0 + 1.2 * frame + 0.025 * (frame - 30.0) ** 2
+    true_center_y = 100.0 + 2.0 * frame + 0.01 * frame**2
+    true_width = 40.0 + 0.25 * frame
+    true_height = 24.0 + 0.16 * frame
+
+    alternating = np.where(frame.astype(int) % 2 == 0, 1.0, -1.0)
+    observed_center_x = true_center_x + 0.7 * np.sin(2.0 * np.pi * frame / 3.0)
+    observed_center_y = true_center_y + 0.6 * np.cos(2.0 * np.pi * frame / 3.0)
+    observed_width = true_width + 6.0 * alternating
+    observed_height = true_height - 5.0 * alternating
+
+    data = pd.DataFrame(
+        {
+            "track_id": 1,
+            "frame_num": frame,
+            "x1": observed_center_x - observed_width / 2.0,
+            "x2": observed_center_x + observed_width / 2.0,
+            "y1": observed_center_y - observed_height / 2.0,
+            "y2": observed_center_y + observed_height / 2.0,
+        }
+    )
+    data["measure_x"] = data["x2"]
+    data["measure_y"] = data["y2"]
+
+    result = stabilize_measure_points(data, window=11)
+    true_measure_x = true_center_x + true_width / 2.0
+    true_measure_y = true_center_y + true_height / 2.0
+    raw_rmse = np.sqrt(
+        np.mean(
+            (data["measure_x"].to_numpy() - true_measure_x) ** 2
+            + (data["measure_y"].to_numpy() - true_measure_y) ** 2
+        )
+    )
+    smooth_rmse = np.sqrt(
+        np.mean(
+            (result["smooth_measure_x"].to_numpy() - true_measure_x) ** 2
+            + (result["smooth_measure_y"].to_numpy() - true_measure_y) ** 2
+        )
+    )
+
+    self_curve = np.polyfit(frame, result["smooth_measure_x"], 2)[0]
+    expected_curve = np.polyfit(frame, true_measure_x, 2)[0]
+    assert smooth_rmse < raw_rmse * 0.35
+    assert abs(self_curve - expected_curve) < 0.003
+    assert np.allclose(result["smooth_measure_anchor_u"], 0.5, atol=1e-8)
+    assert np.allclose(result["smooth_measure_anchor_v"], 0.5, atol=1e-8)

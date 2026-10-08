@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% block title %}ダッシュボード{% endblock %}
+{% block page_title %}ダッシュボード{% endblock %}
 {% block content %}
 <div class="row g-4 align-items-stretch">
   <div class="col-lg-8">
@@ -21,7 +23,7 @@
         </div>
         <div class="row g-3 mt-auto">
           <div class="col-md-6">
-            <div class="d-flex align-items-center p-3 bg-light rounded-3 h-100">
+            <div class="metric-card h-100">
               <span class="badge bg-primary fs-5 me-3">{{ run_summary.total | default(0) }}</span>
               <div>
                 <div class="fw-semibold">登録済みRun</div>
@@ -30,7 +32,7 @@
             </div>
           </div>
           <div class="col-md-6">
-            <div class="d-flex align-items-center p-3 bg-light rounded-3 h-100">
+            <div class="metric-card h-100">
               <span class="badge bg-success fs-5 me-3">{{ run_summary.completed | default(0) }}</span>
               <div>
                 <div class="fw-semibold">完了済みRun</div>
@@ -54,9 +56,12 @@
             <button type="submit" class="btn btn-outline-primary w-100">自転車・車クラスを追加</button>
           </form>
           <p class="small text-muted">YOLO推論前に主要クラス（自転車・車・バス/トラック）をClassテーブルへ登録します。</p>
-          <form method="post" action="{{ url_for('main.reset_runs') }}"
-            onsubmit="return confirm('すべてのRunデータと進行状況をリセットします。よろしいですか？');">
-            <button type="submit" class="btn btn-outline-danger w-100">Runデータをリセット</button>
+          <form method="post" action="{{ url_for('main.reset_runs') }}" data-busy-form
+            data-confirm-title="Runデータのリセット"
+            data-confirm="すべてのRunデータと進行状況をリセットします。この操作は元に戻せません。"
+            data-confirm-ok-label="リセット"
+            data-confirm-ok-class="btn-danger">
+            <button type="submit" class="btn btn-outline-danger w-100" data-busy-label="リセット中...">Runデータをリセット</button>
           </form>
           <ul class="list-unstyled small text-muted mt-3 mb-0">
             <li class="d-flex justify-content-between">

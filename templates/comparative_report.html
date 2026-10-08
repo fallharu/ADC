@@ -1,10 +1,15 @@
 {% extends "base.html" %}
 
 {% block title %}比較分析レポート{% endblock %}
+{% block page_title %}比較分析{% endblock %}
 
 {% block content %}
-<h2><i class="bi bi-bar-chart-fill me-2"></i>年度別・道路タイプ別 比較分析レポート</h2>
-<p class="text-muted">拡幅道路と未拡幅道路の追い越し挙動を年度ごとに比較し、統計的に分析します。</p>
+<div class="page-heading">
+    <div>
+        <h2><i class="bi bi-bar-chart-fill me-2"></i>年度別・道路タイプ別 比較分析レポート</h2>
+        <p>拡幅道路と未拡幅道路の追い越し挙動を年度ごとに比較し、統計的に分析します。</p>
+    </div>
+</div>
 
 {% if error %}
 <div class="alert alert-danger" role="alert">
@@ -184,7 +189,6 @@
                     </div>
                 </div>
             </div>
-    </div>
 
     <div class="row g-3 mt-2">
         <div class="col-12">
@@ -237,12 +241,148 @@
             </button>
         </div>
     </div>
-</div>
-
-<div class="d-flex justify-content-end mb-3">
+    <div class="d-flex justify-content-end mb-3">
     <button type="button" class="btn btn-success" id="downloadExcelBtn">
         <i class="bi bi-file-earmark-excel me-2"></i>Excelレポートをダウンロード
     </button>
+    </div>
+
+<div class="card mb-4 d-none" id="graphsSection">
+    <div class="card-header">
+        <div>
+            <i class="bi bi-bar-chart-line me-2"></i>比較グラフ
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <label class="form-label small mb-0" for="graphMetricSelect">指標</label>
+            <select class="form-select form-select-sm" id="graphMetricSelect" style="width: 240px;"></select>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="chartUnavailableAlert" class="alert alert-warning d-none mb-3">
+            Chart.jsを読み込めないため、グラフを表示できません。ネットワーク接続またはChart.jsの読み込み状態を確認してください。
+        </div>
+        <div class="comparative-ai-panel mb-3">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div>
+                    <div class="fw-semibold"><i class="bi bi-stars me-2"></i>Gemini グラフ別見解</div>
+                    <div class="small text-muted">表示中の比較結果から、各グラフごとの読み取りポイントを生成します。</div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="generateChartInsightsBtn">
+                    <i class="bi bi-chat-square-text me-1"></i>グラフ別見解を生成
+                </button>
+            </div>
+            <div id="chartInsightsSpinner" class="d-none mt-3">
+                <div class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></div>
+                <span class="small text-muted">Geminiがグラフ別の見解を生成中...</span>
+            </div>
+            <div id="chartInsightsContent" class="comparative-chart-insights d-none mt-3"></div>
+        </div>
+        <div class="comparative-graph-nav mb-3" aria-label="グラフ内ナビゲーション">
+            <a href="#basicCharts">基本グラフ</a>
+            <a href="#distributionCharts">分布分析（散布図）</a>
+            <a href="#heatmapCharts">ヒートマップ</a>
+        </div>
+        <div class="row g-4" id="basicCharts">
+            <div class="col-12 col-xl-6">
+                <div class="app-control-panel h-100">
+                    <div class="fw-semibold mb-2">選択指標の平均比較</div>
+                    <div class="comparative-chart-frame">
+                        <canvas id="metricMeanChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="app-control-panel h-100">
+                    <div class="fw-semibold mb-2">中央値の年度推移</div>
+                    <div class="comparative-chart-frame">
+                        <canvas id="metricTrendChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="app-control-panel h-100">
+                    <div class="fw-semibold mb-2">ばらつきレンジ（最小・四分位・最大）</div>
+                    <div class="comparative-chart-frame">
+                        <canvas id="metricRangeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="app-control-panel h-100">
+                    <div class="fw-semibold mb-2">サンプル数</div>
+                    <div class="comparative-chart-frame">
+                        <canvas id="metricCountChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="app-control-panel h-100">
+                    <div class="fw-semibold mb-2">内側/外側追い越し比率</div>
+                    <div class="comparative-chart-frame">
+                        <canvas id="overtakeCompositionChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="app-control-panel h-100">
+                    <div class="fw-semibold mb-2">速度と離隔距離の関係</div>
+                    <div class="comparative-chart-frame">
+                        <canvas id="speedClearanceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12" id="distributionCharts">
+                <div class="app-control-panel">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                        <div>
+                            <div class="fw-semibold">分布分析（イベント単位の散布図）</div>
+                            <div id="scatterMeta" class="small text-muted"></div>
+                        </div>
+                        <select class="form-select form-select-sm" id="scatterPairSelect" style="width: 260px;"></select>
+                    </div>
+                    <div class="comparative-chart-frame comparative-chart-frame-lg">
+                        <canvas id="eventScatterChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12">
+                <div class="app-control-panel">
+                    <div class="fw-semibold mb-2">検定結果（p値）</div>
+                    <div class="comparative-chart-frame comparative-chart-frame-sm">
+                        <canvas id="testPValueChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12" id="heatmapCharts">
+                <div class="app-control-panel">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                        <div>
+                            <div class="fw-semibold">ヒートマップ</div>
+                            <div class="small text-muted">色が濃いほど値が大きく、差分は青が拡幅優位、緑が未拡幅優位です。</div>
+                        </div>
+                    </div>
+                    <div class="row g-4">
+                        <div class="col-12 col-xl-6">
+                            <div class="small fw-semibold mb-2">選択指標: 年度 × 道路タイプ（平均）</div>
+                            <div id="metricHeatmap" class="comparative-heatmap-wrap"></div>
+                        </div>
+                        <div class="col-12 col-xl-6">
+                            <div class="small fw-semibold mb-2">全指標 × グループ（中央値）</div>
+                            <div id="metricMatrixHeatmap" class="comparative-heatmap-wrap"></div>
+                        </div>
+                        <div class="col-12 col-xl-6">
+                            <div class="small fw-semibold mb-2">拡幅 - 未拡幅 差分（平均）</div>
+                            <div id="deltaHeatmap" class="comparative-heatmap-wrap"></div>
+                        </div>
+                        <div class="col-12 col-xl-6">
+                            <div class="small fw-semibold mb-2">検定p値</div>
+                            <div id="pValueHeatmap" class="comparative-heatmap-wrap"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="card mb-4">
@@ -282,6 +422,7 @@
 
 <div id="errorAlert" class="alert alert-danger d-none" role="alert"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const form = document.getElementById('analysisForm');
@@ -289,6 +430,16 @@
         const loadingSpinner = document.getElementById('loadingSpinner');
         const errorAlert = document.getElementById('errorAlert');
         const resetBtn = document.getElementById('resetBtn');
+        const graphsSection = document.getElementById('graphsSection');
+        const graphMetricSelect = document.getElementById('graphMetricSelect');
+        const scatterPairSelect = document.getElementById('scatterPairSelect');
+        const scatterMeta = document.getElementById('scatterMeta');
+        const chartUnavailableAlert = document.getElementById('chartUnavailableAlert');
+        const generateChartInsightsBtn = document.getElementById('generateChartInsightsBtn');
+        const chartInsightsSpinner = document.getElementById('chartInsightsSpinner');
+        const chartInsightsContent = document.getElementById('chartInsightsContent');
+        let chartInstances = [];
+        let latestChartData = null;
 
         form.addEventListener('submit', async function (e) {
             e.preventDefault();
@@ -336,12 +487,15 @@
                     throw new Error(data.error || '分析に失敗しました');
                 }
 
-                // 結果を表示
-                displayResults(data);
+                // 結果エリアを表示してからグラフを描画する
                 resultsArea.classList.remove('d-none');
+                displayResults(data);
 
-                // 結果エリアまでスクロール
-                resultsArea.scrollIntoView({ behavior: 'smooth' });
+                // 分析後はグラフ位置へ移動する
+                requestAnimationFrame(() => {
+                    chartInstances.forEach(chart => chart.resize());
+                    graphsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
 
             } catch (error) {
                 showError(error.message);
@@ -363,7 +517,9 @@
             // デフォルトで「統合」を選択
             document.getElementById('include_both').checked = true;
             resultsArea.classList.add('d-none');
+            graphsSection.classList.add('d-none');
             errorAlert.classList.add('d-none');
+            destroyCharts();
         });
 
         function showError(message) {
@@ -385,10 +541,17 @@
             // 統計検定結果表示
             displayTests(data.tests);
 
+            // グラフ表示
+            displayGraphs(data);
+
             // AIセクションを表示 (コンテンツはまだ空)
             document.getElementById('aiAnalysisSection').classList.remove('d-none');
             document.getElementById('aiAnalysisContent').innerHTML = '';
             document.getElementById('generateAiBtn').classList.remove('d-none');
+            if (chartInsightsContent) {
+                chartInsightsContent.classList.add('d-none');
+                chartInsightsContent.innerHTML = '';
+            }
         }
 
         // AI分析ボタンのイベントリスナー
@@ -414,16 +577,7 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // 簡易的なMarkdownレンダリング (marked.jsなどがあればベストだが、ここでは改行と太字のみ対応)
-                    // 本番環境ではmarked.jsの導入を検討してください
-                    let html = data.insight
-                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                        .replace(/^# (.*$)/gm, '<h1>$1</h1>')
-                        .replace(/^## (.*$)/gm, '<h2>$1</h2>')
-                        .replace(/^### (.*$)/gm, '<h3>$1</h3>')
-                        .replace(/\n/g, '<br>');
-
-                    contentDiv.innerHTML = `<div class="p-3 border rounded bg-light">${html}</div>`;
+                    contentDiv.innerHTML = `<div class="p-3 border rounded bg-light">${renderSimpleMarkdown(data.insight)}</div>`;
                 } else {
                     contentDiv.innerHTML = `<div class="alert alert-danger">AI分析に失敗しました: ${data.error}</div>`;
                 }
@@ -434,6 +588,96 @@
                 spinner.classList.add('d-none');
             }
         });
+
+        if (generateChartInsightsBtn) {
+            generateChartInsightsBtn.addEventListener('click', async function () {
+                if (!currentReportData) return;
+
+                const btn = this;
+                btn.disabled = true;
+                chartInsightsSpinner?.classList.remove('d-none');
+                chartInsightsContent?.classList.remove('d-none');
+                if (chartInsightsContent) {
+                    chartInsightsContent.innerHTML = '';
+                }
+
+                try {
+                    const response = await fetch('/api/comparative_report/chart_insights', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(currentReportData)
+                    });
+                    const data = await response.json();
+
+                    if (!data.success) {
+                        throw new Error(data.error || 'グラフ別見解の生成に失敗しました');
+                    }
+                    renderChartInsights(data.insights || []);
+                } catch (e) {
+                    if (chartInsightsContent) {
+                        chartInsightsContent.innerHTML = `<div class="alert alert-danger mb-0">グラフ別見解の生成に失敗しました: ${escapeHtml(e.message)}</div>`;
+                    }
+                } finally {
+                    btn.disabled = false;
+                    chartInsightsSpinner?.classList.add('d-none');
+                }
+            });
+        }
+
+        function renderSimpleMarkdown(text) {
+            return escapeHtml(text || '')
+                .replace(/^### (.*$)/gm, '<h5>$1</h5>')
+                .replace(/^## (.*$)/gm, '<h4>$1</h4>')
+                .replace(/^# (.*$)/gm, '<h3>$1</h3>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+        }
+
+        function chartInsightAnchor(chartId) {
+            const map = {
+                metricMeanChart: '#basicCharts',
+                metricTrendChart: '#basicCharts',
+                metricRangeChart: '#basicCharts',
+                metricCountChart: '#basicCharts',
+                overtakeCompositionChart: '#basicCharts',
+                speedClearanceChart: '#basicCharts',
+                eventScatterChart: '#distributionCharts',
+                testPValueChart: '#basicCharts',
+                heatmapCharts: '#heatmapCharts'
+            };
+            return map[chartId] || '#graphsSection';
+        }
+
+        function renderChartInsights(insights) {
+            if (!chartInsightsContent) return;
+
+            if (!insights.length) {
+                chartInsightsContent.innerHTML = '<div class="alert alert-warning mb-0">Geminiからグラフ別見解が返りませんでした。</div>';
+                return;
+            }
+
+            chartInsightsContent.innerHTML = insights.map(item => {
+                const watchPoints = Array.isArray(item.watch_points) ? item.watch_points : [];
+                return `
+                    <section class="comparative-insight-card">
+                        <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                            <div>
+                                <div class="small text-muted">${escapeHtml(item.chart_id || '')}</div>
+                                <h5 class="mb-0">${escapeHtml(item.title || 'グラフ見解')}</h5>
+                            </div>
+                            <a class="btn btn-sm btn-outline-secondary" href="${chartInsightAnchor(item.chart_id)}">グラフへ</a>
+                        </div>
+                        <div class="comparative-insight-body">${renderSimpleMarkdown(item.insight || '')}</div>
+                        ${watchPoints.length ? `
+                            <ul class="comparative-insight-points">
+                                ${watchPoints.map(point => `<li>${escapeHtml(point)}</li>`).join('')}
+                            </ul>
+                        ` : ''}
+                        ${item.action ? `<div class="comparative-insight-action"><strong>次に見る点:</strong> ${escapeHtml(item.action)}</div>` : ''}
+                    </section>
+                `;
+            }).join('');
+        }
 
         // Excelダウンロードボタンのイベントリスナー
         document.getElementById('downloadExcelBtn').addEventListener('click', async function () {
@@ -601,6 +845,701 @@
             container.innerHTML = html;
         }
 
+        const metricLabels = {
+            'line_distances': '白線距離 (m)',
+            'clearance_distances': '離隔距離 (m)',
+            'overtake_speeds': '追い越し速度 (km/h)',
+            'accelerations_before': '加速度・追い越し前 (m/s²)',
+            'accelerations_after': '加速度・追い越し後 (m/s²)',
+        };
+
+        function destroyCharts() {
+            chartInstances.forEach(chart => chart.destroy());
+            chartInstances = [];
+        }
+
+        function roadTypeLabel(roadType) {
+            if (roadType === 'widened') return '拡幅';
+            if (roadType === 'non_widened') return '未拡幅';
+            return roadType || '-';
+        }
+
+        function groupLabel(groupKey, summary) {
+            const group = summary?.groups?.[groupKey];
+            if (group) {
+                return `${group.year} ${roadTypeLabel(group.road_type)}`;
+            }
+            const [roadType, year] = String(groupKey).split('_');
+            return `${year || ''} ${roadTypeLabel(roadType)}`.trim();
+        }
+
+        function sortGroupEntries(entries, summary) {
+            return entries.sort(([a], [b]) => {
+                const ga = summary?.groups?.[a] || {};
+                const gb = summary?.groups?.[b] || {};
+                const ya = Number(ga.year || String(a).split('_').pop() || 0);
+                const yb = Number(gb.year || String(b).split('_').pop() || 0);
+                if (ya !== yb) return ya - yb;
+                return String(ga.road_type || a).localeCompare(String(gb.road_type || b));
+            });
+        }
+
+        function groupColor(groupKey, alpha = 0.82) {
+            const key = String(groupKey);
+            if (key.startsWith('widened') || key.startsWith('拡幅')) {
+                return `rgba(13, 110, 253, ${alpha})`;
+            }
+            return `rgba(25, 135, 84, ${alpha})`;
+        }
+
+        function getMetricEntries(data, metric) {
+            const groups = data?.statistics?.[metric] || {};
+            return sortGroupEntries(Object.entries(groups).filter(([, stats]) => stats), data.summary);
+        }
+
+        function baseChartOptions(title, yTitle = '') {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: { mode: 'index', intersect: false },
+                    title: { display: false, text: title }
+                },
+                scales: {
+                    x: { ticks: { maxRotation: 45, minRotation: 0 } },
+                    y: {
+                        beginAtZero: true,
+                        title: { display: !!yTitle, text: yTitle }
+                    }
+                }
+            };
+        }
+
+        function destroyChart(canvasId) {
+            chartInstances = chartInstances.filter(chart => {
+                if (chart?.canvas?.id === canvasId) {
+                    chart.destroy();
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        function registerChart(canvasId, config) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            destroyChart(canvasId);
+            chartInstances.push(new Chart(canvas, config));
+        }
+
+        function displayGraphs(data) {
+            latestChartData = data;
+            destroyCharts();
+            graphsSection.classList.remove('d-none');
+
+            const metrics = Object.keys(data.statistics || {});
+            graphMetricSelect.innerHTML = metrics
+                .map(metric => `<option value="${metric}">${metricLabels[metric] || metric}</option>`)
+                .join('');
+
+            if (!metrics.length) {
+                graphsSection.classList.add('d-none');
+                return;
+            }
+
+            populateScatterPairSelect(data);
+            if (scatterPairSelect) {
+                scatterPairSelect.onchange = () => {
+                    if (typeof Chart !== 'undefined') {
+                        renderScatterChart(latestChartData, scatterPairSelect.value);
+                    }
+                };
+            }
+
+            graphMetricSelect.onchange = () => {
+                if (typeof Chart === 'undefined') {
+                    renderHeatmaps(latestChartData, graphMetricSelect.value);
+                } else {
+                    renderMetricCharts(latestChartData, graphMetricSelect.value);
+                }
+            };
+            if (typeof Chart === 'undefined') {
+                chartUnavailableAlert.classList.remove('d-none');
+                renderHeatmaps(data, graphMetricSelect.value || metrics[0]);
+                return;
+            }
+            chartUnavailableAlert.classList.add('d-none');
+            renderMetricCharts(data, graphMetricSelect.value || metrics[0]);
+        }
+
+        function renderMetricCharts(data, metric) {
+            destroyCharts();
+            const entries = getMetricEntries(data, metric);
+            const labels = entries.map(([key]) => groupLabel(key, data.summary));
+            const colors = entries.map(([key]) => groupColor(key));
+            const metricLabel = metricLabels[metric] || metric;
+
+            registerChart('metricMeanChart', {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: '平均',
+                        data: entries.map(([, stats]) => stats.mean),
+                        backgroundColor: colors,
+                        borderColor: colors.map(c => c.replace('0.82', '1')),
+                        borderWidth: 1
+                    }]
+                },
+                options: baseChartOptions('平均比較', metricLabel)
+            });
+
+            const trendByRoad = {};
+            entries.forEach(([key, stats]) => {
+                const group = data.summary?.groups?.[key] || {};
+                const road = group.road_type || key.split('_')[0];
+                const year = Number(group.year || key.split('_').pop());
+                trendByRoad[road] = trendByRoad[road] || {};
+                trendByRoad[road][year] = stats.median;
+            });
+            const years = Array.from(new Set(entries.map(([key]) => Number(data.summary?.groups?.[key]?.year || key.split('_').pop())))).sort((a, b) => a - b);
+            registerChart('metricTrendChart', {
+                type: 'line',
+                data: {
+                    labels: years,
+                    datasets: Object.entries(trendByRoad).map(([road, values]) => ({
+                        label: roadTypeLabel(road),
+                        data: years.map(year => values[year] ?? null),
+                        borderColor: road === 'widened' ? '#0d6efd' : '#198754',
+                        backgroundColor: road === 'widened' ? 'rgba(13, 110, 253, 0.12)' : 'rgba(25, 135, 84, 0.12)',
+                        tension: 0.25,
+                        spanGaps: true
+                    }))
+                },
+                options: baseChartOptions('中央値の年度推移', metricLabel)
+            });
+
+            registerChart('metricRangeChart', {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: '最小-最大',
+                            data: entries.map(([, stats]) => [stats.min, stats.max]),
+                            backgroundColor: entries.map(([key]) => groupColor(key, 0.18)),
+                            borderColor: entries.map(([key]) => groupColor(key, 0.5)),
+                            borderWidth: 1,
+                            borderSkipped: false
+                        },
+                        {
+                            label: 'Q1-Q3',
+                            data: entries.map(([, stats]) => [stats.q1, stats.q3]),
+                            backgroundColor: colors,
+                            borderSkipped: false
+                        },
+                        {
+                            type: 'line',
+                            label: '中央値',
+                            data: entries.map(([, stats]) => stats.median),
+                            borderColor: '#111827',
+                            backgroundColor: '#111827',
+                            pointRadius: 4,
+                            showLine: false
+                        }
+                    ]
+                },
+                options: baseChartOptions('レンジ', metricLabel)
+            });
+
+            registerChart('metricCountChart', {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'サンプル数',
+                        data: entries.map(([, stats]) => stats.count),
+                        backgroundColor: colors
+                    }]
+                },
+                options: baseChartOptions('サンプル数', '件')
+            });
+
+            renderSummaryCharts(data);
+            renderHeatmaps(data, metric);
+        }
+
+        function renderSummaryCharts(data) {
+            const groups = sortGroupEntries(Object.entries(data.summary?.groups || {}), data.summary);
+            const labels = groups.map(([key]) => groupLabel(key, data.summary));
+
+            registerChart('overtakeCompositionChart', {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: '内側追い越し',
+                            data: groups.map(([, group]) => group.inner_overtakes || 0),
+                            backgroundColor: 'rgba(13, 110, 253, 0.82)'
+                        },
+                        {
+                            label: '外側追い越し',
+                            data: groups.map(([, group]) => group.outer_overtakes || 0),
+                            backgroundColor: 'rgba(255, 193, 7, 0.86)'
+                        }
+                    ]
+                },
+                options: {
+                    ...baseChartOptions('内側/外側追い越し', '件'),
+                    scales: {
+                        x: { stacked: true, ticks: { maxRotation: 45, minRotation: 0 } },
+                        y: { stacked: true, beginAtZero: true, title: { display: true, text: '件' } }
+                    }
+                }
+            });
+
+            const speedStats = latestChartData?.statistics?.overtake_speeds || {};
+            const clearanceStats = latestChartData?.statistics?.clearance_distances || {};
+            const bubblePoints = Object.keys(speedStats)
+                .filter(key => speedStats[key] && clearanceStats[key])
+                .map(key => ({
+                    x: speedStats[key].mean,
+                    y: clearanceStats[key].mean,
+                    r: Math.max(5, Math.min(22, Math.sqrt(clearanceStats[key].count || 1))),
+                    label: groupLabel(key, data.summary),
+                    groupKey: key
+                }));
+
+            registerChart('speedClearanceChart', {
+                type: 'bubble',
+                data: {
+                    datasets: bubblePoints.map(point => ({
+                        label: point.label,
+                        data: [point],
+                        backgroundColor: groupColor(point.groupKey, 0.72),
+                        borderColor: groupColor(point.groupKey, 1),
+                        borderWidth: 1
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const p = ctx.raw;
+                                    return `${ctx.dataset.label}: 速度 ${p.x.toFixed(2)} km/h, 離隔 ${p.y.toFixed(2)} m`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { beginAtZero: true, title: { display: true, text: '追い越し速度 平均 (km/h)' } },
+                        y: { beginAtZero: true, title: { display: true, text: '離隔距離 平均 (m)' } }
+                    }
+                }
+            });
+
+            renderScatterChart(data);
+
+            const tests = Object.entries(data.tests || {});
+            registerChart('testPValueChart', {
+                type: 'bar',
+                data: {
+                    labels: tests.map(([metric]) => metricLabels[metric] || metric),
+                    datasets: [{
+                        label: 'p値',
+                        data: tests.map(([, result]) => result.p_value),
+                        backgroundColor: tests.map(([, result]) => result.significant ? 'rgba(220, 53, 69, 0.82)' : 'rgba(108, 117, 125, 0.72)')
+                    }]
+                },
+                options: {
+                    ...baseChartOptions('p値', 'p値'),
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: { ticks: { maxRotation: 0 } },
+                        y: {
+                            beginAtZero: true,
+                            suggestedMax: 0.1,
+                            title: { display: true, text: 'p値' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function getScatterDefinitions(data) {
+            return data?.scatter_points || {};
+        }
+
+        function sortScatterEntries(entries) {
+            return entries.sort(([a], [b]) => {
+                const aTime = a.startsWith('time_') ? 0 : 1;
+                const bTime = b.startsWith('time_') ? 0 : 1;
+                if (aTime !== bTime) return aTime - bTime;
+                return a.localeCompare(b);
+            });
+        }
+
+        function populateScatterPairSelect(data) {
+            if (!scatterPairSelect) return;
+            const definitions = getScatterDefinitions(data);
+            const entries = sortScatterEntries(Object.entries(definitions));
+            const currentValue = scatterPairSelect.value;
+            const preferredValue = entries.find(([key]) => key.startsWith('time_'))?.[0] || entries[0]?.[0];
+
+            scatterPairSelect.innerHTML = entries
+                .map(([key, definition]) => `<option value="${key}">${escapeHtml(definition.label || key)}</option>`)
+                .join('');
+            scatterPairSelect.disabled = entries.length === 0;
+
+            if (entries.some(([key]) => key === currentValue)) {
+                scatterPairSelect.value = currentValue;
+            } else if (entries.length) {
+                scatterPairSelect.value = preferredValue;
+            }
+
+            if (scatterMeta && !entries.length) {
+                scatterMeta.textContent = '散布図データがありません。';
+            }
+        }
+
+        function scatterNumber(value) {
+            const number = Number(value);
+            return Number.isFinite(number) ? number.toFixed(2) : '-';
+        }
+
+        function scatterAxisValue(value, isTime = false) {
+            const number = Number(value);
+            if (!Number.isFinite(number)) return '-';
+            return isTime ? `${number.toFixed(2)}秒` : number.toFixed(2);
+        }
+
+        function renderScatterChart(data, preferredPairKey = null) {
+            if (typeof Chart === 'undefined') return;
+
+            const definitions = getScatterDefinitions(data);
+            const entries = sortScatterEntries(Object.entries(definitions));
+            const fallbackKey = entries.find(([key]) => key.startsWith('time_'))?.[0] || entries[0]?.[0];
+            const candidateKey = preferredPairKey || scatterPairSelect?.value || fallbackKey;
+            const selectedKey = definitions[candidateKey] ? candidateKey : fallbackKey;
+            const definition = definitions[selectedKey];
+
+            if (!definition || !Array.isArray(definition.points) || !definition.points.length) {
+                destroyChart('eventScatterChart');
+                if (scatterMeta) scatterMeta.textContent = '散布図データがありません。';
+                return;
+            }
+
+            if (scatterPairSelect && scatterPairSelect.value !== selectedKey) {
+                scatterPairSelect.value = selectedKey;
+            }
+
+            const pointsByGroup = {};
+            definition.points.forEach(point => {
+                const groupKey = point.group_key || `${point.road_type || 'group'}_${point.year || ''}`;
+                pointsByGroup[groupKey] = pointsByGroup[groupKey] || [];
+                pointsByGroup[groupKey].push(point);
+            });
+
+            const sortedGroupKeys = sortGroupEntries(
+                Object.keys(pointsByGroup).map(key => [key, data.summary?.groups?.[key] || {}]),
+                data.summary
+            ).map(([key]) => key);
+
+            const total = Number(definition.total_count || 0);
+            const filtered = Number(definition.filtered_count || definition.points.length);
+            const shown = definition.points.length;
+            const sampledText = definition.sampled ? ` / 最大${definition.limit}点に間引き` : '';
+            if (scatterMeta) {
+                scatterMeta.textContent = `${definition.label || ''} / 表示 ${shown} 件（対象 ${filtered} / 全 ${total} 件）${sampledText}`;
+            }
+
+            registerChart('eventScatterChart', {
+                type: 'scatter',
+                data: {
+                    datasets: sortedGroupKeys.map(groupKey => ({
+                        label: groupLabel(groupKey, data.summary),
+                        data: pointsByGroup[groupKey].map(point => ({
+                            x: point.x,
+                            y: point.y,
+                            runId: point.run_id,
+                            eventId: point.event_id,
+                            frameNum: point.frame_num,
+                            videoTimeS: point.video_time_s,
+                            source: point.source
+                        })),
+                        backgroundColor: groupColor(groupKey, 0.5),
+                        borderColor: groupColor(groupKey, 0.9),
+                        pointRadius: 3,
+                        pointHoverRadius: 6,
+                        borderWidth: 1
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    parsing: false,
+                    interaction: { mode: 'nearest', intersect: false },
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const point = ctx.raw || {};
+                                    return `${ctx.dataset.label}: ${scatterAxisValue(point.x, definition.x_is_time)}, ${scatterNumber(point.y)}`;
+                                },
+                                afterLabel: (ctx) => {
+                                    const point = ctx.raw || {};
+                                    const rows = [];
+                                    if (point.videoTimeS !== undefined && point.videoTimeS !== null) rows.push(`時刻 ${scatterAxisValue(point.videoTimeS, true)}`);
+                                    if (point.frameNum !== undefined && point.frameNum !== null) rows.push(`Frame ${point.frameNum}`);
+                                    if (point.runId !== undefined && point.runId !== null) rows.push(`Run ${point.runId}`);
+                                    if (point.eventId !== undefined && point.eventId !== null) rows.push(`Event ${point.eventId}`);
+                                    if (point.source) rows.push(String(point.source));
+                                    return rows;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: definition.x_label || 'X' },
+                            grid: { color: 'rgba(148, 163, 184, 0.18)' }
+                        },
+                        y: {
+                            title: { display: true, text: definition.y_label || 'Y' },
+                            grid: { color: 'rgba(148, 163, 184, 0.18)' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+        }
+
+        function formatHeatValue(value, digits = 2) {
+            const num = Number(value);
+            return Number.isFinite(num) ? num.toFixed(digits) : '-';
+        }
+
+        function finiteValues(values) {
+            return values.map(Number).filter(Number.isFinite);
+        }
+
+        function sequentialHeatStyle(value, values, hue = '13, 110, 253') {
+            const num = Number(value);
+            if (!Number.isFinite(num)) return 'background:#f8fafc;color:#94a3b8;';
+            const nums = finiteValues(values);
+            if (!nums.length) return 'background:#f8fafc;color:#94a3b8;';
+            const min = Math.min(...nums);
+            const max = Math.max(...nums);
+            const ratio = max === min ? 0.55 : (num - min) / (max - min);
+            const alpha = 0.16 + Math.max(0, Math.min(1, ratio)) * 0.72;
+            const color = ratio > 0.55 ? '#fff' : '#16202a';
+            return `background:rgba(${hue}, ${alpha});color:${color};`;
+        }
+
+        function divergingHeatStyle(value, values) {
+            const num = Number(value);
+            if (!Number.isFinite(num)) return 'background:#f8fafc;color:#94a3b8;';
+            const nums = finiteValues(values);
+            const maxAbs = Math.max(...nums.map(v => Math.abs(v)), 0.000001);
+            const ratio = Math.min(1, Math.abs(num) / maxAbs);
+            const hue = num >= 0 ? '13, 110, 253' : '25, 135, 84';
+            const alpha = 0.14 + ratio * 0.72;
+            const color = ratio > 0.55 ? '#fff' : '#16202a';
+            return `background:rgba(${hue}, ${alpha});color:${color};`;
+        }
+
+        function pValueHeatStyle(value) {
+            const num = Number(value);
+            if (!Number.isFinite(num)) return 'background:#f8fafc;color:#94a3b8;';
+            if (num <= 0.01) return 'background:rgba(220, 53, 69, 0.86);color:#fff;';
+            if (num <= 0.05) return 'background:rgba(255, 193, 7, 0.78);color:#16202a;';
+            return 'background:rgba(108, 117, 125, 0.2);color:#16202a;';
+        }
+
+        function heatmapEmpty(message = '表示できるデータがありません。') {
+            return `<div class="comparative-heatmap-empty">${message}</div>`;
+        }
+
+        function buildHeatmapTable(headers, rows, firstColumnLabel = '') {
+            if (!rows.length || !headers.length) return heatmapEmpty();
+            return `
+                <div class="table-responsive comparative-heatmap-table-wrap">
+                    <table class="table table-sm comparative-heatmap-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>${escapeHtml(firstColumnLabel)}</th>
+                                ${headers.map(header => `<th>${escapeHtml(header)}</th>`).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.map(row => `
+                                <tr>
+                                    <th>${escapeHtml(row.label)}</th>
+                                    ${row.cells.map(cell => `
+                                        <td class="comparative-heatmap-cell" style="${cell.style || ''}" title="${escapeHtml(cell.title || '')}">
+                                            ${escapeHtml(cell.display)}
+                                        </td>
+                                    `).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function getSummaryYears(summary) {
+            return Array.from(new Set(Object.values(summary?.groups || {})
+                .map(group => Number(group.year))
+                .filter(Number.isFinite)))
+                .sort((a, b) => a - b);
+        }
+
+        function getSummaryRoadTypes(summary) {
+            const actual = Array.from(new Set(Object.values(summary?.groups || {})
+                .map(group => group.road_type)
+                .filter(Boolean)));
+            const preferred = ['widened', 'non_widened'];
+            return [
+                ...preferred.filter(type => actual.includes(type)),
+                ...actual.filter(type => !preferred.includes(type)).sort()
+            ];
+        }
+
+        function renderHeatmaps(data, selectedMetric) {
+            const metricHeatmap = document.getElementById('metricHeatmap');
+            const metricMatrixHeatmap = document.getElementById('metricMatrixHeatmap');
+            const deltaHeatmap = document.getElementById('deltaHeatmap');
+            const pValueHeatmap = document.getElementById('pValueHeatmap');
+            if (!metricHeatmap || !metricMatrixHeatmap || !deltaHeatmap || !pValueHeatmap) return;
+
+            metricHeatmap.innerHTML = buildYearRoadHeatmap(data, selectedMetric);
+            metricMatrixHeatmap.innerHTML = buildMetricMatrixHeatmap(data);
+            deltaHeatmap.innerHTML = buildDeltaHeatmap(data);
+            pValueHeatmap.innerHTML = buildPValueHeatmap(data);
+        }
+
+        function buildYearRoadHeatmap(data, metric) {
+            const years = getSummaryYears(data.summary);
+            const roadTypes = getSummaryRoadTypes(data.summary);
+            const statsByGroup = data.statistics?.[metric] || {};
+            const values = [];
+            years.forEach(year => roadTypes.forEach(road => {
+                const value = statsByGroup[`${road}_${year}`]?.mean;
+                if (Number.isFinite(Number(value))) values.push(Number(value));
+            }));
+
+            const rows = years.map(year => ({
+                label: `${year}年度`,
+                cells: roadTypes.map(road => {
+                    const value = statsByGroup[`${road}_${year}`]?.mean;
+                    return {
+                        display: formatHeatValue(value),
+                        style: sequentialHeatStyle(value, values),
+                        title: `${metricLabels[metric] || metric} / ${year} ${roadTypeLabel(road)} / 平均`
+                    };
+                })
+            }));
+
+            return buildHeatmapTable(roadTypes.map(roadTypeLabel), rows, '年度');
+        }
+
+        function buildMetricMatrixHeatmap(data) {
+            const metrics = Object.keys(data.statistics || {});
+            const groups = sortGroupEntries(Object.entries(data.summary?.groups || {}), data.summary);
+            const groupKeys = groups.map(([key]) => key);
+            const values = [];
+            metrics.forEach(metric => groupKeys.forEach(key => {
+                const value = data.statistics?.[metric]?.[key]?.median;
+                if (Number.isFinite(Number(value))) values.push(Number(value));
+            }));
+
+            const rows = metrics.map(metric => ({
+                label: metricLabels[metric] || metric,
+                cells: groupKeys.map(key => {
+                    const value = data.statistics?.[metric]?.[key]?.median;
+                    return {
+                        display: formatHeatValue(value),
+                        style: sequentialHeatStyle(value, values, '15, 118, 110'),
+                        title: `${metricLabels[metric] || metric} / ${groupLabel(key, data.summary)} / 中央値`
+                    };
+                })
+            }));
+
+            return buildHeatmapTable(groupKeys.map(key => groupLabel(key, data.summary)), rows, '指標');
+        }
+
+        function buildDeltaHeatmap(data) {
+            const metrics = Object.keys(data.statistics || {});
+            const years = getSummaryYears(data.summary);
+            const deltas = [];
+            metrics.forEach(metric => years.forEach(year => {
+                const widened = data.statistics?.[metric]?.[`widened_${year}`]?.mean;
+                const nonWidened = data.statistics?.[metric]?.[`non_widened_${year}`]?.mean;
+                if (Number.isFinite(Number(widened)) && Number.isFinite(Number(nonWidened))) {
+                    deltas.push(Number(widened) - Number(nonWidened));
+                }
+            }));
+
+            const rows = metrics.map(metric => ({
+                label: metricLabels[metric] || metric,
+                cells: years.map(year => {
+                    const widened = data.statistics?.[metric]?.[`widened_${year}`]?.mean;
+                    const nonWidened = data.statistics?.[metric]?.[`non_widened_${year}`]?.mean;
+                    const value = Number(widened) - Number(nonWidened);
+                    const hasValue = Number.isFinite(Number(widened)) && Number.isFinite(Number(nonWidened));
+                    return {
+                        display: hasValue ? formatHeatValue(value) : '-',
+                        style: hasValue ? divergingHeatStyle(value, deltas) : 'background:#f8fafc;color:#94a3b8;',
+                        title: `${metricLabels[metric] || metric} / ${year} / 拡幅平均 - 未拡幅平均`
+                    };
+                })
+            }));
+
+            return buildHeatmapTable(years.map(year => `${year}年度`), rows, '指標');
+        }
+
+        function buildPValueHeatmap(data) {
+            const tests = Object.entries(data.tests || {});
+            if (!tests.length) return heatmapEmpty('検定結果がありません。');
+            const rows = tests.map(([metric, result]) => ({
+                label: metricLabels[metric] || metric,
+                cells: [
+                    {
+                        display: formatHeatValue(result.p_value, 4),
+                        style: pValueHeatStyle(result.p_value),
+                        title: `${metricLabels[metric] || metric} / p値`
+                    },
+                    {
+                        display: result.significant ? '有意差あり' : '有意差なし',
+                        style: result.significant
+                            ? 'background:rgba(220, 53, 69, 0.18);color:#842029;'
+                            : 'background:rgba(108, 117, 125, 0.16);color:#16202a;',
+                        title: result.test_type || ''
+                    }
+                ]
+            }));
+            return buildHeatmapTable(['p値', '判定'], rows, '指標');
+        }
+
         function displayStatistics(statistics) {
             const container = document.getElementById('statisticsSection');
             const metricLabels = {
@@ -727,6 +1666,155 @@
 
     .badge {
         font-weight: 500;
+    }
+
+    .comparative-ai-panel {
+        padding: 0.9rem;
+        background: #f8fbff;
+        border: 1px solid #d7e6ff;
+        border-radius: 8px;
+    }
+
+    .comparative-chart-insights {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 0.85rem;
+    }
+
+    .comparative-insight-card {
+        min-width: 0;
+        padding: 0.9rem;
+        background: #fff;
+        border: 1px solid var(--app-border, #d8dee6);
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+    }
+
+    .comparative-insight-body {
+        color: #16202a;
+        font-size: 0.9rem;
+        line-height: 1.6;
+    }
+
+    .comparative-insight-points {
+        margin: 0.65rem 0 0;
+        padding-left: 1.2rem;
+        color: #425166;
+        font-size: 0.86rem;
+    }
+
+    .comparative-insight-action {
+        margin-top: 0.7rem;
+        padding: 0.55rem 0.65rem;
+        color: #17324d;
+        font-size: 0.84rem;
+        background: #eef6ff;
+        border-radius: 6px;
+    }
+
+    .comparative-chart-frame {
+        position: relative;
+        width: 100%;
+        height: 260px;
+        min-height: 260px;
+        max-height: 260px;
+        overflow: hidden;
+    }
+
+    .comparative-chart-frame-lg {
+        height: 340px;
+        min-height: 340px;
+        max-height: 340px;
+    }
+
+    .comparative-chart-frame-sm {
+        height: 170px;
+        min-height: 170px;
+        max-height: 170px;
+    }
+
+    .comparative-chart-frame canvas {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100%;
+        max-height: 100%;
+    }
+
+    .comparative-graph-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .comparative-graph-nav a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 0.35rem 0.7rem;
+        color: #0d3f88;
+        font-size: 0.86rem;
+        font-weight: 700;
+        text-decoration: none;
+        background: #eef5ff;
+        border: 1px solid #c9dcff;
+        border-radius: 999px;
+    }
+
+    .comparative-graph-nav a:hover {
+        color: #072b61;
+        background: #dceaff;
+    }
+
+    #graphsSection,
+    #basicCharts,
+    #distributionCharts,
+    #heatmapCharts {
+        scroll-margin-top: calc(var(--app-topbar-height, 64px) + 16px);
+    }
+
+    .comparative-heatmap-table-wrap {
+        max-height: 360px;
+        overflow: auto;
+    }
+
+    .comparative-heatmap-table th {
+        white-space: nowrap;
+        background: #f8fafc;
+    }
+
+    .comparative-heatmap-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+    }
+
+    .comparative-heatmap-table tbody th {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        min-width: 150px;
+        box-shadow: 1px 0 0 var(--app-border, #d8dee6);
+    }
+
+    .comparative-heatmap-cell {
+        min-width: 92px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-weight: 700;
+        transition: filter 0.15s ease;
+    }
+
+    .comparative-heatmap-cell:hover {
+        filter: brightness(0.95);
+    }
+
+    .comparative-heatmap-empty {
+        padding: 1rem;
+        color: #637083;
+        background: #f8fafc;
+        border: 1px dashed var(--app-border, #d8dee6);
+        border-radius: 8px;
     }
 </style>
 {% endblock %}

@@ -6,6 +6,8 @@ from typing import Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 
+from ..speed_regression import integrate_scaled_axis_position, rolling_linear_slope
+
 
 @dataclass(frozen=True)
 class VerticalContext:
@@ -137,19 +139,40 @@ def apply_vertical_speed(
     fps: float,
     frame_window: int,
     context: VerticalContext,
+    speed_window_frames: int = 1,
 ) -> bool:
     if not context.ready:
         return False
 
-    df["scale_pixels_per_meter"] = context.ppm_series
-    df["y_delta"] = context.y_delta
-    df["travel_direction"] = np.where(df["y_delta"].fillna(0) < 0, "F", "B")
+    speed_window_frames = max(int(speed_window_frames), 1)
+    y_column = "smooth_measure_y" if "smooth_measure_y" in df.columns else "smooth_center_y"
+    y_fallback = "measure_y" if "measure_y" in df.columns else "center_y"
+    y_source = df[y_column].fillna(df[y_fallback])
 
-    distance_pixels = df["y_delta"].abs()
-    valid = (time_s > 0) & df["scale_pixels_per_meter"].notna()
-    df.loc[valid, "speed_mps"] = (
-        (distance_pixels[valid] / df["scale_pixels_per_meter"][valid]) / time_s[valid]
+    df["scale_pixels_per_meter"] = context.ppm_series
+    df["y_delta"] = y_source.groupby(df["track_id"]).diff(periods=speed_window_frames)
+    point_valid = df["scale_pixels_per_meter"].notna()
+    if context.range_min is not None and context.range_max is not None:
+        point_valid &= (
+            (df["center_y"] >= context.range_min)
+            & (df["center_y"] <= context.range_max)
+        )
+    vertical_position_m = integrate_scaled_axis_position(
+        y_source,
+        df["scale_pixels_per_meter"],
+        df["track_id"],
     )
+    vertical_velocity_mps = rolling_linear_slope(
+        df["frame_num"],
+        vertical_position_m,
+        df["track_id"],
+        fps,
+        speed_window_frames,
+        valid_mask=point_valid & vertical_position_m.notna(),
+    )
+    valid = vertical_velocity_mps.notna()
+    df.loc[valid, "speed_mps"] = vertical_velocity_mps[valid].abs()
+    df["travel_direction"] = np.where(vertical_velocity_mps.fillna(0) < 0, "F", "B")
     df["speed_km_h"] = df["speed_mps"] * 3.6
     df["speed_diff"] = df.groupby("track_id")["speed_mps"].diff(periods=frame_window)
     df["time_diff_accel"] = df.groupby("track_id")["frame_num"].diff(periods=frame_window) / fps

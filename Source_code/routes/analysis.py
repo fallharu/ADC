@@ -1,5 +1,6 @@
 from flask import render_template, request, jsonify, current_app, send_file, flash, redirect, url_for
 import io
+import math
 import pandas as pd
 import sqlite3
 import glob
@@ -28,6 +29,178 @@ def _ensure_database_ready():
     if not os.path.exists(MAIN_DB_PATH):
          return jsonify({"error": "Database not found"}), 503
     return None
+
+
+def _as_finite_float(value):
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _road_type_key(label):
+    if label == "Widened":
+        return "widened"
+    if label == "Non-Widened":
+        return "non_widened"
+    return str(label or "").strip()
+
+
+def _iqr_bounds(values):
+    if len(values) < 4:
+        return None
+    series = pd.Series(values, dtype="float64")
+    q1 = series.quantile(0.25)
+    q3 = series.quantile(0.75)
+    iqr = q3 - q1
+    if not math.isfinite(iqr):
+        return None
+    return q1 - 1.5 * iqr, q3 + 1.5 * iqr
+
+
+def _filter_scatter_outliers(points, filter_x=True, filter_y=True):
+    x_bounds = _iqr_bounds([point["x"] for point in points]) if filter_x else None
+    y_bounds = _iqr_bounds([point["y"] for point in points]) if filter_y else None
+    if not x_bounds and not y_bounds:
+        return points
+
+    def in_bounds(point):
+        if x_bounds and not (x_bounds[0] <= point["x"] <= x_bounds[1]):
+            return False
+        if y_bounds and not (y_bounds[0] <= point["y"] <= y_bounds[1]):
+            return False
+        return True
+
+    return [point for point in points if in_bounds(point)]
+
+
+def _sample_scatter_points(points, limit):
+    if len(points) <= limit:
+        return points, False
+    step = len(points) / limit
+    sampled = [points[int(index * step)] for index in range(limit)]
+    return sampled, True
+
+
+def _build_comparative_scatter_points(raw_records, exclude_outliers=False, limit_per_series=2500):
+    pair_specs = {
+        "time_clearance": {
+            "label": "時刻 × 離隔距離",
+            "x_key": "Video_Time_s",
+            "y_key": "Clearance_Distance_m",
+            "x_label": "動画時刻 (秒)",
+            "y_label": "離隔距離 (m)",
+            "x_is_time": True,
+        },
+        "time_line": {
+            "label": "時刻 × 白線距離",
+            "x_key": "Video_Time_s",
+            "y_key": "Line_Distance_m",
+            "x_label": "動画時刻 (秒)",
+            "y_label": "白線距離 (m)",
+            "x_is_time": True,
+        },
+        "time_speed": {
+            "label": "時刻 × 追い越し速度",
+            "x_key": "Video_Time_s",
+            "y_key": "Overtake_Speed_kmh",
+            "x_label": "動画時刻 (秒)",
+            "y_label": "追い越し速度 (km/h)",
+            "x_is_time": True,
+        },
+        "time_accel_before": {
+            "label": "時刻 × 加速度（追い越し前）",
+            "x_key": "Video_Time_s",
+            "y_key": "Accel_Before_ms2",
+            "x_label": "動画時刻 (秒)",
+            "y_label": "追い越し前加速度 (m/s2)",
+            "x_is_time": True,
+        },
+        "line_clearance": {
+            "label": "白線距離 × 離隔距離",
+            "x_key": "Line_Distance_m",
+            "y_key": "Clearance_Distance_m",
+            "x_label": "白線距離 (m)",
+            "y_label": "離隔距離 (m)",
+        },
+        "speed_clearance": {
+            "label": "追い越し速度 × 離隔距離",
+            "x_key": "Overtake_Speed_kmh",
+            "y_key": "Clearance_Distance_m",
+            "x_label": "追い越し速度 (km/h)",
+            "y_label": "離隔距離 (m)",
+        },
+        "speed_line": {
+            "label": "追い越し速度 × 白線距離",
+            "x_key": "Overtake_Speed_kmh",
+            "y_key": "Line_Distance_m",
+            "x_label": "追い越し速度 (km/h)",
+            "y_label": "白線距離 (m)",
+        },
+        "accel_before_after": {
+            "label": "加速度 前 × 後",
+            "x_key": "Accel_Before_ms2",
+            "y_key": "Accel_After_ms2",
+            "x_label": "追い越し前加速度 (m/s2)",
+            "y_label": "追い越し後加速度 (m/s2)",
+        },
+    }
+
+    scatter_points = {}
+    for key, spec in pair_specs.items():
+        points = []
+        for record in raw_records:
+            x_value = _as_finite_float(record.get(spec["x_key"]))
+            y_value = _as_finite_float(record.get(spec["y_key"]))
+            if x_value is None or y_value is None:
+                continue
+
+            road_type = _road_type_key(record.get("Road_Type"))
+            year = record.get("Year")
+            try:
+                year_value = int(year)
+            except (TypeError, ValueError):
+                year_value = year
+
+            points.append({
+                "x": round(x_value, 4),
+                "y": round(y_value, 4),
+                "group_key": f"{road_type}_{year_value}",
+                "road_type": road_type,
+                "year": year_value,
+                "run_id": record.get("Run_ID"),
+                "event_id": record.get("Event_ID"),
+                "frame_num": record.get("Frame_Num"),
+                "video_time_s": record.get("Video_Time_s"),
+                "source": record.get("Source"),
+            })
+
+        total_count = len(points)
+        if not total_count:
+            continue
+        if exclude_outliers:
+            points = _filter_scatter_outliers(points, filter_x=not spec.get("x_is_time"), filter_y=True)
+        filtered_count = len(points)
+        if not filtered_count:
+            continue
+        points, sampled = _sample_scatter_points(points, limit_per_series)
+
+        scatter_points[key] = {
+            "label": spec["label"],
+            "x_label": spec["x_label"],
+            "y_label": spec["y_label"],
+            "x_is_time": bool(spec.get("x_is_time")),
+            "points": points,
+            "total_count": total_count,
+            "filtered_count": filtered_count,
+            "sampled": sampled,
+            "limit": limit_per_series,
+        }
+
+    return scatter_points
 
 @main.route("/analysis")
 @main.route("/comparative_report")
@@ -150,11 +323,17 @@ def generate_comparative_report():
                 if result:
                     tests[metric] = asdict(result)
 
+        scatter_points = _build_comparative_scatter_points(
+            analyzer.raw_records,
+            exclude_outliers=exclude_outliers,
+        )
+
         return jsonify({
             "success": True,
             "summary": summary,
             "statistics": statistics,
-            "tests": tests
+            "tests": tests,
+            "scatter_points": scatter_points,
         })
 
     except Exception as e:
@@ -221,6 +400,26 @@ def comparative_report_ai_analysis():
         })
     except Exception as e:
         current_app.logger.exception("AI Analysis failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@main.route("/api/comparative_report/chart_insights", methods=["POST"])
+def comparative_report_chart_insights():
+    """Generate Gemini insight cards for each comparative report chart."""
+    try:
+        from ..modules.ai_insight import generate_chart_insights
+
+        report_data = request.json
+        if not report_data:
+            return jsonify({"success": False, "error": "No report data provided"}), 400
+
+        insights = generate_chart_insights(report_data)
+        return jsonify({
+            "success": True,
+            "insights": insights,
+        })
+    except Exception as e:
+        current_app.logger.exception("Chart insight generation failed")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

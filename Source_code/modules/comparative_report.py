@@ -176,12 +176,18 @@ class ComparativeAnalyzer:
                     v.road_type,
                     v.collection_year,
                     v.video_id,
+                    v.fps,
                     p.run_id,
                     e.overtake_event_id,
                     e.event_frame_num,
+                    CASE
+                        WHEN v.fps IS NOT NULL AND v.fps > 0 THEN CAST(e.event_frame_num AS REAL) / v.fps
+                        ELSE NULL
+                    END as video_time_s,
                     e.line_distance_m,
                     e.clearance_distance_m,
                     e.speed_profile_json,
+                    NULL as direct_speed_km_h,
                     e.l_line_distance_m,
                     e.r_line_distance_m,
                     'auto' as source_type
@@ -233,12 +239,21 @@ class ComparativeAnalyzer:
                         v.road_type,
                         v.collection_year,
                         v.video_id,
+                        v.fps,
                         p.run_id,
                         m.manual_event_id as overtake_event_id,
                         m.frame_num as event_frame_num,
+                        COALESCE(
+                            m.video_time_s,
+                            CASE
+                                WHEN v.fps IS NOT NULL AND v.fps > 0 THEN CAST(m.frame_num AS REAL) / v.fps
+                                ELSE NULL
+                            END
+                        ) as video_time_s,
                         m.overtaker_line_distance_m as line_distance_m,
                         m.clearance_distance_m,
                         NULL as speed_profile_json,
+                        m.overtaker_speed_km_h as direct_speed_km_h,
                         m.overtaker_line_distance_m as l_line_distance_m,
                         m.overtaken_line_distance_m as r_line_distance_m,
                         'manual' as source_type
@@ -355,12 +370,22 @@ class ComparativeAnalyzer:
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
 
+        if speed_at is None and "direct_speed_km_h" in row.keys():
+            try:
+                direct_speed = row["direct_speed_km_h"]
+                speed_at = float(direct_speed) if direct_speed is not None else None
+            except (TypeError, ValueError):
+                speed_at = None
+
         # Raw Record 追加
         source_type = row["source_type"] if "source_type" in row.keys() else "auto"
         self.raw_records.append({
             "Video_ID": row["video_id"],
             "Run_ID": row["run_id"],
             "Event_ID": row["overtake_event_id"],
+            "Frame_Num": row["event_frame_num"],
+            "Video_Time_s": row["video_time_s"] if "video_time_s" in row.keys() else None,
+            "FPS": row["fps"] if "fps" in row.keys() else None,
             "Year": year,
             "Road_Type": "Widened" if road_type == "widened" else "Non-Widened" if road_type == "non_widened" else road_type,
             "Line_Distance_m": row["line_distance_m"],

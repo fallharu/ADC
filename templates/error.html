@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}{{ status_code }} - {{ title }}{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="app-error-page">
+  <div class="card app-error-card shadow-sm">
+    <div class="card-body p-4 p-lg-5">
+      <div class="d-flex align-items-start gap-3">
+        <div class="metric-icon bg-danger">
+          <i class="bi bi-exclamation-triangle"></i>
+        </div>
+        <div>
+          <div class="text-muted small fw-semibold mb-1">HTTP {{ status_code }}</div>
+          <h1 class="h3 fw-bold mb-2">{{ title }}</h1>
+          <p class="text-muted mb-4">{{ message }}</p>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="{{ url_for('main.index') }}" class="btn btn-primary">
+              <i class="bi bi-house-door me-1"></i>ダッシュボードへ戻る
+            </a>
+            <button type="button" class="btn btn-outline-secondary" onclick="history.back()">
+              <i class="bi bi-arrow-left me-1"></i>前の画面へ戻る
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

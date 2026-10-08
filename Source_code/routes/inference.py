@@ -17,15 +17,20 @@ from ..modules.db_manager import list_locations
 from ..modules.folder_config import save_folder_settings, load_folder_settings
 from ..modules.folder_utils import _gather_folder_summaries, resolve_registered_folder, _format_relative_path
 from ..modules.inference import (
-    process_video, 
-    process_video_folder, 
-    VideoProcessResult, 
+    process_video,
+    process_video_folder,
+    VideoProcessResult,
     ResolvedFolderSettings, 
     FolderProcessingResult,
     SubfolderSettingsResolver,
     run_postprocess_pipeline_sync,
+    preview_model_selection,
 )
-from ..modules.resource_monitor import capture_system_metrics, SystemMetrics
+from ..modules.resource_monitor import (
+    SystemMetrics,
+    capture_system_metrics,
+    describe_inference_device,
+)
 from ..tools.calibration_tool import apply_calibration_profile
 
 # --- Helper Definitions ---
@@ -141,6 +146,17 @@ def _serialize_metrics(metrics: Optional[SystemMetrics]) -> Dict[str, Optional[f
         "timestamp": metrics.timestamp,
     }
 
+
+def _inference_execution_preview() -> Dict[str, Any]:
+    """Build the non-mutating execution summary shown before a run starts."""
+
+    models, warnings = preview_model_selection()
+    return {
+        "device": describe_inference_device(),
+        "models": models,
+        "warnings": warnings,
+    }
+
 # --- Route ---
 
 @main.route("/detect", methods=["GET", "POST"])
@@ -152,6 +168,7 @@ def detect():
     available_folders = sorted([name for name in os.listdir(upload_folder) if os.path.isdir(os.path.join(upload_folder, name))])
     folder_summaries = _gather_folder_summaries(upload_folder, available_folders)
     metrics_snapshot = capture_system_metrics()
+    inference_preview = _inference_execution_preview()
     locations = list_locations()
     location_ids: set[int] = set()
     for loc in locations:
@@ -502,6 +519,7 @@ def detect():
         batch_status=batch_status_for_view,
         folder_summaries=folder_summaries,
         system_metrics=_serialize_metrics(metrics_snapshot),
+        inference_preview=inference_preview,
         available_profiles=available_profiles,
         locations=locations,
         available_models=available_models,

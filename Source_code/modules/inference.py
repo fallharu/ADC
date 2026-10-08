@@ -40,7 +40,7 @@ from .resource_monitor import (
 )
 from .class_filters import is_vehicle_class, vehicle_allowed_classes
 from .group_id import assign_group_ids
-from .kinematics_analyzer import assign_kinematics
+from .speed import assign_kinematics
 from .overtake import assign_overtake, summarize_run_overtakes, _export_overtake_snapshots
 from .approach_distance import assign_approach_and_clearance
 from .lane_distance import assign_lane_distance
@@ -388,6 +388,18 @@ def _resolve_model_sequence(
          warnings.append(f"警告: 指定されたタイヤモデル '{explicit_tire_model}' が見つかりません。")
 
     return resolved, warnings
+
+
+def preview_model_selection(
+    explicit_vehicle_model: Optional[str] = None,
+    explicit_tire_model: Optional[str] = None,
+) -> tuple[list[str], list[str]]:
+    """Resolve the models that would be selected before starting inference."""
+
+    return _resolve_model_sequence(
+        explicit_vehicle_model=explicit_vehicle_model,
+        explicit_tire_model=explicit_tire_model,
+    )
 
 
 def _resolve_tracker_config() -> Optional[str]:

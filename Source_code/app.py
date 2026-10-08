@@ -1,5 +1,5 @@
 # Source_code/app.py
-from flask import Flask
+from flask import Flask, jsonify, render_template, request
 import os
 from dotenv import load_dotenv
 from dotenv import load_dotenv
@@ -24,6 +24,39 @@ app.register_blueprint(main, url_prefix="/")
 app.register_blueprint(verify_bp)
 app.register_blueprint(check_sheet_bp)
 app.register_blueprint(results_bp)
+
+
+def _wants_json_error():
+    if request.path.startswith("/api/"):
+        return True
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return True
+    accept = request.headers.get("Accept", "")
+    return "application/json" in accept and "text/html" not in accept
+
+
+@app.errorhandler(404)
+def page_not_found(error):
+    if _wants_json_error():
+        return jsonify({"error": "Not found", "message": "The requested resource was not found."}), 404
+    return render_template(
+        "error.html",
+        status_code=404,
+        title="ページが見つかりません",
+        message="指定されたページは存在しないか、移動された可能性があります。",
+    ), 404
+
+
+@app.errorhandler(500)
+def internal_server_error(error):
+    if _wants_json_error():
+        return jsonify({"error": "Internal server error", "message": "An unexpected error occurred."}), 500
+    return render_template(
+        "error.html",
+        status_code=500,
+        title="サーバーエラー",
+        message="処理中に問題が発生しました。直前の操作を確認して、必要に応じてログを確認してください。",
+    ), 500
 
 # データベースマイグレーション
 import sqlite3

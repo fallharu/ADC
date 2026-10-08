@@ -1,0 +1,79 @@
+{
+  "source": "CVAT five-track 2_20250720_y processed aggregate; no annotations or frame coordinates",
+  "fps": 30,
+  "video_size": [
+    1280,
+    720
+  ],
+  "calibration_size": [
+    1920,
+    1080
+  ],
+  "tracks": [
+    {
+      "track_id": 0,
+      "label": "bicycle",
+      "active_frames": 1066,
+      "calibrated_frames": 1027,
+      "strict_calibrated_frames": 478,
+      "calibrated_duration_s": 34.2,
+      "traveled_distance_m": 30.464827613861868,
+      "median_speed_km_h": 2.6991365035715424,
+      "max_speed_km_h": 15.448786093223935,
+      "endpoint_speed_roughness_km_h": 1.1103077497818166,
+      "regression_speed_roughness_km_h": 0.8480303775784539
+    },
+    {
+      "track_id": 1,
+      "label": "car",
+      "active_frames": 443,
+      "calibrated_frames": 425,
+      "strict_calibrated_frames": 188,
+      "calibrated_duration_s": 14.133333333333333,
+      "traveled_distance_m": 30.375699709759765,
+      "median_speed_km_h": 6.929411555201904,
+      "max_speed_km_h": 22.791612858545584,
+      "endpoint_speed_roughness_km_h": 1.6771447082972766,
+      "regression_speed_roughness_km_h": 1.264985083377233
+    },
+    {
+      "track_id": 2,
+      "label": "car",
+      "active_frames": 292,
+      "calibrated_frames": 278,
+      "strict_calibrated_frames": 191,
+      "calibrated_duration_s": 9.233333333333333,
+      "traveled_distance_m": 21.40551302745905,
+      "median_speed_km_h": 8.18205183610355,
+      "max_speed_km_h": 22.423260884917447,
+      "endpoint_speed_roughness_km_h": 1.872115400947656,
+      "regression_speed_roughness_km_h": 1.2725494818620706
+    },
+    {
+      "track_id": 3,
+      "label": "car",
+      "active_frames": 356,
+      "calibrated_frames": 345,
+      "strict_calibrated_frames": 195,
+      "calibrated_duration_s": 11.466666666666669,
+      "traveled_distance_m": 24.778641043093288,
+      "median_speed_km_h": 7.136026490355683,
+      "max_speed_km_h": 22.74994668727433,
+      "endpoint_speed_roughness_km_h": 2.002497499646781,
+      "regression_speed_roughness_km_h": 1.4583793930990812
+    },
+    {
+      "track_id": 4,
+      "label": "car",
+      "active_frames": 311,
+      "calibrated_frames": 302,
+      "strict_calibrated_frames": 203,
+      "calibrated_duration_s": 10.033333333333331,
+      "traveled_distance_m": 22.096614129516578,
+      "median_speed_km_h": 7.166452392522768,
+      "max_speed_km_h": 19.142926181093483,
+      "endpoint_speed_roughness_km_h": 1.7796585067774044,
+      "regression_speed_roughness_km_h": 1.2175810542292855
+    }
+  ]
+}

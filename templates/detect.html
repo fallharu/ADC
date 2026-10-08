@@ -1,11 +1,21 @@
 {% extends "base.html" %}
 {% block title %}YOLO処理{% endblock %}
+{% block page_title %}YOLO処理{% endblock %}
 
 {% block content %}
-<h2 class="mb-3">2. YOLO処理</h2>
-<p class="text-muted">アップロード済みの動画やフォルダを選択してYOLO推論を実行できます。</p>
+<div class="page-heading">
+  <div>
+    <h2>2. YOLO処理</h2>
+    <p>アップロード済みの動画やフォルダを選択してYOLO推論を実行できます。</p>
+  </div>
+  <div class="nav nav-pills app-tabs app-compact-tabs" role="tablist" aria-label="処理モード">
+    <a class="nav-link active" href="#singleVideoCard"><i class="bi bi-file-play me-1"></i>単体処理</a>
+    <a class="nav-link" href="#folderBatchCard"><i class="bi bi-folder2-open me-1"></i>フォルダ処理</a>
+    <a class="nav-link" href="#modelManageCard"><i class="bi bi-box me-1"></i>モデル</a>
+  </div>
+</div>
 
-<div class="card mb-4" id="systemMetricsCard">
+<div class="card mb-4 border-0 shadow-sm" id="systemMetricsCard">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span>システムリソース状況</span>
     <span class="small text-muted" id="metricsTimestamp">-</span>
@@ -49,12 +59,43 @@
   </div>
 </div>
 
+<section class="inference-context mb-4" aria-labelledby="inferenceContextTitle">
+  <div class="inference-context-heading">
+    <div>
+      <div class="inference-context-kicker">NEXT INFERENCE</div>
+      <h3 id="inferenceContextTitle">推論の実行環境</h3>
+    </div>
+    <span class="inference-device-badge inference-device-{{ inference_preview.device.kind }}">
+      <i class="bi {{ 'bi-gpu-card' if inference_preview.device.kind == 'gpu' else 'bi-cpu' }}"></i>
+      {{ inference_preview.device.label }}
+    </span>
+  </div>
+  <div class="inference-context-grid">
+    <div>
+      <div class="inference-context-label">使用デバイス</div>
+      <div class="inference-context-value">{{ inference_preview.device.detail }}</div>
+      {% if inference_preview.device.fallback_possible %}
+      <div class="inference-context-note">CUDA の動作確認に失敗した場合は CPU に切り替えます。</div>
+      {% endif %}
+    </div>
+    <div>
+      <div class="inference-context-label">使用AI（自動選択）</div>
+      <div class="inference-context-value" id="selectedModelSummary">
+        {% if inference_preview.models %}{{ inference_preview.models | join(' / ') }}{% else %}使用可能なモデルが見つかりません{% endif %}
+      </div>
+      {% if inference_preview.warnings %}
+      <div class="inference-context-note text-warning-emphasis">{{ inference_preview.warnings | join(' ') }}</div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
 <div class="row g-4">
   <div class="col-lg-5">
     <div class="card h-100" id="singleVideoCard">
       <div class="card-header">単体動画を処理</div>
       <div class="card-body">
-        <form method="POST" id="singleVideoForm">
+        <form method="POST" id="singleVideoForm" data-busy-form>
           <div class="mb-3">
             <label for="fileSelect" class="form-label">動画を選択</label>
             <select class="form-select" name="selected_video" id="fileSelect">
@@ -71,7 +112,7 @@
               checked>
             <label class="form-check-label" for="singleUseStored">サブフォルダ設定（場所・年度・道路タイプ）を優先して使用</label>
           </div>
-          <div class="mb-3 form-check">
+          <div class="mb-3 form-check app-danger-zone p-2 rounded border">
             <input type="checkbox" class="form-check-input" id="singleOverwrite" name="single_overwrite" value="1">
             <label class="form-check-label text-danger" for="singleOverwrite">既存の実行結果を上書きする (過去データを削除)</label>
           </div>
@@ -136,11 +177,11 @@
           <div class="alert alert-info small" role="status">
             並列フレーム数はシステムの負荷に応じて自動調整されます。
           </div>
-          <button type="submit" class="btn btn-success w-100" {% if not uploaded_files %}disabled{% endif
-            %}>処理開始</button>
+          <button type="submit" class="btn btn-success w-100 py-2 fw-semibold" data-busy-label="推論を開始しています..." {% if not uploaded_files %}disabled{% endif
+            %}><i class="bi bi-play-fill me-1"></i>YOLO推論を開始</button>
         </form>
         <div class="small text-muted mt-3">
-          選択した動画はGPU最適化済みの設定で処理され、完了するとProcessLogにRun IDが追加されます。
+          実行デバイスと使用AIは、開始前に上部の「推論の実行環境」で確認できます。完了するとProcessLogにRun IDが追加されます。
         </div>
       </div>
     </div>
@@ -226,7 +267,7 @@
             <label class="form-check-label" for="batchAutoPostprocess">処理完了後に後処理パイプラインを自動実行する</label>
             <div class="form-text">フォルダごとの既定設定として保存されます。</div>
           </div>
-          <div class="form-check mb-2">
+          <div class="form-check mb-2 app-danger-zone p-2 rounded border">
             <input class="form-check-input" type="checkbox" id="batchOverwrite" name="batch_overwrite" value="1">
             <label class="form-check-label text-danger" for="batchOverwrite">既存の実行結果を上書きする (過去データを削除)</label>
           </div>
@@ -509,6 +550,98 @@
   const batchStatusUrl = "{{ url_for('main.batch_status_api') }}";
   const initialMetrics = {{ system_metrics | tojson }};
   const metricsUrl = "{{ url_for('main.system_metrics_api') }}";
+  const inferencePreview = {{ inference_preview | tojson }};
+
+  function bindOverwriteConfirm(formId, checkboxId, title) {
+    const form = document.getElementById(formId);
+    const checkbox = document.getElementById(checkboxId);
+    if (!form || !checkbox) return;
+
+    form.addEventListener('submit', async (event) => {
+      if (form.dataset.overwriteConfirmed === '1') {
+        delete form.dataset.overwriteConfirmed;
+        return;
+      }
+      if (!checkbox.checked) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const ok = await AppUI.confirm({
+        title,
+        message: '既存の実行結果を削除して上書きします。この操作は元に戻せません。',
+        okLabel: '上書きして実行',
+        okClass: 'btn-danger'
+      });
+      if (ok) {
+        form.dataset.overwriteConfirmed = '1';
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit(event.submitter);
+        } else {
+          form.submit();
+        }
+      }
+    }, true);
+  }
+
+  bindOverwriteConfirm('singleVideoForm', 'singleOverwrite', '単体動画を上書き処理');
+  bindOverwriteConfirm('folderBatchForm', 'batchOverwrite', 'フォルダを上書き処理');
+
+  const selectedModelSummary = document.getElementById('selectedModelSummary');
+  const vehicleModelSelect = document.getElementById('singleVehicleModel');
+  const tireModelSelect = document.getElementById('singleTireModel');
+
+  function selectedModelLabel() {
+    const autoModels = (inferencePreview.models || []).join(' / ') || '使用可能なモデルが見つかりません';
+    const vehicle = vehicleModelSelect?.value || '';
+    const tire = tireModelSelect?.value || '';
+    if (!vehicle && !tire) return autoModels;
+    return [
+      vehicle ? `車両: ${vehicle}` : '車両: 自動選択',
+      tire ? `タイヤ: ${tire}` : 'タイヤ: 自動選択'
+    ].join(' / ');
+  }
+
+  function updateSelectedModelSummary() {
+    if (selectedModelSummary) selectedModelSummary.textContent = selectedModelLabel();
+  }
+
+  vehicleModelSelect?.addEventListener('change', updateSelectedModelSummary);
+  tireModelSelect?.addEventListener('change', updateSelectedModelSummary);
+
+  function bindInferenceStartConfirm() {
+    const form = document.getElementById('singleVideoForm');
+    const videoSelect = document.getElementById('fileSelect');
+    if (!form) return;
+
+    form.addEventListener('submit', async (event) => {
+      if (form.dataset.inferenceStartConfirmed === '1') {
+        delete form.dataset.inferenceStartConfirmed;
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const video = videoSelect?.value || '選択した動画';
+      const device = inferencePreview.device?.label || 'CPU';
+      const ok = await AppUI.confirm({
+        title: 'YOLO推論を開始',
+        message: `対象: ${video}\n実行デバイス: ${device}\n使用AI: ${selectedModelLabel()}`,
+        okLabel: '推論を開始',
+        okClass: 'btn-success'
+      });
+      if (ok) {
+        form.dataset.inferenceStartConfirmed = '1';
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit(event.submitter);
+        } else {
+          form.submit();
+        }
+      }
+    }, true);
+  }
+
+  updateSelectedModelSummary();
+  bindInferenceStartConfirm();
 
   const metricsCard = document.getElementById('systemMetricsCard');
   const metricsTimestamp = document.getElementById('metricsTimestamp');
@@ -945,7 +1078,13 @@
 
   // GLOBAL scope needed for onclick handler
   window.removeSubfolderSetting = async function (subKey) {
-    if (!confirm(`サブフォルダ '${subKey}' の設定を削除しますか？`)) return;
+    const ok = await AppUI.confirm({
+      title: 'サブフォルダ設定を削除',
+      message: `サブフォルダ '${subKey}' の設定を削除します。この操作は保存後すぐに反映されます。`,
+      okLabel: '削除',
+      okClass: 'btn-danger'
+    });
+    if (!ok) return;
     delete currentSubfolderSettings[subKey];
     await saveCurrentSubfolderSettings();
   };

@@ -3,7 +3,93 @@
 {% block title %}キャリブレーションツール{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-2">
+<style>
+  /* 全画面モード: フル HD で縦スクロールなしに収める */
+  body.calib-fs .app-content > *:not(#calibRoot) { display: none !important; }
+  body.calib-fs .app-content { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  body.calib-fs #calibHeader,
+  body.calib-fs #calibHints { display: none !important; }
+  body.calib-fs #calibRoot {
+    position: fixed;
+    inset: 0;
+    z-index: 1040;
+    background: var(--bs-body-bg);
+    padding: 8px;
+    margin: 0;
+    overflow: hidden;
+  }
+  body.calib-fs #calibLayout {
+    display: flex;
+    flex-wrap: nowrap;
+    height: 100%;
+    gap: 8px;
+    margin: 0;
+  }
+  body.calib-fs #calibPreviewCol {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    height: 100%;
+    padding: 0;
+  }
+  body.calib-fs #calibToolCol {
+    flex: 0 0 440px;
+    max-width: 440px;
+    height: 100%;
+    overflow-y: auto;
+    padding: 0;
+  }
+  body.calib-fs #calibPreviewCol .card { height: 100%; }
+  body.calib-fs #calibPreviewCol .card-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 8px;
+  }
+  /* キャンバスは JS が実寸を設定するので、中央寄せは親(#canvasArea)が担当する */
+  body.calib-fs #canvasArea { flex: 1 1 auto; min-height: 0; }
+  body.calib-fs #calibToolCol .card-body { padding: 10px; }
+  /* 全画面では俯瞰と位置調整を画像の上下の帯へずらして置く */
+  body.calib-fs #previewRow {
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+  }
+  body.calib-fs #bevSlot {
+    flex: 0 0 auto;
+    max-width: none;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    order: -1;              /* 画像より上の帯 */
+  }
+  body.calib-fs #bevSlot #bevPanel {
+    margin-bottom: 0 !important;
+    display: flex;
+    flex-direction: column;
+  }
+  body.calib-fs #bevSlot #bevWrap {
+    height: 160px;
+    max-height: 160px !important;
+  }
+  /* 中央寄せは margin で行う（justify/align の center だと、拡大してはみ出した左上側へスクロールできない） */
+  #bevCanvas { margin: auto; flex: 0 0 auto; }
+  body.calib-fs #bevSlot #bevStatus {
+    max-height: 2.6em;
+    overflow: hidden;
+  }
+  body.calib-fs #bevSlot #bevWrap { overflow: auto; }
+  body.calib-fs #lineAdjustSlot {
+    flex: 0 0 auto;
+    width: 100%;
+    max-height: 210px;
+    overflow-y: auto;
+  }
+  body.calib-fs #lineAdjustSlot #lineAdjustPanel { margin-bottom: 0; }
+  body.calib-fs #canvasContainer { min-height: 0 !important; }
+</style>
+<div id="calibHeader" class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-2">
   <div>
     <h2 class="mb-1">キャリブレーションツール</h2>
     {% if run_id %}
@@ -28,24 +114,34 @@
 </div>
 {% endif %}
 {% else %}
-<div class="row g-4 align-items-stretch">
-  <div class="col-12 col-xl-8">
+<div id="calibRoot">
+<div id="calibLayout" class="row g-4 align-items-stretch">
+  <div id="calibPreviewCol" class="col-12 col-xl-8">
     <div class="card h-100 shadow-sm">
       <div class="card-header d-flex justify-content-between align-items-center gap-2">
         <span>プレビュー</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm ms-auto" id="fullscreenBtn">全画面 (F)</button>
         <span id="frameCounter" class="badge text-bg-secondary">0 / 0</span>
       </div>
       <div class="card-body">
-        <div id="canvasContainer" class="position-relative border bg-body-tertiary rounded overflow-hidden"
-          style="min-height: 420px;">
-          <div id="frameLoader"
-            class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-body-tertiary">
-            <div class="spinner-border text-primary" role="status">
-              <span class="visually-hidden">読み込み中...</span>
+        <div id="previewRow" class="d-flex gap-2 align-items-stretch" style="min-height: 0;">
+          <div id="canvasArea" class="flex-grow-1 d-flex align-items-center justify-content-center"
+            style="min-width: 0; min-height: 0;">
+            <div id="canvasContainer" class="position-relative border bg-body-tertiary rounded overflow-hidden"
+              style="min-height: 420px; width: 100%;">
+              <div id="frameLoader"
+                class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-body-tertiary">
+                <div class="spinner-border text-primary" role="status">
+                  <span class="visually-hidden">読み込み中...</span>
+                </div>
+              </div>
+              <img id="frameImage" class="d-none" alt="calibration frame" draggable="false"
+                style="display: block;">
+              <canvas id="drawCanvas" class="position-absolute top-0 start-0"></canvas>
             </div>
           </div>
-          <img id="frameImage" class="w-100 h-auto d-none" alt="calibration frame" draggable="false">
-          <canvas id="drawCanvas" class="position-absolute top-0 start-0"></canvas>
+          <div id="bevSlot" class="d-none"></div>
+          <div id="lineAdjustSlot" class="d-none"></div>
         </div>
         <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
           <div class="input-group input-group-sm" style="max-width: 210px;">
@@ -68,7 +164,7 @@
     </div>
   </div>
 
-  <div class="col-12 col-xl-4">
+  <div id="calibToolCol" class="col-12 col-xl-4">
     <div class="card shadow-sm mb-3">
       <div class="card-header d-flex align-items-center gap-2">
         <span>描画ツール</span>
@@ -96,6 +192,20 @@
           <button type="button" class="btn btn-outline-secondary btn-sm" id="undoBtn">ひとつ戻す</button>
           <button type="button" class="btn btn-outline-secondary btn-sm" id="clearModeBtn">現在の描画をクリア</button>
           <button type="button" class="btn btn-outline-danger btn-sm" id="clearAllBtn">すべてリセット</button>
+        </div>
+        <div class="mt-2">
+          <span class="form-label small d-block mb-1">線の表示</span>
+          <div class="d-flex flex-wrap gap-3">
+            <div class="form-check form-check-inline m-0">
+              <input class="form-check-input" type="checkbox" id="showCenterLineCheck" checked>
+              <label class="form-check-label small" for="showCenterLineCheck">中央線</label>
+            </div>
+            <div class="form-check form-check-inline m-0">
+              <input class="form-check-input" type="checkbox" id="showMidLinesCheck" checked>
+              <label class="form-check-label small" for="showMidLinesCheck">中間線</label>
+            </div>
+          </div>
+          <div class="form-text">表示を切り替えるだけで、保存されるデータは変わりません。</div>
         </div>
         <hr class="my-3">
         <div id="verticalControls" class="mode-panel">
@@ -136,9 +246,24 @@
         <div id="homographyControls" class="mode-panel d-none">
           <div class="row g-2 mb-2">
             <div class="col-6">
-              <label for="homographyWidthInput" class="form-label small mb-1">幅 (m)</label>
+              <label for="homographyRoadWidthInput" class="form-label small mb-1">車道幅 (m)</label>
+              <input id="homographyRoadWidthInput" type="number" class="form-control form-control-sm" step="0.1"
+                min="0" value="7">
+              <div class="form-text">左端から右側白線まで（例 7 = 3.5 + 3.5）。</div>
+            </div>
+            <div class="col-6">
+              <label for="homographySidewalkWidthInput" class="form-label small mb-1">歩道幅 (m)</label>
+              <input id="homographySidewalkWidthInput" type="number" class="form-control form-control-sm" step="0.1"
+                min="0" value="0.5">
+              <div class="form-text">右側白線から右端まで。</div>
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label for="homographyWidthInput" class="form-label small mb-1">合計幅 (m)</label>
               <input id="homographyWidthInput" type="number" class="form-control form-control-sm" step="0.1" min="0.1"
-                value="3.5">
+                value="7.5" readonly>
+              <div class="form-text">車道幅 + 歩道幅（すべて x 軸上）。4点はこの幅で囲みます。</div>
             </div>
             <div class="col-6">
               <label for="homographyLengthInput" class="form-label small mb-1">奥行き (m)</label>
@@ -147,27 +272,85 @@
             </div>
           </div>
           <div class="row g-2 mb-2">
+            <div class="col-4">
+              <label for="dashPaintInput" class="form-label small mb-1">中央線 (m)</label>
+              <input id="dashPaintInput" type="number" class="form-control form-control-sm" step="0.1" min="0.1"
+                value="5">
+            </div>
+            <div class="col-4">
+              <label for="dashGapInput" class="form-label small mb-1">中央空白 (m)</label>
+              <input id="dashGapInput" type="number" class="form-control form-control-sm" step="0.1" min="0.1"
+                value="5">
+            </div>
+            <div class="col-4">
+              <label for="dashTotalInput" class="form-label small mb-1">1セット計 (m)</label>
+              <input id="dashTotalInput" type="number" class="form-control form-control-sm" step="0.1" min="0.2"
+                value="10">
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <div class="form-check form-check-inline m-0">
+              <input class="form-check-input" type="checkbox" id="dashAutoCheck">
+              <label class="form-check-label small" for="dashAutoCheck">自動モード</label>
+            </div>
+            <button type="button" class="btn btn-outline-info btn-sm ms-auto" id="dashMeasureBtn">俯瞰から比率を測定</button>
+          </div>
+          <div class="form-text mb-2" id="dashStatus">
+            中央線と中央空白を交互に配置します。自動モードでは 1セット計だけを入力し、
+            内訳は俯瞰視点の明暗の比率から求めます。
+          </div>
+          <div class="row g-2 mb-2">
             <div class="col-6">
               <label for="homographyIntervalInput" class="form-label small mb-1">縦方向の間隔 (m)</label>
               <input id="homographyIntervalInput" type="number" class="form-control form-control-sm" step="0.1"
                 min="0.1" value="5">
-              <div class="form-text">補助線のピッチを設定します。</div>
+              <div class="form-text">自動モードでは中央線の長さに従います。</div>
             </div>
             <div class="col-6 d-flex align-items-end">
               <div class="form-text mb-0">4点指定後は長押しで頂点を微調整できます。</div>
             </div>
           </div>
-          <div class="mb-2">
-            <span class="form-label small d-block mb-1">調整する補助線</span>
-            <div id="homographyLineList" class="list-group list-group-flush small"></div>
+          <div class="mb-2" id="bevPanel">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="form-label small mb-0">俯瞰プレビュー</span>
+              <div class="form-check form-check-inline m-0 ms-auto">
+                <input class="form-check-input" type="checkbox" id="bevGridCheck" checked>
+                <label class="form-check-label small" for="bevGridCheck">目盛り</label>
+              </div>
+            </div>
+            <div id="bevWrap" class="border rounded bg-body-tertiary d-flex p-1"
+              style="max-height: 420px; overflow: auto; overscroll-behavior: contain;">
+              <canvas id="bevCanvas"></canvas>
+            </div>
+            <div class="form-text" id="bevStatus">4点を指定すると俯瞰図が表示されます。ホイールで拡大縮小、ダブルクリックで等倍。</div>
+
           </div>
-          <div class="mb-2">
-            <label for="homographyLineSlider" class="form-label small mb-1">位置調整 (比率)</label>
-            <input id="homographyLineSlider" type="range" class="form-range" min="0" max="10" step="0.1" disabled>
-            <div class="d-flex align-items-center gap-2 mt-1">
-              <input id="homographyLineDistance" type="number" class="form-control form-control-sm" step="0.1" min="0"
-                disabled>
-              <span class="form-text mb-0">m</span>
+          <div id="lineAdjustPanel" class="border rounded p-2">
+            <div class="mb-2">
+              <span class="form-label small d-block mb-1">調整する補助線</span>
+              <div id="homographyLineList" class="list-group list-group-flush small"></div>
+            </div>
+            <div class="mb-0">
+              <div class="d-flex align-items-center gap-2 mb-1">
+                <label for="homographyLineSlider" class="form-label small mb-0">位置調整 (比率)</label>
+                <span class="badge text-bg-secondary ms-auto" id="lineSelectBadge">—</span>
+              </div>
+              <input id="homographyLineSlider" type="range" class="form-range" min="0" max="1" step="0.001">
+              <div class="d-flex align-items-center gap-2 mt-1">
+                <input id="homographyLineDistance" type="number" class="form-control form-control-sm" step="0.1"
+                  min="0">
+                <span class="form-text mb-0">m</span>
+              </div>
+              <div class="btn-group btn-group-sm w-100 mt-2" role="group">
+                <button type="button" class="btn btn-outline-secondary" id="linePrevBtn">◀ 前の線</button>
+                <button type="button" class="btn btn-outline-secondary" id="lineNextBtn">次の線 ▶</button>
+              </div>
+              <div class="btn-group btn-group-sm w-100 mt-1" role="group">
+                <button type="button" class="btn btn-outline-primary" id="lineAddBtn"
+                  title="奥に補助線を 1 本足し、その分だけ奥行きと 4 点の奥側を伸ばします">奥に線を追加</button>
+                <button type="button" class="btn btn-outline-danger" id="lineRemoveBtn">選択を削除</button>
+              </div>
+              <div class="form-text">↑ ↓ キー（← → も可）で線を選べます。↑ が奥側です。</div>
             </div>
           </div>
           <ul id="homographyPointsList" class="list-group list-group-flush small mb-2"></ul>
@@ -207,7 +390,7 @@
       </div>
     </div>
 
-    <div class="card shadow-sm">
+    <div id="calibHints" class="card shadow-sm">
       <div class="card-header">ヒント</div>
       <div class="card-body small">
         <ul class="mb-0 ps-3">
@@ -215,10 +398,12 @@
           <li>XYルートはドラッグで経路を描き、実際の距離を入力します。</li>
           <li>ホモグラフィはエリアの四隅を時計回りにクリックして指定します。</li>
           <li>保存後は Post Process でプロファイルを適用し、速度計算に利用できます。</li>
+          <li><kbd>F</kbd> で全画面表示を切り替えます（<kbd>Esc</kbd> で解除）。</li>
         </ul>
       </div>
     </div>
   </div>
+</div>
 </div>
 {% endif %}
 {% endblock %}
@@ -248,17 +433,19 @@
   "dataUrl": data_url,
   "saveUrl": save_url,
   "laneTestUrl": lane_test_url,
+  "homographyPreviewUrl": url_for('main.calibration_homography_preview', run_id=run_id, path_hint=path_hint) if has_run else None,
   "pathHint": path_hint
 }|tojson }}
 </script>
 
 {% if not error %}
+<script src="{{ url_for('static', filename='js/calibration-projection.js') }}"></script>
 <script>
   (() => {
     const configEl = document.getElementById('calibrationConfig');
     if (!configEl) return;
     const config = JSON.parse(configEl.textContent || '{}');
-    if (!config || !config.runId || !config.metadataUrl) return;
+    if (!config || config.runId == null || !config.metadataUrl) return;
 
     // DOM
     const canvas = document.getElementById('drawCanvas');
@@ -289,10 +476,23 @@
     const homographyWidthInput = document.getElementById('homographyWidthInput');
     const homographyLengthInput = document.getElementById('homographyLengthInput');
     const homographyIntervalInput = document.getElementById('homographyIntervalInput');
+    const dashPaintInput = document.getElementById('dashPaintInput');
+    const dashGapInput = document.getElementById('dashGapInput');
+    const dashTotalInput = document.getElementById('dashTotalInput');
+    const dashAutoCheck = document.getElementById('dashAutoCheck');
+    const dashStatus = document.getElementById('dashStatus');
+    const lineSelectBadge = document.getElementById('lineSelectBadge');
+    const homographyRoadWidthInput = document.getElementById('homographyRoadWidthInput');
+    const homographySidewalkWidthInput = document.getElementById('homographySidewalkWidthInput');
     const homographyPointsList = document.getElementById('homographyPointsList');
     const homographyLineList = document.getElementById('homographyLineList');
     const homographyLineSlider = document.getElementById('homographyLineSlider');
     const homographyLineDistance = document.getElementById('homographyLineDistance');
+    const bevCanvas = document.getElementById('bevCanvas');
+    const bevStatus = document.getElementById('bevStatus');
+    const bevGridCheck = document.getElementById('bevGridCheck');
+    const showCenterLineCheck = document.getElementById('showCenterLineCheck');
+    const showMidLinesCheck = document.getElementById('showMidLinesCheck');
 
     const verticalControls = document.getElementById('verticalControls');
     const verticalHybridControls = document.getElementById('verticalHybridControls');
@@ -355,8 +555,21 @@
         homography_connectors: []
       },
       laneTests: [],
+      lineVisibility: {
+        center: true,
+        mid: true
+      },
+      bevSourceCanvas: null,
+      bevZoom: 1,
+      loadedCalibration: {},
       homographySettings: {
-        interval: 5
+        interval: 5,
+        roadWidth: 7,
+        sidewalkWidth: 0.5,
+        dashPaint: 5,
+        dashGap: 5,
+        dashAuto: false,
+        rightLine: 7
       },
       homographyDrag: {
         index: null,
@@ -403,6 +616,17 @@
     if (homographyIntervalInput) {
       homographyIntervalInput.value = String(state.homographySettings.interval);
     }
+    if (homographyRoadWidthInput && homographySidewalkWidthInput) {
+      // 初期表示の合計幅を入力値から求めておく
+      const r0 = Math.max(0, parseFloat(homographyRoadWidthInput.value || '0') || 0);
+      const w0 = Math.max(0, parseFloat(homographySidewalkWidthInput.value || '0') || 0);
+      state.homographySettings.roadWidth = r0;
+      state.homographySettings.sidewalkWidth = w0;
+      state.homographySettings.rightLine = w0 > 0 ? r0 : 0;
+      if (homographyWidthInput && r0 + w0 > 0) {
+        homographyWidthInput.value = String(Number((r0 + w0).toFixed(3)));
+      }
+    }
 
 
     // ユーティリティ
@@ -448,15 +672,28 @@
 
     function resizeCanvas() {
       if (!canvas || !state.nativeWidth || !state.nativeHeight) return;
-      const containerWidth = canvasContainer?.clientWidth || state.nativeWidth;
-      const scale = containerWidth / state.nativeWidth;
+      const area = document.getElementById('canvasArea');
+      const availW = area?.clientWidth || canvasContainer?.clientWidth || state.nativeWidth;
+      let scale = availW / state.nativeWidth;
+      // 全画面では高さにも収める（縦スクロールを出さない）
+      if (document.body.classList.contains('calib-fs')) {
+        const availH = area?.clientHeight || 0;
+        if (availH > 0) scale = Math.min(scale, availH / state.nativeHeight);
+      }
       state.displayWidth = Math.max(1, Math.round(state.nativeWidth * scale));
       state.displayHeight = Math.max(1, Math.round(state.nativeHeight * scale));
       canvas.width = state.displayWidth;
       canvas.height = state.displayHeight;
+      // 画像とキャンバスは必ず同じ寸法・同じ原点に置く（ズレると描画位置が狂う）
+      if (canvasContainer) {
+        canvasContainer.style.width = `${state.displayWidth}px`;
+        canvasContainer.style.height = `${state.displayHeight}px`;
+      }
       if (imageEl) {
         imageEl.width = state.displayWidth;
         imageEl.height = state.displayHeight;
+        imageEl.style.width = `${state.displayWidth}px`;
+        imageEl.style.height = `${state.displayHeight}px`;
       }
     }
 
@@ -571,6 +808,549 @@
         }
       });
       return sorted.slice(topIndex).concat(sorted.slice(0, topIndex));
+    }
+
+    // --- 頂点の向き ---------------------------------------------------------
+    // image_points は [[0,0],[W,0],[W,L],[0,L]] に対応する。
+    // p0-p1 / p3-p2 が道路を横断する辺、p0-p3 / p1-p2 が道路に沿う辺。
+    // 道路が斜めに写るカメラでは画像 y の差で横断/進行を見分けられず、
+    // 幅と奥行きが入れ替わって俯瞰がねじれ、左右も反転していた。
+    // そのため白線の向き（白線がなければ消失点の位置）で判定する。
+    const UNIT_SQUARE = [[0, 0], [1, 0], [1, 1], [0, 1]];
+
+    // 重心まわりの角度順に並べ、辺が交差しない（蝶ネクタイ状にならない）順序にする
+    function cyclicQuad(points) {
+      const base = points.slice(0, 4).map((pt) => [pt[0], pt[1]]);
+      const cx = base.reduce((sum, pt) => sum + pt[0], 0) / 4;
+      const cy = base.reduce((sum, pt) => sum + pt[1], 0) / 4;
+      const angle = (pt) => Math.atan2(pt[1] - cy, pt[0] - cx);
+      return base.sort((a, b) => angle(a) - angle(b));
+    }
+
+    // q の並びで白線を世界座標(0..1)へ写し、白線が v 方向（道路に沿う向き）に
+    // 伸びている度合いを 0..1 で返す。正しい並びなら白線は u 一定の直線になる。
+    function laneAlongScore(q) {
+      const lines = ['left_white_line', 'right_white_line', 'center_line']
+        .map((key) => state.annotations[key])
+        .filter((line) => Array.isArray(line) && line.length >= 2);
+      if (!lines.length) return null;
+      const H = solveHomography(q, UNIT_SQUARE);
+      if (!H) return null;
+      const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4;
+      const cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+      const wCenter = H[6] * cx + H[7] * cy + H[8];
+      let total = 0;
+      let count = 0;
+      lines.forEach((line) => {
+        let minU = Infinity;
+        let maxU = -Infinity;
+        let minV = Infinity;
+        let maxV = -Infinity;
+        let n = 0;
+        line.forEach((pt) => {
+          const w = H[6] * pt[0] + H[7] * pt[1] + H[8];
+          if (!(w * wCenter > 0)) return;  // 地平線より向こうの点は使わない
+          const u = (H[0] * pt[0] + H[1] * pt[1] + H[2]) / w;
+          const v = (H[3] * pt[0] + H[4] * pt[1] + H[5]) / w;
+          minU = Math.min(minU, u);
+          maxU = Math.max(maxU, u);
+          minV = Math.min(minV, v);
+          maxV = Math.max(maxV, v);
+          n += 1;
+        });
+        if (n < 2) return;
+        const du = maxU - minU;
+        const dv = maxV - minV;
+        if (!(du + dv > 0)) return;
+        total += dv / (du + dv);
+        count += 1;
+      });
+      return count ? total / count : null;
+    }
+
+    // 直線 a-b と直線 c-d の交点（消失点）の、画像中心からの距離
+    function vanishingPointDistance(a, b, c, d) {
+      const den = (a[0] - b[0]) * (c[1] - d[1]) - (a[1] - b[1]) * (c[0] - d[0]);
+      if (Math.abs(den) < 1e-9) return Infinity;
+      const s = a[0] * b[1] - a[1] * b[0];
+      const t = c[0] * d[1] - c[1] * d[0];
+      const px = (s * (c[0] - d[0]) - (a[0] - b[0]) * t) / den;
+      const py = (s * (c[1] - d[1]) - (a[1] - b[1]) * t) / den;
+      const cx = state.nativeWidth ? state.nativeWidth / 2 : (a[0] + b[0] + c[0] + d[0]) / 4;
+      const cy = state.nativeHeight ? state.nativeHeight / 2 : (a[1] + b[1] + c[1] + d[1]) / 4;
+      return Math.hypot(px - cx, py - cy);
+    }
+
+    // 巡回順に並んだ 4 点について、何点ずらせば p0-p1 が横断方向になるか(0/1)を返す。
+    // confident が false のときは向きを確定できていない。
+    function quadAxisParity(base) {
+      const rot1 = base.slice(1).concat(base.slice(0, 1));
+      const s0 = laneAlongScore(base);
+      const s1 = laneAlongScore(rot1);
+      if (s0 !== null && s1 !== null && Math.abs(s0 - s1) > 0.2) {
+        return { parity: s0 > s1 ? 0 : 1, confident: true };
+      }
+      // 道路に沿う辺の消失点は画像の中心付近（道路の先）に、
+      // 横断する辺の消失点は画像のはるか外側に来る
+      const alongVp = vanishingPointDistance(base[0], base[3], base[1], base[2]);
+      const acrossVp = vanishingPointDistance(base[0], base[1], base[3], base[2]);
+      const ratio = Math.max(alongVp, acrossVp) / Math.max(1e-6, Math.min(alongVp, acrossVp));
+      if (Number.isFinite(ratio) && ratio > 1.2) {
+        return { parity: alongVp <= acrossVp ? 0 : 1, confident: ratio > 1.5 };
+      }
+      // 平行四辺形に近く消失点で決まらないときは、画像 y の隔たりで判定する
+      const midY = (q, a, b) => (q[a][1] + q[b][1]) / 2;
+      const spread = (q) => Math.abs(midY(q, 0, 1) - midY(q, 3, 2)) - Math.abs(midY(q, 1, 2) - midY(q, 0, 3));
+      return { parity: spread(base) >= spread(rot1) ? 0 : 1, confident: false };
+    }
+
+    function quadOrientationIsConfident(points) {
+      if (!Array.isArray(points) || points.length < 4) return true;
+      return quadAxisParity(cyclicQuad(points)).confident;
+    }
+
+    // クリック順によらず、幅方向が道路を横断し、v=0 が手前、u が進行方向の右手に
+    // なる順序へ並べる。これで歩道の境界は必ず道路と平行（x 軸上の一定位置）になる。
+    function normalizeQuadOrder(points) {
+      if (!Array.isArray(points) || points.length < 4) return points;
+      const base = cyclicQuad(points);
+      const { parity } = quadAxisParity(base);
+      let q = base.slice(parity).concat(base.slice(0, parity));
+      // v=0 を画像の下側（手前）にする。180 度回しても軸の対応は変わらない
+      if ((q[0][1] + q[1][1]) / 2 < (q[3][1] + q[2][1]) / 2) q = [q[2], q[3], q[0], q[1]];
+
+      // u の向きを決める。歩道は右白線の外側なので右白線が u の大きい側に来るようにする。
+      const img2world = solveHomography(q, UNIT_SQUARE);
+      const medianU = (line) => {
+        if (!img2world || !Array.isArray(line) || line.length < 2) return null;
+        const us = [];
+        line.forEach((pt) => {
+          const w = img2world[6] * pt[0] + img2world[7] * pt[1] + img2world[8];
+          if (!w) return;
+          us.push((img2world[0] * pt[0] + img2world[1] * pt[1] + img2world[2]) / w);
+        });
+        if (!us.length) return null;
+        us.sort((a, b) => a - b);
+        return us[Math.floor(us.length / 2)];
+      };
+      let flip = null;
+      const rightU = medianU(state.annotations.right_white_line);
+      if (rightU !== null) {
+        flip = rightU < 0.5;
+      } else {
+        const leftU = medianU(state.annotations.left_white_line);
+        if (leftU !== null) flip = leftU > 0.5;
+      }
+      if (flip === null) {
+        // 白線がなければ、上から見て u が進行方向(v)の右手になる向きにして鏡像を防ぐ
+        // （画像座標は y が下向きなので、その向きでは外積が負になる）
+        const cross = (q[1][0] - q[0][0]) * (q[3][1] - q[0][1])
+          - (q[1][1] - q[0][1]) * (q[3][0] - q[0][0]);
+        flip = cross > 0;
+      }
+      if (flip) q = [q[1], q[0], q[3], q[2]];
+      return q;
+    }
+
+    // 保存済みの点順は実座標と補正の対応を表すので、未編集なら維持する。
+    // 新規・編集済みの4点だけを正規化し、プレビューと保存で共用する。
+    function effectiveQuad(points) {
+      const saved = state.loadedCalibration.scale?.homography?.image_points;
+      if (Array.isArray(saved) && JSON.stringify(points) === JSON.stringify(saved)) {
+        return saved.map(point => point.slice());
+      }
+      return normalizeQuadOrder(points);
+    }
+
+    // --- 車道幅 / 歩道幅 ----------------------------------------------------
+    // 合計幅(width_m)は 2 つの入力から導出し、右側白線は車道幅の位置に置く。
+    function syncHomographyWidths() {
+      const road = Math.max(0, parseFloat(homographyRoadWidthInput?.value || '0') || 0);
+      const walk = Math.max(0, parseFloat(homographySidewalkWidthInput?.value || '0') || 0);
+      const total = road + walk;
+      state.homographySettings.roadWidth = road;
+      state.homographySettings.sidewalkWidth = walk;
+      state.homographySettings.rightLine = walk > 0 ? road : 0;
+      if (homographyWidthInput) {
+        homographyWidthInput.value = total > 0 ? String(Number(total.toFixed(3))) : '';
+      }
+      updateHomographyDerivedData();
+    }
+
+    // 保存済みプロファイルから車道幅/歩道幅を復元する（旧形式にも対応）
+    function applyHomographyWidths(homography) {
+      if (!homography) return;
+      const total = Number(homography.width_m) || 0;
+      let road = Number(homography.road_width_m);
+      let walk = Number(homography.sidewalk_width_m);
+      if (!Number.isFinite(road) || road <= 0) {
+        const line = Number(homography.right_line_m);
+        road = Number.isFinite(line) && line > 0 ? line : total;
+      }
+      if (!Number.isFinite(walk) || walk < 0) walk = Math.max(0, total - road);
+      if (road + walk <= 0) return;
+      if (homographyRoadWidthInput) homographyRoadWidthInput.value = String(Number(road.toFixed(3)));
+      if (homographySidewalkWidthInput) homographySidewalkWidthInput.value = String(Number(walk.toFixed(3)));
+      state.homographySettings.roadWidth = road;
+      state.homographySettings.sidewalkWidth = walk;
+      state.homographySettings.rightLine = walk > 0 ? road : 0;
+      if (homographyWidthInput) homographyWidthInput.value = String(Number((road + walk).toFixed(3)));
+    }
+
+    // --- 俯瞰プレビュー -----------------------------------------------------
+    // world(u,v) -> image(x,y) の射影行列を 4 点対応から解く（DLT, 8元連立）
+    function solveHomography(src, dst) {
+      const A = [];
+      const b = [];
+      for (let i = 0; i < 4; i += 1) {
+        const [x, y] = src[i];
+        const [X, Y] = dst[i];
+        A.push([x, y, 1, 0, 0, 0, -x * X, -y * X]);
+        b.push(X);
+        A.push([0, 0, 0, x, y, 1, -x * Y, -y * Y]);
+        b.push(Y);
+      }
+      // ガウスの消去法（部分ピボット選択）
+      const n = 8;
+      for (let col = 0; col < n; col += 1) {
+        let piv = col;
+        for (let r = col + 1; r < n; r += 1) {
+          if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+        }
+        if (Math.abs(A[piv][col]) < 1e-12) return null;
+        if (piv !== col) {
+          [A[piv], A[col]] = [A[col], A[piv]];
+          [b[piv], b[col]] = [b[col], b[piv]];
+        }
+        const d = A[col][col];
+        for (let c = col; c < n; c += 1) A[col][c] /= d;
+        b[col] /= d;
+        for (let r = 0; r < n; r += 1) {
+          if (r === col) continue;
+          const f = A[r][col];
+          if (!f) continue;
+          for (let c = col; c < n; c += 1) A[r][c] -= f * A[col][c];
+          b[r] -= f * b[col];
+        }
+      }
+      return [b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], 1];
+    }
+
+    function ensureBevSource() {
+      if (!imageEl || !imageEl.complete || !state.nativeWidth || !state.nativeHeight) return null;
+      if (state.bevSourceCanvas && state.bevSourceCanvas.dataset.url === state.imageUrl) {
+        return state.bevSourceCanvas;
+      }
+      const off = document.createElement('canvas');
+      off.width = state.nativeWidth;
+      off.height = state.nativeHeight;
+      const octx = off.getContext('2d', { willReadFrequently: true });
+      try {
+        octx.drawImage(imageEl, 0, 0, state.nativeWidth, state.nativeHeight);
+      } catch (e) {
+        return null;
+      }
+      off.dataset.url = state.imageUrl || '';
+      state.bevSourceCanvas = off;
+      return off;
+    }
+
+    const previewLoader = new CalibrationProjection.PreviewLoader();
+    let previewTimer;
+
+    function currentProjectionCalibration() {
+      return CalibrationProjection.mergeCalibration(state.loadedCalibration, {
+        scale: {
+          mode: 'homography',
+          lines: state.annotations.homography_scale_lines,
+          homography: {
+            image_points: effectiveQuad(state.annotations.homography_points),
+            width_m: parseFloat(homographyWidthInput?.value || '0') || 0,
+            length_m: parseFloat(homographyLengthInput?.value || '0') || 0,
+            interval_m: state.homographySettings.interval,
+          },
+        },
+      });
+    }
+
+    function renderHomographyPreview() {
+      const sequence = previewLoader.invalidate();
+      window.clearTimeout(previewTimer);
+      // Clear the old view immediately: it must not describe a different calibration.
+      if (bevCanvas) bevCanvas.getContext('2d').clearRect(0, 0, bevCanvas.width, bevCanvas.height);
+      previewTimer = window.setTimeout(() => {
+        drawHomographyPreview(sequence).catch(error => {
+          if (sequence !== previewLoader.sequence || error.name === 'AbortError') return;
+          if (bevStatus) bevStatus.textContent = error.message || '俯瞰画像を生成できません。';
+        });
+      }, 150);
+    }
+
+    async function drawHomographyPreview(sequence) {
+      if (!bevCanvas) return;
+      const bctx = bevCanvas.getContext('2d');
+      const points = state.annotations.homography_points;
+      const widthM = parseFloat(homographyWidthInput?.value || '0') || 0;
+      let lengthM = parseFloat(homographyLengthInput?.value || '0') || 0;
+
+      const fail = (msg) => {
+        bevCanvas.width = 1;
+        bevCanvas.height = 1;
+        bctx.clearRect(0, 0, 1, 1);
+        if (bevStatus) bevStatus.textContent = msg;
+      };
+
+      if (state.scaleMode !== 'homography') return;
+      if (!Array.isArray(points) || points.length < 4) {
+        fail(`4点を指定すると俯瞰図が表示されます。（現在 ${points ? points.length : 0} 点）`);
+        return;
+      }
+      if (!(widthM > 0) || !(lengthM > 0)) {
+        fail('幅 (m) と奥行き (m) を入力してください。');
+        return;
+      }
+      if (!imageEl?.complete || !state.nativeWidth || !state.nativeHeight) {
+        fail('フレームの読み込み待ちです。');
+        return;
+      }
+
+      // 解析側(speed_homography)は image_points をその順で
+      // [[0,0],[W,0],[W,L],[0,L]] に対応づける。幅方向が道路を横断する並びに
+      // 正規化してからプレビューする（保存時も同じ並びに揃える）。
+      const quad = effectiveQuad(points.slice(0, 4).map((pt) => [pt[0], pt[1]]));
+
+      // 全画面では画像の上下の帯に収めるため横向き（道路が左右）に描く
+      const horizontal = document.body.classList.contains('calib-fs');
+      const zoom = state.bevZoom || 1;
+      // 1m あたりの px。ppmU は横断方向(u)、ppmV は進行方向(v)
+      let ppmU;
+      let ppmV;
+      let outW;
+      let outH;
+      if (horizontal) {
+        // 横幅は動画の表示幅の 1.2 倍を目安に（帯に収まる範囲で）進行方向へ引き伸ばし、
+        // 高さは帯いっぱいに使う。offset 寸法はスクロールバーの有無で変わらない
+        const box = document.getElementById('bevWrap');
+        const availW = Math.max(240, (box?.offsetWidth || 900) - 10);
+        const availH = Math.max(90, (box?.offsetHeight || 190) - 10);
+        const targetW = state.displayWidth > 0 ? Math.round(state.displayWidth * 1.2) : availW;
+        outW = Math.max(1, Math.round(Math.min(availW, targetW) * zoom));
+        outH = Math.max(1, Math.round(availH * zoom));
+        ppmV = outW / lengthM;
+        ppmU = outH / widthM;
+      } else {
+        ppmU = Math.max(1, Math.min(300 / widthM, 1400 / lengthM)) * zoom;
+        ppmV = ppmU;
+        outW = Math.max(1, Math.round(widthM * ppmU));
+        outH = Math.max(1, Math.round(lengthM * ppmV));
+      }
+      // Render from the native video frame with the same transform as speed estimation.
+      // Limit work per request even when zooming in on the preview.
+      const sizeFactor = Math.min(1, 2400 / outW, 2400 / outH,
+        Math.sqrt(2000000 / (outW * outH)));
+      const requestBody = {
+        frame: state.frameIndex, horizontal,
+        width: Math.max(1, Math.floor(outW * sizeFactor)),
+        height: Math.max(1, Math.floor(outH * sizeFactor)),
+        calibration: currentProjectionCalibration(),
+      };
+      if (bevStatus) bevStatus.textContent = '速度計算と同じ補正で俯瞰画像を更新中…';
+      const preview = await previewLoader.load(config.homographyPreviewUrl, requestBody, sequence);
+      if (!preview || sequence !== previewLoader.sequence || state.scaleMode !== 'homography') return;
+      lengthM = preview.length_m;
+      const zeroIsNear = preview.zero_is_near;
+      outW = preview.image.naturalWidth;
+      outH = preview.image.naturalHeight;
+      ppmU = ((horizontal ? outH : outW) - 1) / widthM;
+      ppmV = ((horizontal ? outW : outH) - 1) / lengthM;
+      bevCanvas.width = outW;
+      bevCanvas.height = outH;
+      if (state.bevScrollAnchor) {
+        const wrap = document.getElementById('bevWrap');
+        const anchor = state.bevScrollAnchor;
+        wrap.scrollLeft = anchor.x * outW - anchor.offsetX;
+        wrap.scrollTop = anchor.y * outH - anchor.offsetY;
+        state.bevScrollAnchor = null;
+      }
+
+      // 世界座標 (u:横断, v:進行) をキャンバス座標へ写す。
+      // 横向きでは u が増えるほど下（右白線と歩道が下側に出る）。
+      const toX = horizontal ? (u, v) => v * ppmV : (u, v) => u * ppmU;
+      const toY = horizontal ? (u, v) => u * ppmU : (u, v) => outH - 1 - v * ppmV;
+
+      bctx.drawImage(preview.image, 0, 0);
+
+      const rightLine = Number(state.homographySettings.rightLine) || 0;
+      const hasRightLine = rightLine > 0 && rightLine < widthM;
+      const midUForLegend = hasRightLine ? rightLine / 2 : widthM / 2;
+
+      if (bevGridCheck && bevGridCheck.checked) {
+        const interval = state.homographySettings.interval || 5;
+        const midU = hasRightLine ? rightLine / 2 : widthM / 2;
+        // 世界座標の線分をキャンバスに引く
+        const seg = (u1, v1, u2, v2) => {
+          bctx.beginPath();
+          bctx.moveTo(toX(u1, v1), toY(u1, v1));
+          bctx.lineTo(toX(u2, v2), toY(u2, v2));
+          bctx.stroke();
+        };
+        bctx.save();
+        bctx.font = '10px sans-serif';
+
+        // 画像と同じ補正で求めた、手前端からの実距離を目盛りに使う。
+        const stations = preview.stations_m.slice();
+        if (!stations.length) {
+          for (let d = 0; d <= lengthM + 1e-6; d += interval) stations.push(d);
+        }
+        bctx.strokeStyle = '#4ecdc4';
+        bctx.fillStyle = '#4ecdc4';
+        bctx.lineWidth = 1;
+        stations.forEach((d) => {
+          const vLabel = d;
+          seg(0, d, widthM, d);
+          const lx = toX(0, d);
+          const ly = toY(0, d);
+          const txt = `${vLabel.toFixed(vLabel % 1 ? 1 : 0)}m`;
+          if (horizontal) bctx.fillText(txt, Math.min(lx + 2, outW - 24), 10);
+          else bctx.fillText(txt, 2, Math.max(10, ly - 2));
+        });
+
+        // 横断方向の 1m 目盛り（線は引かず、手前の端に短い目盛りとラベルだけ出す）
+        bctx.strokeStyle = 'rgba(255,214,10,0.9)';
+        bctx.fillStyle = 'rgba(255,214,10,0.9)';
+        bctx.font = '9px sans-serif';
+        for (let d = 1; d < widthM - 1e-6; d += 1) {
+          const x = toX(d, 0);
+          const y = toY(d, 0);
+          bctx.beginPath();
+          if (horizontal) { bctx.moveTo(0, y); bctx.lineTo(9, y); }
+          else { bctx.moveTo(x, outH - 9); bctx.lineTo(x, outH); }
+          bctx.stroke();
+          const t = `${d}`;
+          if (horizontal) bctx.fillText(t, 11, y + 3);
+          else bctx.fillText(t, x + 2, outH - 11);
+        }
+        bctx.font = '10px sans-serif';
+
+        // 中央付近を 0.1 m 刻みで可視化（手前側の端に目盛りを出す）
+        bctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        const span = Math.min(1.0, widthM / 2);
+        for (let t = -span; t <= span + 1e-6; t += 0.1) {
+          const u = midU + t;
+          if (u < 0 || u > widthM) continue;
+          const isHalf = Math.abs(Math.round(t * 10) % 5) < 1e-6;
+          const len = isHalf ? 22 : 12;
+          const x = toX(u, 0);
+          const y = toY(u, 0);
+          bctx.beginPath();
+          if (horizontal) { bctx.moveTo(x, y); bctx.lineTo(x + len, y); }
+          else { bctx.moveTo(x, outH - len); bctx.lineTo(x, outH); }
+          bctx.stroke();
+        }
+
+        // 車道中央（小数第一位まで）
+        bctx.strokeStyle = '#ff3b6b';
+        bctx.lineWidth = 1.5;
+        seg(midU, 0, midU, lengthM);
+        const midLabel = `${midU.toFixed(1)}m`;
+        const mw = bctx.measureText(midLabel).width;
+        const labelStep = Math.max(interval * 2, lengthM / 8);
+        for (let d = 0; d <= lengthM + 1e-6; d += labelStep) {
+          const lx = toX(midU, d);
+          const ly = toY(midU, d);
+          const tx = Math.min(Math.max(lx - mw / 2, 2), outW - mw - 4);
+          const ty = Math.min(Math.max(ly - 4, 12), outH - 4);
+          bctx.fillStyle = 'rgba(0,0,0,0.65)';
+          bctx.fillRect(tx - 2, ty - 10, mw + 4, 13);
+          bctx.fillStyle = '#ff3b6b';
+          bctx.fillText(midLabel, tx, ty);
+        }
+
+        // 右側白線で車道と歩道を分ける（x 軸上の一定位置なので道路と平行）
+        if (hasRightLine) {
+          bctx.fillStyle = 'rgba(78, 205, 196, 0.18)';
+          if (horizontal) {
+            // u が下向きなので、右白線から下端までが歩道
+            const y0 = toY(rightLine, 0);
+            bctx.fillRect(0, y0, outW, outH - y0);
+          } else {
+            const x0 = toX(rightLine, 0);
+            bctx.fillRect(x0, 0, outW - x0, outH);
+          }
+          bctx.strokeStyle = '#ffffff';
+          bctx.lineWidth = 2;
+          seg(rightLine, 0, rightLine, lengthM);
+        }
+
+        // x 軸の内訳（例 0 / 3.5 / 7.0 / 7.5）
+        const marks = hasRightLine ? [0, midU, rightLine, widthM] : [0, midU, widthM];
+        bctx.font = '9px sans-serif';
+        marks.forEach((u) => {
+          const label = `${u.toFixed(1)}`;
+          const lw = bctx.measureText(label).width;
+          let tx;
+          let ty;
+          if (horizontal) {
+            tx = Math.max(2, outW - lw - 3);
+            ty = Math.min(Math.max(toY(u, 0) + 3, 10), outH - 2);
+          } else {
+            tx = Math.min(Math.max(toX(u, 0) - lw / 2, 2), outW - lw - 2);
+            ty = outH - 3;
+          }
+          bctx.fillStyle = 'rgba(0,0,0,0.7)';
+          bctx.fillRect(tx - 2, ty - 9, lw + 4, 11);
+          bctx.fillStyle = '#ffffff';
+          bctx.fillText(label, tx, ty);
+        });
+        bctx.restore();
+      }
+
+      const orientationConfident = quadOrientationIsConfident(quad);
+      // 凡例（線の意味）
+      if (bevGridCheck && bevGridCheck.checked) {
+        bctx.save();
+        bctx.font = '9px sans-serif';
+        const legend = [
+          ['#4ecdc4', `${state.homographySettings.interval || 5}m 区切り`],
+          ['#ff3b6b', `中央 ${midUForLegend.toFixed(1)}m`],
+        ];
+        if (hasRightLine) legend.push(['#ffffff', `右白線 ${rightLine.toFixed(1)}m`]);
+        legend.push(['rgba(255,214,10,0.9)', '1m 目盛り']);
+        let ly = 12;
+        legend.forEach(([col, text]) => {
+          const tw = bctx.measureText(text).width;
+          const bx = outW - tw - 20;
+          bctx.fillStyle = 'rgba(0,0,0,0.7)';
+          bctx.fillRect(bx - 4, ly - 9, tw + 22, 12);
+          bctx.strokeStyle = col;
+          bctx.lineWidth = 2;
+          bctx.beginPath();
+          bctx.moveTo(bx - 1, ly - 3);
+          bctx.lineTo(bx + 11, ly - 3);
+          bctx.stroke();
+          bctx.fillStyle = '#ffffff';
+          bctx.fillText(text, bx + 14, ly);
+          ly += 13;
+        });
+        bctx.restore();
+      }
+
+      if (bevStatus) {
+        const split = hasRightLine
+          ? `車道 ${rightLine.toFixed(1)}m / 歩道 ${(widthM - rightLine).toFixed(1)}m・`
+          : '';
+        bevStatus.textContent =
+          `幅 ${widthM} m × 補正後の奥行き ${lengthM.toFixed(2)} m / ` +
+          `速度計算と共通の補正（レンズ: ${preview.lens_corrected ? 'あり' : 'なし'}・縦距離: ${preview.longitudinal_corrected ? 'あり' : 'なし'}） / ` +
+          (horizontal
+            ? `進行 ${ppmV.toFixed(1)} / 横断 ${ppmU.toFixed(1)} px/m`
+            : `${ppmU.toFixed(1)} px/m`) +
+          ` (x${(state.bevZoom || 1).toFixed(2)})・${split}${horizontal ? '左端' : '下端'}が手前。` +
+          `赤線が中央 ${(hasRightLine ? rightLine / 2 : widthM / 2).toFixed(1)}m（${horizontal ? '左端' : '下部'}の目盛りは 0.1m 刻み）。` +
+          `距離は手前端からの補正後の距離です。実測した目印の間隔で精度を確認してください。` +
+          (zeroIsNear ? '' : '（クリック順の都合で 0m が奥側になっています。距離計算には影響しません）') +
+          (orientationConfident ? '' : ' ⚠ 4点だけでは道路の向きを確定できません。左右の白線を描くと確実に判定できます。');
+      }
     }
 
     function updateScaleLineGuides() {
@@ -856,6 +1636,32 @@
       const rightStart = sorted[1];
       const rightEnd = sorted[2];
       const leftEnd = sorted[3];
+
+      // 射影で正しい実距離の位置に置く。
+      // 画像上の単純な内分だと遠近が効かず、5m 間隔の線が実際には 2m だったりする。
+      const widthM = (state.homographySettings.roadWidth || 0)
+        + (state.homographySettings.sidewalkWidth || 0);
+      if (widthM > 0 && lengthValue > 0) {
+        const H = solveHomography(
+          [[0, 0], [widthM, 0], [widthM, lengthValue], [0, lengthValue]], sorted
+        );
+        if (H) {
+          const at = (u, v) => {
+            const w = H[6] * u + H[7] * v + H[8];
+            return w ? [(H[0] * u + H[1] * v + H[2]) / w, (H[3] * u + H[4] * v + H[5]) / w] : null;
+          };
+          const mapped = positions.map((distance, idx) => {
+            const fallback = distance / lengthValue;
+            const r = Array.isArray(ratios) && Number.isFinite(ratios[idx]) ? ratios[idx] : fallback;
+            const v = Math.min(1, Math.max(0, r)) * lengthValue;
+            const a = at(0, v);
+            const b = at(widthM, v);
+            return a && b ? [a, b] : null;
+          });
+          if (mapped.every(Boolean)) return mapped;
+        }
+      }
+
       return positions.map((distance, idx) => {
         const fallback = lengthValue > 0 ? distance / lengthValue : 0;
         const ratioValue = Array.isArray(ratios) && Number.isFinite(ratios[idx]) ? ratios[idx] : fallback;
@@ -979,6 +1785,49 @@
       updateHomographyLineControls();
     }
 
+    // 中央線と中央空白を交互に配置した補助線の位置（0, 線, 線+空白, ..., 奥行き）
+    function homographyDashSteps() {
+      const interval = state.homographySettings.interval;
+      return [
+        Math.max(0.1, state.homographySettings.dashPaint || interval),
+        Math.max(0.1, state.homographySettings.dashGap || interval),
+      ];
+    }
+
+    function homographyStationPositions(lengthValue) {
+      const steps = homographyDashSteps();
+      const positions = [0];
+      let cursor = 0;
+      let guard = 0;
+      while (cursor < lengthValue - 1e-6 && guard < 2000) {
+        cursor += steps[guard % 2];
+        positions.push(Math.min(cursor, lengthValue));
+        guard += 1;
+      }
+      if (positions[positions.length - 1] < lengthValue - 1e-6) positions.push(lengthValue);
+      return positions;
+    }
+
+    // 白線の変更で 4 点の並び（道路の向き）が変わったら補助線を作り直す。
+    // 左右反転だけなら手前->奥の比率は変わらないので手動調整を残す。
+    function refreshHomographyOrder() {
+      const points = state.annotations.homography_points;
+      if (!Array.isArray(points) || points.length !== 4) return;
+      const next = effectiveQuad(points);
+      const prev = state.homographySorted;
+      const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      if (same(next, prev)) return;
+      const mirrored = Array.isArray(prev) && prev.length === 4
+        && same(next, [prev[1], prev[0], prev[3], prev[2]]);
+      if (!mirrored) {
+        state.homographyPositionsManual = false;
+        state.homographyScalePositions = [];
+        state.homographyScaleRatios = [];
+        state.annotations.homography_scale_lines = [];
+      }
+      updateHomographyDerivedData();
+    }
+
     function updateHomographyDerivedData() {
       const intervalRaw = parseFloat(homographyIntervalInput?.value || '0');
       if (!Number.isNaN(intervalRaw) && intervalRaw > 0) {
@@ -1002,7 +1851,9 @@
         updateHomographyLineControls();
         return;
       }
-      const sorted = sortHomographyPoints(points);
+      // 俯瞰プレビュー・保存と同じ並びを使う（アプリ既定の sortHomographyPoints だと
+      // クリック順によって幅と奥行きが入れ替わり、補助線が 90 度ずれる）
+      const sorted = effectiveQuad(points);
       state.homographySorted = sorted;
       const lengthValue = parseFloat(homographyLengthInput?.value || '0') || 0;
       if (!(lengthValue > 0)) {
@@ -1020,19 +1871,11 @@
       }
 
       state.homographyLength = lengthValue;
-      const interval = state.homographySettings.interval;
       const existingLines = Array.isArray(state.annotations.homography_scale_lines) ? state.annotations.homography_scale_lines : [];
       const currentRatios = Array.isArray(state.homographyScaleRatios) ? state.homographyScaleRatios.slice() : [];
       let manual = !!state.homographyPositionsManual;
 
-      const baseCount = interval > 0 ? Math.round(lengthValue / interval) : 1;
-      const expectedCount = Math.max(1, baseCount);
-      const totalLines = expectedCount + 1;
-      const positions = Array.from({ length: totalLines }, (_, idx) => {
-        if (idx === totalLines - 1) return lengthValue;
-        const distance = idx * interval;
-        return Math.min(distance, lengthValue);
-      });
+      const positions = homographyStationPositions(lengthValue);
 
       let ratios = currentRatios;
       if (manual) {
@@ -1077,6 +1920,240 @@
       updateHomographyLineControls();
     }
 
+    // 選択中の補助線を前後へ移す
+    function stepHomographyLine(delta) {
+      const positions = state.homographyScalePositions || [];
+      if (positions.length < 3) return;
+      const first = 1;
+      const last = positions.length - 2;
+      let idx = state.homographySelectedLineIndex;
+      if (typeof idx !== 'number' || Number.isNaN(idx)) idx = first;
+      else idx = Math.min(last, Math.max(first, idx + delta));
+      setHomographyLineSelection(idx);
+    }
+
+    // 奥側に補助線を 1 本足し、その分だけ奥行きを伸ばす。
+    // 4 点の奥側 2 点も今の射影のまま奥へ延ばすので、手前側の実距離は変わらない。
+    function addHomographyLine() {
+      const points = state.annotations.homography_points;
+      const length = parseFloat(homographyLengthInput?.value || '0') || 0;
+      if (!Array.isArray(points) || points.length !== 4 || !(length > 0)) {
+        showMessage('先に4点と奥行きを設定してください。', 'warning');
+        return;
+      }
+
+      // 中央線と空白を交互に積んで、今の奥行きの次の区切りまで伸ばす
+      const steps = homographyDashSteps();
+      let cursor = 0;
+      let guard = 0;
+      while (cursor <= length + 1e-6 && guard < 10000) {
+        cursor += steps[guard % 2];
+        guard += 1;
+      }
+      const newLength = Number(cursor.toFixed(6));
+
+      const quad = effectiveQuad(points);
+      const H = solveHomography([[0, 0], [1, 0], [1, length], [0, length]], quad);
+      if (!H) {
+        showMessage('射影を計算できません。', 'warning');
+        return;
+      }
+      const project = (u, v) => {
+        const w = H[6] * u + H[7] * v + H[8];
+        return [(H[0] * u + H[1] * v + H[2]) / w, (H[3] * u + H[4] * v + H[5]) / w, w];
+      };
+      const wCenter = project(0.5, length / 2)[2];
+      const farRight = project(1, newLength);
+      const farLeft = project(0, newLength);
+      const inFront = (p) => p[2] * wCenter > 0 && Number.isFinite(p[0]) && Number.isFinite(p[1]);
+      if (!inFront(farRight) || !inFront(farLeft)) {
+        showMessage('これ以上奥へは伸ばせません（地平線を越えます）。', 'warning');
+        return;
+      }
+      const inImage = (p) => !state.nativeWidth || !state.nativeHeight
+        || (p[0] >= 0 && p[1] >= 0 && p[0] <= state.nativeWidth && p[1] <= state.nativeHeight);
+      if (!inImage(farRight) || !inImage(farLeft)) {
+        showMessage(`奥行き ${newLength} m の位置は画像の外に出るため、これ以上伸ばせません。`, 'warning');
+        return;
+      }
+      // 消失点に近づくと画像上でほとんど動かず、奥行きの精度が出ない
+      const shift = Math.max(
+        Math.hypot(farRight[0] - quad[2][0], farRight[1] - quad[2][1]),
+        Math.hypot(farLeft[0] - quad[3][0], farLeft[1] - quad[3][1])
+      );
+      if (shift < 3) {
+        showMessage('奥が遠すぎて画像上でほとんど動かないため、これ以上伸ばせません。', 'warning');
+        return;
+      }
+      // effectiveQuad は元の座標をそのまま並べ替えるので、値の一致で元の点を探せる
+      const indexOf = (target) => points.findIndex((pt) => pt[0] === target[0] && pt[1] === target[1]);
+      const iRight = indexOf(quad[2]);
+      const iLeft = indexOf(quad[3]);
+      if (iRight < 0 || iLeft < 0 || iRight === iLeft) {
+        showMessage('追加できませんでした。', 'warning');
+        return;
+      }
+
+      // 手動で動かした線は実距離を保つ（奥行きが伸びた分だけ比率を縮める）
+      const manual = !!state.homographyPositionsManual;
+      const oldPositions = state.homographyScalePositions || [];
+      const oldRatios = state.homographyScaleRatios || [];
+      const positions = homographyStationPositions(newLength);
+      state.homographyScaleRatios = positions.map((p, i) => {
+        const j = oldPositions.findIndex((q) => Math.abs(q - p) < 1e-6);
+        if (manual && j >= 0 && Number.isFinite(oldRatios[j])) return oldRatios[j] * length / newLength;
+        return p / newLength;
+      });
+      state.homographyPositionsManual = manual;
+
+      points[iRight] = [farRight[0], farRight[1]];
+      points[iLeft] = [farLeft[0], farLeft[1]];
+      if (homographyLengthInput) homographyLengthInput.value = String(newLength);
+      resetHomographyScaleDrag();
+      updateHomographyDerivedData();
+      setHomographyLineSelection(Math.max(1, positions.length - 2));
+      showMessage(`奥に補助線を追加し、奥行きを ${length} m → ${newLength} m に伸ばしました。`, 'success');
+    }
+
+    function removeHomographyLine() {
+      const positions = (state.homographyScalePositions || []).slice();
+      const ratios = (state.homographyScaleRatios || []).slice();
+      const length = state.homographyLength || 0;
+      const idx = state.homographySelectedLineIndex;
+      if (positions.length <= 3 || typeof idx !== 'number' || idx <= 0 || idx >= positions.length - 1) {
+        showMessage('これ以上は削除できません。', 'warning');
+        return;
+      }
+      positions.splice(idx, 1);
+      ratios.splice(idx, 1);
+      state.homographyScalePositions = positions;
+      state.homographyScaleRatios = ratios;
+      state.homographyPositionsManual = true;
+      state.annotations.homography_scale_lines = buildHomographyLines(
+        positions, ratios, state.homographySorted, length
+      );
+      updateScaleLineGuides();
+      renderAnnotations();
+      refreshPanels();
+      setHomographyLineSelection(Math.min(idx, positions.length - 2));
+      showMessage('補助線を削除しました。', 'info');
+    }
+
+    // 俯瞰画像の明暗から 中央線:中央空白 の比率を測り、1セット計を配分する
+    function measureDashRatio() {
+      const total = Math.max(0.2, parseFloat(dashTotalInput?.value || '0') || 0);
+      const points = state.annotations.homography_points;
+      const widthM = parseFloat(homographyWidthInput?.value || '0') || 0;
+      const lengthM = parseFloat(homographyLengthInput?.value || '0') || 0;
+      const source = ensureBevSource();
+      if (!points || points.length < 4 || !(widthM > 0) || !(lengthM > 0) || !source) {
+        showMessage('4点・幅・奥行きを設定してから実行してください。', 'warning');
+        return;
+      }
+      const quad = effectiveQuad(points.slice(0, 4).map((pt) => [pt[0], pt[1]]));
+      const H = solveHomography([[0, 0], [widthM, 0], [widthM, lengthM], [0, lengthM]], quad);
+      if (!H) { showMessage('射影を計算できません。', 'warning'); return; }
+
+      const midU = (state.homographySettings.rightLine || widthM) / 2;
+      const ctxSrc = source.getContext('2d', { willReadFrequently: true });
+      const data = ctxSrc.getImageData(0, 0, source.width, source.height).data;
+      const step = 0.05;
+      const vals = [];
+      for (let v = 0; v <= lengthM; v += step) {
+        let best = -1;
+        for (let du = -0.25; du <= 0.25; du += 0.05) {
+          const w = H[6] * (midU + du) + H[7] * v + H[8];
+          if (!w) continue;
+          const x = Math.round((H[0] * (midU + du) + H[1] * v + H[2]) / w);
+          const y = Math.round((H[3] * (midU + du) + H[4] * v + H[5]) / w);
+          if (x < 0 || y < 0 || x >= source.width || y >= source.height) continue;
+          const i = (y * source.width + x) * 4;
+          const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          if (lum > best) best = lum;
+        }
+        vals.push({ v, lum: best });
+      }
+      const lums = vals.filter((o) => o.lum >= 0).map((o) => o.lum).sort((a, b) => a - b);
+      if (lums.length < 10) { showMessage('俯瞰から明るさを取得できませんでした。', 'warning'); return; }
+      const thr = (lums[Math.floor(lums.length * 0.5)] + lums[lums.length - 1]) / 2;
+
+      // 明(=中央線) と 暗(=空白) の連続長さを集計する
+      const runs = [];
+      let cur = null;
+      vals.forEach((o) => {
+        if (o.lum < 0) return;
+        const on = o.lum > thr;
+        if (!cur || cur.on !== on) { cur = { on, len: 0 }; runs.push(cur); }
+        cur.len += step;
+      });
+      const body = runs.slice(1, -1).filter((r) => r.len >= 0.5);
+      const paints = body.filter((r) => r.on).map((r) => r.len);
+      const gaps = body.filter((r) => !r.on).map((r) => r.len);
+      if (!paints.length || !gaps.length) {
+        showMessage('明暗の区切りを検出できませんでした。手動で入力してください。', 'warning');
+        return;
+      }
+      const med = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
+      const mp = med(paints);
+      const mg = med(gaps);
+      const paintM = total * mp / (mp + mg);
+      const gapM = total - paintM;
+      state.homographySettings.dashPaint = paintM;
+      state.homographySettings.dashGap = gapM;
+      if (dashPaintInput) dashPaintInput.value = paintM.toFixed(2);
+      if (dashGapInput) dashGapInput.value = gapM.toFixed(2);
+      if (homographyIntervalInput) {
+        homographyIntervalInput.value = paintM.toFixed(2);
+        state.homographySettings.interval = paintM;
+      }
+      if (dashStatus) {
+        dashStatus.textContent =
+          `検出: 線 ${paints.length} 本 / 空白 ${gaps.length} 区間、比率 ${mp.toFixed(2)}:${mg.toFixed(2)} → `
+          + `1セット ${total} m を 中央線 ${paintM.toFixed(2)} m + 空白 ${gapM.toFixed(2)} m に配分しました。`;
+      }
+      state.homographyPositionsManual = false;
+      state.homographyScalePositions = [];
+      state.annotations.homography_scale_lines = [];
+      resetHomographyScaleDrag();
+      updateHomographyDerivedData();
+      showMessage('俯瞰から破線の比率を測定しました。', 'success');
+    }
+
+    function syncDashInputs(fromTotal) {
+      const auto = !!dashAutoCheck?.checked;
+      state.homographySettings.dashAuto = auto;
+      if (dashPaintInput) dashPaintInput.disabled = auto;
+      if (dashGapInput) dashGapInput.disabled = auto;
+      if (auto) {
+        if (!fromTotal) return;
+        // 自動モードでは比率を保ったまま 1セット計に合わせる
+        const total = Math.max(0.2, parseFloat(dashTotalInput?.value || '0') || 0);
+        const p = state.homographySettings.dashPaint || 5;
+        const g = state.homographySettings.dashGap || 5;
+        const sum = p + g || 1;
+        const paintM = total * p / sum;
+        state.homographySettings.dashPaint = paintM;
+        state.homographySettings.dashGap = total - paintM;
+        if (dashPaintInput) dashPaintInput.value = paintM.toFixed(2);
+        if (dashGapInput) dashGapInput.value = (total - paintM).toFixed(2);
+      } else {
+        const p = Math.max(0.1, parseFloat(dashPaintInput?.value || '0') || 0);
+        const g = Math.max(0.1, parseFloat(dashGapInput?.value || '0') || 0);
+        state.homographySettings.dashPaint = p;
+        state.homographySettings.dashGap = g;
+        if (dashTotalInput) dashTotalInput.value = (p + g).toFixed(2);
+      }
+      state.homographySettings.interval = state.homographySettings.dashPaint;
+      if (homographyIntervalInput) {
+        homographyIntervalInput.value = String(Number(state.homographySettings.interval.toFixed(2)));
+      }
+      state.homographyPositionsManual = false;
+      state.homographyScalePositions = [];
+      state.annotations.homography_scale_lines = [];
+      resetHomographyScaleDrag();
+      updateHomographyDerivedData();
+    }
+
     function updateHomographyLineControls() {
       if (!homographyLineList || !homographyLineSlider || !homographyLineDistance) return;
       const length = state.homographyLength || 0;
@@ -1089,10 +2166,11 @@
         if (!isHomographyMode || positions.length < 3) {
           homographyLineList.classList.add('text-muted');
           homographyLineList.innerHTML = '<div class="form-text">補助線を追加するとここに一覧が表示されます。</div>';
-          homographyLineSlider.disabled = true;
-          homographyLineDistance.disabled = true;
+          homographyLineSlider.disabled = false;
+          homographyLineDistance.disabled = false;
           homographyLineSlider.value = '0';
           homographyLineDistance.value = '';
+          if (lineSelectBadge) lineSelectBadge.textContent = '—';
           state.homographySelectedLineIndex = null;
           return;
         }
@@ -1108,6 +2186,10 @@
           selected = lineEntries[0].index;
         }
         state.homographySelectedLineIndex = selected;
+        if (lineSelectBadge) {
+          const pos = lineEntries.findIndex((e) => e.index === selected);
+          lineSelectBadge.textContent = `${pos + 1} / ${lineEntries.length}`;
+        }
 
         lineEntries.forEach((entry, idx) => {
           const wrapper = document.createElement('label');
@@ -1119,7 +2201,9 @@
           input.className = 'form-check-input m-0';
           input.checked = entry.index === selected;
           const span = document.createElement('span');
-          span.innerText = `補助線 ${idx + 1} (${entry.distance.toFixed(2)} m, 区間 ${entry.delta.toFixed(2)} m)`;
+          // 0 を起点に 線→空白→線… と続くので、奇数番目の区間が「中央線」
+          const kind = (entry.index % 2 === 1) ? '線' : '空白';
+          span.innerText = `${idx + 1}. ${entry.distance.toFixed(2)} m（直前${kind} ${entry.delta.toFixed(2)} m）`;
           wrapper.appendChild(input);
           wrapper.appendChild(span);
           homographyLineList.appendChild(wrapper);
@@ -1196,7 +2280,7 @@
 
     function drawHomographyPoints(points) {
       if (!ctx || !Array.isArray(points)) return;
-      const sorted = points.length >= 4 ? sortHomographyPoints(points) : points.slice();
+      const sorted = points.length >= 4 ? effectiveQuad(points) : points.slice();
       const displayPoly = sorted.map(toDisplayPoint).filter(Boolean);
       ctx.save();
       ctx.lineWidth = 2;
@@ -1271,15 +2355,19 @@
       clearCanvas();
       drawPolyline(state.annotations.left_white_line, TOOL_DEFS.left_white_line);
       drawPolyline(state.annotations.right_white_line, TOOL_DEFS.right_white_line);
-      drawPolyline(state.annotations.center_line, TOOL_DEFS.center_line);
+      if (state.lineVisibility.center) {
+        drawPolyline(state.annotations.center_line, TOOL_DEFS.center_line);
+      }
       state.annotations.count_lines.forEach(line => {
         drawPolyline(line, TOOL_DEFS.count_line);
       });
-      if (state.annotations.left_mid_line.length) {
-        drawPolyline(state.annotations.left_mid_line, { color: '#ffd60a', dash: [8, 4] });
-      }
-      if (state.annotations.right_mid_line.length) {
-        drawPolyline(state.annotations.right_mid_line, { color: '#ffd60a', dash: [8, 4] });
+      if (state.lineVisibility.mid) {
+        if (state.annotations.left_mid_line.length) {
+          drawPolyline(state.annotations.left_mid_line, { color: '#ffd60a', dash: [8, 4] });
+        }
+        if (state.annotations.right_mid_line.length) {
+          drawPolyline(state.annotations.right_mid_line, { color: '#ffd60a', dash: [8, 4] });
+        }
       }
       drawHybridControlPoints();
       if (state.scaleMode !== 'homography') {
@@ -1308,6 +2396,9 @@
       }
 
       drawLaneTestMarkers();
+      if (state.scaleMode === 'homography') {
+        renderHomographyPreview();
+      }
     }
 
     function computePathLength(points) {
@@ -1478,10 +2569,13 @@
 
       if (state.scaleMode === 'homography') {
         payload.scale.homography = {
-          image_points: state.annotations.homography_points,
+          image_points: effectiveQuad(state.annotations.homography_points),
           width_m: parseFloat(homographyWidthInput?.value || '0') || 0,
           length_m: parseFloat(homographyLengthInput?.value || '0') || 0,
           interval_m: state.homographySettings.interval,
+          right_line_m: state.homographySettings.rightLine || 0,
+          road_width_m: state.homographySettings.roadWidth || 0,
+          sidewalk_width_m: state.homographySettings.sidewalkWidth || 0,
         };
       }
 
@@ -1640,6 +2734,7 @@
 
     function applyLoadedPayload(payload) {
       if (!payload) return;
+      state.loadedCalibration = JSON.parse(JSON.stringify(payload));
       resetHomographyDrag();
       resetHomographyScaleDrag();
       if (typeof payload.source_frame === 'number') setFrameIndex(payload.source_frame);
@@ -1704,6 +2799,7 @@
       if (homographyLengthInput && scale.homography && typeof scale.homography.length_m !== 'undefined') {
         homographyLengthInput.value = String(scale.homography.length_m);
       }
+      if (scale.homography) applyHomographyWidths(scale.homography);
       if (homographyIntervalInput && scale.homography && typeof scale.homography.interval_m !== 'undefined') {
         homographyIntervalInput.value = String(scale.homography.interval_m);
         const parsedInterval = parseFloat(homographyIntervalInput.value);
@@ -1994,6 +3090,7 @@
       }
       if (['left_white_line', 'right_white_line', 'center_line'].includes(state.activeTool)) {
         updateHybridMidLines(true);
+        refreshHomographyOrder();
       }
       resetDrawingState();
       updateScaleLineGuides();
@@ -2012,6 +3109,7 @@
         case 'center_line':
           state.annotations[mode] = [];
           updateHybridMidLines(true);
+          refreshHomographyOrder();
           break;
         case 'count_line':
           state.annotations.count_lines.pop();
@@ -2046,6 +3144,7 @@
         case 'center_line':
           state.annotations[mode] = [];
           updateHybridMidLines(true);
+          refreshHomographyOrder();
           break;
         case 'count_line':
           state.annotations.count_lines = [];
@@ -2108,7 +3207,7 @@
       const activeScaleLines = state.scaleMode === 'homography'
         ? state.annotations.homography_scale_lines
         : state.annotations.scale_lines;
-      const body = {
+      let body = {
         profile_name: profileName,
         source_frame: state.frameIndex,
         count_lines: state.annotations.count_lines,
@@ -2135,13 +3234,17 @@
       }
       if (state.scaleMode === 'homography') {
         body.scale.homography = {
-          image_points: state.annotations.homography_points,
+          image_points: effectiveQuad(state.annotations.homography_points),
           width_m: parseFloat(homographyWidthInput?.value || '0') || 0,
           length_m: parseFloat(homographyLengthInput?.value || '0') || 0,
           interval_m: state.homographySettings.interval,
+          right_line_m: state.homographySettings.rightLine || 0,
+          road_width_m: state.homographySettings.roadWidth || 0,
+          sidewalk_width_m: state.homographySettings.sidewalkWidth || 0,
         };
       }
 
+      body = CalibrationProjection.mergeCalibration(state.loadedCalibration, body);
       saveButton.disabled = true;
       showMessage('保存中...', 'info');
       try {
@@ -2155,6 +3258,7 @@
           const errorText = data?.error || '保存に失敗しました。';
           showMessage(errorText, 'danger');
         } else {
+          state.loadedCalibration = JSON.parse(JSON.stringify(body));
           updateProfileInput(data.profile_name || profileName);
           showMessage('設定を保存しました。', 'success');
         }
@@ -2164,6 +3268,81 @@
         saveButton.disabled = false;
       }
     }
+
+    // --- 全画面 ------------------------------------------------------------
+    function applyFullscreenLayout(on) {
+      document.body.classList.toggle('calib-fs', !!on);
+      const btn = document.getElementById('fullscreenBtn');
+      if (btn) btn.textContent = on ? '全画面を解除 (F)' : '全画面 (F)';
+
+      // 全画面では俯瞰プレビューと位置調整をプレビュー列の右へ移し、常に見えるようにする
+      const panel = document.getElementById('bevPanel');
+      const adjust = document.getElementById('lineAdjustPanel');
+      const slot = document.getElementById('bevSlot');
+      const adjustSlot = document.getElementById('lineAdjustSlot');
+      const home = document.getElementById('homographyControls');
+      if (panel && slot && home) {
+        if (on) {
+          slot.appendChild(panel);                   // 画像の上の帯
+          if (adjust && adjustSlot) adjustSlot.appendChild(adjust);  // 画像の下の帯
+          slot.classList.remove('d-none');
+          adjustSlot?.classList.remove('d-none');
+        } else {
+          const anchor = document.getElementById('homographyPointsList');
+          if (anchor) {
+            home.insertBefore(panel, anchor);
+            if (adjust) home.insertBefore(adjust, anchor);
+          } else {
+            home.appendChild(panel);
+            if (adjust) home.appendChild(adjust);
+          }
+          slot.classList.add('d-none');
+          adjustSlot?.classList.add('d-none');
+        }
+      }
+
+      // レイアウト確定後にキャンバスを測り直す
+      requestAnimationFrame(() => {
+        handleResize();
+        requestAnimationFrame(() => {
+          handleResize();
+          if (state.scaleMode === 'homography') renderHomographyPreview();
+        });
+      });
+    }
+
+    function toggleFullscreen() {
+      const el = document.documentElement;
+      if (!document.fullscreenElement) {
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (req) {
+          req.call(el).catch(() => applyFullscreenLayout(true));
+        } else {
+          // ブラウザ API が使えない場合もレイアウトだけ切り替える
+          applyFullscreenLayout(!document.body.classList.contains('calib-fs'));
+        }
+      } else {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) exit.call(document).catch(() => applyFullscreenLayout(false));
+      }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      applyFullscreenLayout(!!document.fullscreenElement);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'f' && event.key !== 'F') return;
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      const t = event.target;
+      // 入力中は無効
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement
+        || t instanceof HTMLSelectElement || (t && t.isContentEditable)) return;
+      event.preventDefault();
+      toggleFullscreen();
+    });
+
+    document.getElementById('fullscreenBtn')?.addEventListener('click', toggleFullscreen);
 
     function handleResize() {
       const prevWidth = state.displayWidth;
@@ -2283,6 +3462,108 @@
         showMessage('白線と中央線を描いてから再生成してください。', 'warning');
       }
     });
+    showCenterLineCheck?.addEventListener('change', () => {
+      state.lineVisibility.center = !!showCenterLineCheck.checked;
+      renderAnnotations();
+    });
+    showMidLinesCheck?.addEventListener('change', () => {
+      state.lineVisibility.mid = !!showMidLinesCheck.checked;
+      renderAnnotations();
+    });
+    bevGridCheck?.addEventListener('change', renderHomographyPreview);
+
+    // 俯瞰プレビューのホイール拡大縮小（カーソル位置を保つ）
+    const bevWrapEl = document.getElementById('bevWrap');
+    bevWrapEl?.addEventListener('wheel', (event) => {
+      if (state.scaleMode !== 'homography') return;
+      event.preventDefault();
+      const prev = state.bevZoom || 1;
+      const next = Math.min(10, Math.max(0.5, prev * (event.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      if (Math.abs(next - prev) < 1e-6) return;
+      const rect = bevWrapEl.getBoundingClientRect();
+      const offsetX = event.clientX - rect.left;
+      const offsetY = event.clientY - rect.top;
+      const contentX = bevWrapEl.scrollLeft + offsetX;
+      const contentY = bevWrapEl.scrollTop + offsetY;
+      state.bevScrollAnchor = {
+        x: contentX / Math.max(bevCanvas.width, 1),
+        y: contentY / Math.max(bevCanvas.height, 1), offsetX, offsetY,
+      };
+      state.bevZoom = next;
+      renderHomographyPreview();
+    }, { passive: false });
+
+    // ホイールボタンを押したままドラッグで、拡大した俯瞰プレビューを動かす
+    const bevPan = { pointerId: null, x: 0, y: 0, left: 0, top: 0 };
+    bevWrapEl?.addEventListener('pointerdown', (event) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      bevPan.pointerId = event.pointerId;
+      bevPan.x = event.clientX;
+      bevPan.y = event.clientY;
+      bevPan.left = bevWrapEl.scrollLeft;
+      bevPan.top = bevWrapEl.scrollTop;
+      try { bevWrapEl.setPointerCapture(event.pointerId); } catch (e) { /* ignore */ }
+      bevWrapEl.style.cursor = 'grabbing';
+    });
+    bevWrapEl?.addEventListener('pointermove', (event) => {
+      if (bevPan.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      bevWrapEl.scrollLeft = bevPan.left - (event.clientX - bevPan.x);
+      bevWrapEl.scrollTop = bevPan.top - (event.clientY - bevPan.y);
+    });
+    const endBevPan = (event) => {
+      if (bevPan.pointerId !== event.pointerId) return;
+      bevPan.pointerId = null;
+      bevWrapEl.style.cursor = '';
+      try { bevWrapEl.releasePointerCapture(event.pointerId); } catch (e) { /* ignore */ }
+    };
+    bevWrapEl?.addEventListener('pointerup', endBevPan);
+    bevWrapEl?.addEventListener('pointercancel', endBevPan);
+    // ブラウザ標準の中ボタン自動スクロールを出さない
+    ['mousedown', 'auxclick'].forEach((type) => {
+      bevWrapEl?.addEventListener(type, (event) => {
+        if (event.button === 1) event.preventDefault();
+      });
+    });
+
+    // ダブルクリックで等倍に戻す
+    bevWrapEl?.addEventListener('dblclick', () => {
+      if (state.scaleMode !== 'homography') return;
+      if ((state.bevZoom || 1) === 1) return;
+      state.bevZoom = 1;
+      renderHomographyPreview();
+      showMessage('俯瞰プレビューの倍率を戻しました。', 'info');
+    });
+    homographyRoadWidthInput?.addEventListener('input', syncHomographyWidths);
+    homographySidewalkWidthInput?.addEventListener('input', syncHomographyWidths);
+    dashPaintInput?.addEventListener('input', () => syncDashInputs(false));
+    dashGapInput?.addEventListener('input', () => syncDashInputs(false));
+    dashTotalInput?.addEventListener('input', () => syncDashInputs(true));
+    dashAutoCheck?.addEventListener('change', () => syncDashInputs(true));
+    document.getElementById('dashMeasureBtn')?.addEventListener('click', measureDashRatio);
+    document.getElementById('linePrevBtn')?.addEventListener('click', () => stepHomographyLine(-1));
+    document.getElementById('lineNextBtn')?.addEventListener('click', () => stepHomographyLine(1));
+    document.getElementById('lineAddBtn')?.addEventListener('click', addHomographyLine);
+    document.getElementById('lineRemoveBtn')?.addEventListener('click', removeHomographyLine);
+
+    // ↑ ↓ キーで補助線を選び替える（← → も可）。画像で奥の線が上にあるので ↑ が奥側
+    const LINE_STEP_KEYS = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 };
+    document.addEventListener('keydown', (event) => {
+      const step = LINE_STEP_KEYS[event.key];
+      if (!step) return;
+      if (state.scaleMode !== 'homography') return;
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      const t = event.target;
+      // 一覧のラジオは標準の矢印移動と向きが逆になるので、こちらで処理する
+      const isLineChoice = t instanceof HTMLInputElement && t.name === 'homographyLineChoice';
+      if (!isLineChoice && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement
+        || t instanceof HTMLSelectElement || (t && t.isContentEditable))) return;
+      event.preventDefault();
+      stepHomographyLine(step);
+    });
+
+
     saveButton?.addEventListener('click', handleSave);
 
     canvas?.addEventListener('pointerdown', handlePointerDown);
@@ -2318,6 +3599,7 @@
         if (!res.ok) return;
         const data = await res.json();
         if (!data || typeof data !== 'object') return;
+        state.loadedCalibration = JSON.parse(JSON.stringify(data));
 
         // 線データを復元
         const lines = data.lines || {};
@@ -2339,6 +3621,8 @@
         if (Array.isArray(scale.lines)) {
           if (scale.mode === 'homography') {
             state.annotations.homography_scale_lines = scale.lines;
+            state.homographyPositionsManual = scale.lines.length > 0;
+            state.homographyScaleRatios = [];
           } else {
             state.annotations.scale_lines = scale.lines;
           }
@@ -2358,6 +3642,7 @@
           if (homographyWidthInput && scale.homography.width_m) homographyWidthInput.value = String(scale.homography.width_m);
           if (homographyLengthInput && scale.homography.length_m) homographyLengthInput.value = String(scale.homography.length_m);
           if (scale.homography.interval_m) state.homographySettings.interval = scale.homography.interval_m;
+          applyHomographyWidths(scale.homography);
         }
 
         // ソースフレーム

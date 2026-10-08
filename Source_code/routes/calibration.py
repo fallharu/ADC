@@ -2067,6 +2067,41 @@ def calibration_data(run_id):
             except: pass
     return jsonify({})
 
+
+@main.route("/api/calibration/<int:run_id>/homography_preview", methods=["POST"])
+def calibration_homography_preview(run_id):
+    from ..modules.homography_preview import render_homography_preview
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "プレビュー設定を指定してください。"}), 400
+    try:
+        width, height = int(data.get("width", 900)), int(data.get("height", 600))
+        frame_index = int(data.get("frame", 0))
+        if (frame_index < 0 or not 1 <= width <= 2400 or not 1 <= height <= 2400
+                or width * height > 2_000_000):
+            raise ValueError("プレビューサイズまたはフレーム番号が範囲外です。")
+        payload = data.get("calibration")
+        if not isinstance(payload, dict):
+            raise ValueError("キャリブレーション設定を指定してください。")
+        path = _get_video_path_calib(run_id, request.args.get("path_hint"))
+        if not path:
+            return jsonify({"error": "動画が見つかりません。"}), 404
+        frame = load_video_frame(path, frame_index)
+        if frame is None:
+            return jsonify({"error": "フレームを読み込めません。"}), 404
+        preview, metadata = render_homography_preview(
+            frame, payload, width, height, horizontal=bool(data.get("horizontal")),
+        )
+        ok, encoded = cv2.imencode(".png", preview)
+        if not ok:
+            raise ValueError("俯瞰画像を生成できません。")
+    except PathValidationError as exc:
+        return jsonify({"error": exc.message}), exc.status_code
+    except (ValueError, TypeError, AttributeError, OverflowError, cv2.error) as exc:
+        return jsonify({"error": "俯瞰画像を生成できません。校正点と補正設定を確認してください。"}), 400
+    return jsonify({**metadata, "image": "data:image/png;base64," + base64.b64encode(encoded).decode("ascii")})
+
 @main.route("/api/calibration/<int:run_id>/save", methods=["POST"])
 def calibration_save(run_id):
     data = request.json

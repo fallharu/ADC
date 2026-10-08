@@ -1,5 +1,6 @@
 ﻿{% extends "base.html" %}
 {% block title %}検出結果閲覧{% endblock %}
+{% block page_title %}検出結果閲覧{% endblock %}
 
 {% block content %}
 {% set current_mode = view_mode if view_mode is defined and view_mode else 'auto' %}
@@ -45,7 +46,7 @@
     }
 </style>
 
-<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+<div class="page-heading">
     <div>
         <h2 class="mb-0">4. 検出結果閲覧</h2>
         <p class="text-muted mb-0">自動検出結果と手動追い越しテーブルを切り替えて確認できます。</p>
@@ -73,7 +74,11 @@
         <div class="small text-muted">現在表示中のRunに対して後処理を開始します。</div>
     </div>
     <div class="d-flex align-items-center gap-2">
-        <form method="post" action="{{ url_for('main.post_process_action') }}" id="postProcessQuickForm" class="mb-0">
+        <form method="post" action="{{ url_for('main.post_process_action') }}" id="postProcessQuickForm" class="mb-0"
+            data-confirm-title="後処理を実行"
+            data-confirm="現在表示中のRunに対して後処理を開始します。既存の出力がある場合は更新される可能性があります。"
+            data-confirm-ok-label="実行"
+            data-confirm-ok-class="btn-danger">
             {% if csrf_token is defined %}
             <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is callable else csrf_token }}">
             {% endif %}
@@ -236,7 +241,8 @@ MANUAL MODE
 ========================= #}
 {% if current_mode == 'manual' %}
 
-<form method="get" class="row g-2 align-items-end mb-3">
+<div class="app-toolbar">
+<form method="get" class="row g-2 align-items-end flex-grow-1 mb-0">
     <input type="hidden" name="mode" value="manual">
 
     <div class="col-sm-4 col-md-3">
@@ -272,6 +278,7 @@ MANUAL MODE
         <a href="{{ url_for('main.detections', mode='manual') }}" class="btn btn-outline-secondary btn-sm">リセット</a>
     </div>
 </form>
+</div>
 
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
     <div><span class="fw-semibold">表示件数: {{ manual_events|length }}</span></div>
@@ -388,7 +395,8 @@ AUTO MODE
     CSV出力時の列の意味は<a href="{{ url_for('main.download_csv_column_guide') }}" class="link-secondary">こちらの説明CSV</a>から確認できます。
 </p>
 
-<form method="get" class="row g-2 align-items-end mb-3">
+<div class="app-toolbar">
+<form method="get" class="row g-2 align-items-end flex-grow-1 mb-0">
     <input type="hidden" name="page" value="1">
     <input type="hidden" name="mode" value="auto">
 
@@ -529,9 +537,10 @@ AUTO MODE
         </div>
     </div>
 </form>
+</div>
 
 {% if detections %}
-<div class="d-flex justify-content-between align-items-center mb-2">
+<div class="app-toolbar">
     <div>
         <span class="fw-semibold">全 {{ total }} 件中 {{ (page - 1) * per_page + 1 }} - {{ [(page * per_page), total]|min
             }} 件を表示</span>
@@ -569,13 +578,16 @@ AUTO MODE
             </a>
         </div>
         <a href="{{ url_for('main.export_db') }}" class="btn btn-outline-secondary ms-2"
-            onclick="return confirm('現在のデータベースをバックアップ・出力しますか？');">
+            data-confirm-title="データベースを出力"
+            data-confirm="現在のデータベースをバックアップとして出力します。処理中は画面を閉じずにお待ちください。"
+            data-confirm-ok-label="DB出力"
+            data-confirm-ok-class="btn-primary">
             <i class="bi bi-database-down"></i> DB出力
         </a>
     </div>
 </div>
 
-<div class="table-responsive">
+<div class="table-responsive app-sticky-table">
     <table class="table table-sm table-striped table-hover align-middle" id="detectionsTable">
         <thead class="table-light">
             <tr>
@@ -1177,7 +1189,7 @@ MODALS (共通)
         });
     }
 
-    function applyVisibility(visibleColumns) {
+    function applyVisibility(visibleColumns, options = {}) {
         const table = document.getElementById('detectionsTable');
         if (!table) return;
 
@@ -1205,7 +1217,9 @@ MODALS (共通)
         });
 
         localStorage.setItem(COLUMN_VISIBILITY_KEY, JSON.stringify(visibleColumns));
-        showNotification('表示設定を更新しました', 'info');
+        if (!options.silent) {
+            showNotification('表示設定を更新しました', 'info');
+        }
     }
 
     // グローバル関数（HTML onclick から呼ぶ）
@@ -1245,9 +1259,9 @@ MODALS (共通)
         if (saved) {
             try { visible = JSON.parse(saved); } catch (e) { visible = null; }
         }
-        if (!visible) visible = COLUMN_PRESETS.all;
+        if (!visible) visible = COLUMN_PRESETS.basic;
 
-        applyVisibility(visible);
+        applyVisibility(visible, { silent: true });
         updateCheckboxes(visible);
     }
 
@@ -1277,7 +1291,7 @@ MODALS (共通)
         document.querySelectorAll('.detection-checkbox').forEach(cb => cb.addEventListener('change', updateAutoBatchBtn));
 
         if (btnSaveBatch) {
-            btnSaveBatch.addEventListener('click', function () {
+            btnSaveBatch.addEventListener('click', async function () {
                 const year = document.getElementById('inputBatchCollectionYear')?.value ?? '';
                 const road = document.getElementById('inputBatchRoadType')?.value ?? '';
 
@@ -1288,7 +1302,13 @@ MODALS (共通)
                 checked.forEach(cb => { if (cb.dataset.run) runIds.add(parseInt(cb.dataset.run)); });
 
                 if (runIds.size === 0) { showAlert("Run IDが見つかりません。", "danger"); return; }
-                if (!confirm(`選択した検出に関連する ${runIds.size} 件のRunを一括更新しますか？`)) return;
+                const ok = await AppUI.confirm({
+                    title: 'Run属性の一括更新',
+                    message: `選択した検出に関連する ${runIds.size} 件のRunを一括更新します。`,
+                    okLabel: '更新',
+                    okClass: 'btn-primary'
+                });
+                if (!ok) return;
 
                 const originalText = btnSaveBatch.textContent;
                 btnSaveBatch.disabled = true;

@@ -45,11 +45,19 @@ Thumbs.db
 .vscode/
 .idea/
 
+# ---- Local secrets / personal Obsidian state ----
+.env
+key/
+.obsidian/
+
 output/
 uploads/
 db.zips/
 bench_out/
 yolo26test/
+
+# ---- Local literature workspace (never commit downloaded papers or notes) ----
+local_papers/
 
 # ---- Database ----
 *.db
@@ -58,3 +66,7 @@ yolo26test/
 *.backup*
 db/
 old/
+
+# ---- Durable local experiment / presentation assets (keep; do not auto-clean) ----
+docs/analysis-vault/80-Artifacts/
+docs/output-vault/80-Artifacts/
