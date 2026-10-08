@@ -4,9 +4,9 @@ vault_kind: software
 note_type: router
 title: ADC AI entry
 summary: 作業に必要なADCのコード・保存・分析ルールへの入口。
-revision: 4
+revision: 5
 status: current
-updated: 2026-09-26
+updated: 2026-10-08
 ---
 
 # AI entry
@@ -17,6 +17,7 @@ updated: 2026-09-26
 | --- | --- |
 | Flask・画面 | `Source_code/app.py`、対象route・template |
 | 検出・推論前のモデル/GPU表示 | `Source_code/routes/inference.py`、`Source_code/modules/inference.py`、`Source_code/modules/resource_monitor.py` |
+| 全編YOLOの複数動画実験・継続／再開 | `20-Workflows/full-video-yolo-batch.md`、`scripts/batch_full_video_yolo.py` |
 | 計測点・平滑化・速度回帰 | `Source_code/modules/measure_points.py`、`Source_code/modules/speed_regression.py`、`Source_code/modules/speed/` |
 | ホモグラフィ速度・レンズ/縦方向補正 | `Source_code/modules/speed_homography/`、`Source_code/modules/speed_y_axis/` |
 | 校正保存・俯瞰プレビュー | `Source_code/routes/calibration.py`、`Source_code/modules/homography_preview.py`、`Source_code/tools/calibration_tool.py` |

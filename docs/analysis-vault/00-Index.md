@@ -4,9 +4,9 @@ vault_kind: analysis
 note_type: index
 title: 分析改善の索引
 summary: 分析手順、相談、発表準備と実験ノートの短いカタログ。
-revision: 18
+revision: 30
 status: current
-updated: 2026-09-30T11:27:02+00:00
+updated: 2026-10-08
 ---
 
 # 分析改善の索引
@@ -36,3 +36,6 @@ updated: 2026-09-30T11:27:02+00:00
 | `adc-run-20260923T200734Z-manual-auto-distance-speed-820f6b9f` | 同一車両で手動4点と自動候補4点の速度―進行距離を比較。自動側は実寸未測量。 | completed | [[10-Experiments/adc-run-20260923T200734Z-manual-auto-distance-speed-820f6b9f]] |
 | `adc-run-20260923T201533Z-manual-auto-birdseye-max-speed-f98736dc` | 俯瞰画像に手動・自動候補の最高速度位置を表示。最高値の発生フレームは異なる。 | completed | [[10-Experiments/adc-run-20260923T201533Z-manual-auto-birdseye-max-speed-f98736dc]] |
 | `adc-run-20260930T105426Z-bicycle-present-absent-e6d8b7ad` | 同じ動画の25秒ずつをCVAT化して車の速度を暫定比較。自転車なし全フレーム確認と速度真値は未了。 | inconclusive | [[10-Experiments/adc-run-20260930T105426Z-bicycle-present-absent-e6d8b7ad]] |
+| `adc-run-20261004T103803Z-yolo-cvat-speed-clearance-ba59a545` | 共通校正の速度窓363件をtrain262・val101へ動画分割。距離val0件、絶対精度は未検証。 | inconclusive | [[10-Experiments/adc-run-20261004T103803Z-yolo-cvat-speed-clearance-ba59a545]] |
+| `adc-run-20261007T210449Z-full-video-yolo-cvat-eb597089` | 元動画A/Bの全12613・12643フレームにYOLO26xとByteTrackを連続実行。CVATとのフレーム対応、参照枠の対応率とID変化を集計。実測精度は未検証。 | inconclusive | [[10-Experiments/adc-run-20261007T210449Z-full-video-yolo-cvat-eb597089]] |
+| `adc-run-20261007T212800Z-multi-video-yolo-e795a922` | 既処理2本＋追加7本の全編処理。全113,607フレーム、追加動画精度は未評価。 | completed | [[10-Experiments/adc-run-20261007T212800Z-multi-video-yolo-e795a922]] |
